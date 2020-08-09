@@ -9,8 +9,8 @@ import (
 	"net/http"
 )
 
-//Find performs the specified findrequest on the specified layout
-func (conn *Connection) Find(layout string, findRequest interface{}) ([]interface{}, error) {
+//PerformFind performs the specified findrequest on the specified layout
+func (conn *Connection) PerformFind(layout string, findRequest interface{}) ([]interface{}, error) {
 	if layout == "" {
 		return nil, errors.New("No layout specified")
 	}
