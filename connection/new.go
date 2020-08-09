@@ -12,6 +12,14 @@ import (
 
 //New starts a database session
 func New(host string, database string, username string, password string) (*Connection, error) {
+	if host == "" {
+		return nil, errors.New("No host specified")
+	} else if database == "" {
+		return nil, errors.New("No database specified")
+	} else if username == "" {
+		return nil, errors.New("No username specified")
+	}
+
 	type responseBody struct {
 		Messages []struct {
 			Code    string `json:"code"`
@@ -31,8 +39,8 @@ func New(host string, database string, username string, password string) (*Conne
 	}
 
 	//Determine protocol scheme
-	var protocol = "http://"
-	if host[0:8] == "https://" || host[0:7] == "http://" {
+	var protocol = "https://"
+	if len(host) >= 8 && host[0:8] == "https://" {
 		protocol = ""
 	}
 
