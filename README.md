@@ -12,9 +12,9 @@ defer conn.Close()
 
 ## Perform find
 ``` go
-var command = NewFindCommand(
-  NewFindRequest(
-    NewFindCriterion("fieldname", "=matchthis"),
+var command = filemaker.NewFindCommand(
+  filemaker.NewFindRequest(
+    filemaker.NewFindCriterion("fieldname", "=matchthis"),
   ),
   ...
 )
@@ -31,33 +31,33 @@ for _, record := range records {
 
 ### Omit
 ``` go
-var command = NewFindCommand(
-  NewFindRequest(
-    NewFindCriterion("fieldname", "somethinglikethis"),
+var command = filemaker.NewFindCommand(
+  filemaker.NewFindRequest(
+    filemaker.NewFindCriterion("fieldname", "somethinglikethis"),
   ),
-  NewFindRequest(
-    NewFindCriterion("otherfieldname", "=notsomethinglikethis"),
+  filemaker.NewFindRequest(
+    filemaker.NewFindCriterion("otherfieldname", "=notsomethinglikethis"),
   ).Omit(), //Omit request
 )
 ```
 
 ### Limit
 ``` go
-var command = NewFindCommand(
+var command = filemaker.NewFindCommand(
   ...
 ).SetLimit(10)
 ```
 
 ### Offset
 ``` go
-var command = NewFindCommand(
+var command = filemaker.NewFindCommand(
   ...
 ).SetOffset(10)
 ```
 
 ### Limit and offset (chaining)
 ``` go
-var command = NewFindCommand(
+var command = filemaker.NewFindCommand(
   ...
 ).SetLimit(10).SetOffset(10)
 ```
