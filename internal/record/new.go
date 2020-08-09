@@ -1,6 +1,6 @@
 package record
 
-//New returns a new empty record instance
+//New returns a new instance of an existing record
 func New(layout string, data interface{}) Record {
 	return Record{
 		ID:            data.(map[string]interface{})["recordId"].(string),

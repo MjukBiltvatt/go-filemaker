@@ -12,7 +12,7 @@ defer conn.Close()
 
 ## Perform find
 ``` go
-var command = filemaker.NewFindCommand(
+command := filemaker.NewFindCommand(
   filemaker.NewFindRequest(
     filemaker.NewFindCriterion("fieldname", "=matchthis"),
   ),
@@ -31,7 +31,7 @@ for _, record := range records {
 
 ### Omit
 ``` go
-var command = filemaker.NewFindCommand(
+command := filemaker.NewFindCommand(
   filemaker.NewFindRequest(
     filemaker.NewFindCriterion("fieldname", "somethinglikethis"),
   ),
@@ -43,21 +43,21 @@ var command = filemaker.NewFindCommand(
 
 ### Limit
 ``` go
-var command = filemaker.NewFindCommand(
+command := filemaker.NewFindCommand(
   //...
 ).SetLimit(10)
 ```
 
 ### Offset
 ``` go
-var command = filemaker.NewFindCommand(
+command := filemaker.NewFindCommand(
   //...
 ).SetOffset(10)
 ```
 
 ### Limit and offset (chaining)
 ``` go
-var command = filemaker.NewFindCommand(
+command := filemaker.NewFindCommand(
   //...
 ).SetLimit(10).SetOffset(10)
 ```
@@ -66,7 +66,15 @@ var command = filemaker.NewFindCommand(
 
 ### Create
 ``` go
-//@TODO
+record := filemaker.CreateRecord("layoutname")
+record.SetField("fieldname", "data")
+
+err = conn.Commit(record)
+if err != nil {
+  fmt.Println("Error:", err.Error())
+}
+
+fmt.Println("Record ID:", record.ID)
 ```
 
 ### Edit

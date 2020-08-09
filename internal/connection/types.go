@@ -19,6 +19,7 @@ type ResponseBody struct {
 	Response struct {
 		Token    string `json:"token"`
 		ModID    string `json:"modId"`
+		RecordID string `json:"recordId"`
 		DataInfo struct {
 			Database         string `json:"database"`
 			Layout           string `json:"layout"`

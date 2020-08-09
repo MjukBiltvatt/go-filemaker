@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestCommit(t *testing.T) {
+func TestCommitEdit(t *testing.T) {
 	conn, err := Connect(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
 	if err != nil {
 		fmt.Println("Error:", err.Error())
@@ -26,8 +26,25 @@ func TestCommit(t *testing.T) {
 	}
 
 	var record = records[0]
-
 	record.SetField("D001_Registreringsnummer", "FOOBAR")
+
+	err = conn.Commit(record)
+	if err != nil {
+		fmt.Println("Error:", err.Error())
+	}
+}
+
+func TestCommitCreate(t *testing.T) {
+	conn, err := Connect(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
+	if err != nil {
+		fmt.Println("Error:", err.Error())
+		return
+	}
+	defer conn.Close()
+
+	var record = CreateRecord("fmi_appcars")
+	record.SetField("D001_Registreringsnummer", "FOOBAR")
+
 	err = conn.Commit(record)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
