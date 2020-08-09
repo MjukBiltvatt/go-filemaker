@@ -30,8 +30,6 @@ func New(host string, database string, username string, password string) (*Conne
 		} `json:"response"`
 	}
 
-	fmt.Println("Creating new connection")
-
 	//Create an empty json body
 	var requestBody, err = json.Marshal(struct{}{})
 	if err != nil {
@@ -53,7 +51,7 @@ func New(host string, database string, username string, password string) (*Conne
 		return nil, errors.New("Failed to send POST request: " + err.Error())
 	}
 
-	fmt.Println("Status: ", res.Status)
+	fmt.Printf("\nCreating new connection: " + res.Status + "\n")
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
