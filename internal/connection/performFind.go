@@ -9,8 +9,8 @@ import (
 	"net/http"
 )
 
-//PerformFind performs the specified findrequest on the specified layout
-func (conn *Connection) PerformFind(layout string, findRequest interface{}) ([]interface{}, error) {
+//PerformFind performs the specified findcommand on the specified layout
+func (conn *Connection) PerformFind(layout string, findCommand interface{}) ([]interface{}, error) {
 	if layout == "" {
 		return nil, errors.New("No layout specified")
 	}
@@ -34,7 +34,7 @@ func (conn *Connection) PerformFind(layout string, findRequest interface{}) ([]i
 	}
 
 	//Create the request json body
-	var requestBody, err = json.Marshal(findRequest)
+	var requestBody, err = json.Marshal(findCommand)
 	if err != nil {
 		return nil, errors.New("Failed to marshal request body: " + err.Error())
 	}

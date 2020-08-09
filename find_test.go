@@ -73,3 +73,28 @@ func TestFindOffset(t *testing.T) {
 
 	fmt.Println("Records:", records)
 }
+
+func TestFindOmit(t *testing.T) {
+	conn, err := Connect(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
+	if err != nil {
+		fmt.Println("Error:", err.Error())
+		return
+	}
+	defer conn.Close()
+
+	var command = NewFindCommand(
+		NewFindRequest(
+			NewFindCriterion("D001_Registreringsnummer", ".."),
+		),
+		NewFindRequest(
+			NewFindCriterion("D002_Aktiv", "=Aktiv"),
+		).Omit(),
+	)
+
+	records, err := conn.PerformFind("fmi_appcars", command)
+	if err != nil {
+		fmt.Println("Error:", err.Error())
+	}
+
+	fmt.Println("Records:", records)
+}

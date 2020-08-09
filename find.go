@@ -7,7 +7,7 @@ type FindCriterion struct {
 }
 
 //FindRequest represents the findrequest that builds up a findcommand
-type FindRequest map[string]string
+type FindRequest map[string]interface{}
 
 //FindCommand represents the findcommand
 // type FindCommand struct {
@@ -60,4 +60,10 @@ func (c FindCommand) SetLimit(limit int) {
 //SetOffset sets the offset for the records returned by the findcommand
 func (c FindCommand) SetOffset(offset int) {
 	c["offset"] = offset
+}
+
+//Omit sets the findrequest to omit matching records
+func (r FindRequest) Omit() FindRequest {
+	r["omit"] = "true"
+	return r
 }
