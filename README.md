@@ -16,7 +16,7 @@ var command = filemaker.NewFindCommand(
   filemaker.NewFindRequest(
     filemaker.NewFindCriterion("fieldname", "=matchthis"),
   ),
-  ...
+  //...
 )
 
 records, err := conn.PerformFind("layoutname", command)
@@ -44,20 +44,20 @@ var command = filemaker.NewFindCommand(
 ### Limit
 ``` go
 var command = filemaker.NewFindCommand(
-  ...
+  //...
 ).SetLimit(10)
 ```
 
 ### Offset
 ``` go
 var command = filemaker.NewFindCommand(
-  ...
+  //...
 ).SetOffset(10)
 ```
 
 ### Limit and offset (chaining)
 ``` go
 var command = filemaker.NewFindCommand(
-  ...
+  //...
 ).SetLimit(10).SetOffset(10)
 ```
