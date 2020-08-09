@@ -7,30 +7,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+
+	"github.com/jomla97/go-filemaker/internal/record"
 )
 
 //PerformFind performs the specified findcommand on the specified layout
-func (conn *Connection) PerformFind(layout string, findCommand interface{}) ([]interface{}, error) {
+func (conn *Connection) PerformFind(layout string, findCommand interface{}) ([]record.Record, error) {
 	if layout == "" {
 		return nil, errors.New("No layout specified")
-	}
-
-	type responseBody struct {
-		Response struct {
-			DataInfo struct {
-				Database         string `json:"database"`
-				Layout           string `json:"layout"`
-				Table            string `json:"table"`
-				TotalRecordCount int    `json:"totalRecordCount"`
-				FoundCount       int    `json:"foundCount"`
-				ReturnedCount    int    `json:"returnedCount"`
-			} `json:"dataInfo"`
-			Data []interface{} `json:"data"`
-		} `json:"response"`
-		Messages []struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"messages"`
 	}
 
 	//Create the request json body
@@ -60,7 +44,7 @@ func (conn *Connection) PerformFind(layout string, findCommand interface{}) ([]i
 	fmt.Println("Response body:", string(resBodyBytes))
 
 	//Unmarshal json body
-	var jsonRes responseBody
+	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
 		return nil, errors.New("Failed to decode response body as json: " + err.Error())
@@ -70,5 +54,11 @@ func (conn *Connection) PerformFind(layout string, findCommand interface{}) ([]i
 		return nil, errors.New("Failed at host: " + jsonRes.Messages[0].Message)
 	}
 
-	return jsonRes.Response.Data, nil
+	var records []record.Record
+
+	for _, r := range jsonRes.Response.Data {
+		records = append(records, record.New(layout, r))
+	}
+
+	return records, nil
 }

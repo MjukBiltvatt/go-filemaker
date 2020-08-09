@@ -11,16 +11,6 @@ import (
 
 //Close logs out of the database session
 func (conn *Connection) Close() error {
-	type responseBody struct {
-		Messages []struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"messages"`
-		Response struct {
-			Token string `json:"token"`
-		} `json:"response"`
-	}
-
 	//Build and send request to the host
 	req, err := http.NewRequest("DELETE", conn.Protocol+conn.Host+"/fmi/data/v1/databases/"+conn.Database+"/sessions/"+conn.Token, bytes.NewBuffer([]byte{}))
 	req.Header.Add("Content-Type", "application/json")
@@ -39,7 +29,7 @@ func (conn *Connection) Close() error {
 	fmt.Println("Response body: ", string(resBodyBytes))
 
 	//Unmarshal json body
-	var jsonRes responseBody
+	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
 		return errors.New("Failed to decode response body as json: " + err.Error())

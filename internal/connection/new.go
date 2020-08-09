@@ -20,16 +20,6 @@ func New(host string, database string, username string, password string) (*Conne
 		return nil, errors.New("No username specified")
 	}
 
-	type responseBody struct {
-		Messages []struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"messages"`
-		Response struct {
-			Token string `json:"token"`
-		} `json:"response"`
-	}
-
 	//Create an empty json body
 	var requestBody, err = json.Marshal(struct{}{})
 	if err != nil {
@@ -61,7 +51,7 @@ func New(host string, database string, username string, password string) (*Conne
 	fmt.Println("Response body: ", string(resBodyBytes))
 
 	//Unmarshal json body
-	var jsonRes responseBody
+	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
 		return nil, errors.New("Failed to decode response body as json: " + err.Error())
