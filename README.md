@@ -1,8 +1,6 @@
-# go-fm-rest
+# Getting started
 
-## Getting started
-
-### Starting/destroying session
+## Starting/destroying session
 ``` go
 conn, err := filemaker.Connect("https://example.com", "database", "username", "password")
 if err != nil {
@@ -12,7 +10,7 @@ if err != nil {
 defer conn.Close()
 ```
 
-### Perform find
+## Perform find
 ``` go
 var command = NewFindCommand(
   NewFindRequest(
