@@ -25,7 +25,7 @@ if err != nil {
 }
 
 for _, record := range records {
-  fmt.Println(record["fieldname"])
+  fmt.Println(record.GetField("fieldname"))
 }
 ```
 
@@ -60,4 +60,26 @@ var command = filemaker.NewFindCommand(
 var command = filemaker.NewFindCommand(
   //...
 ).SetLimit(10).SetOffset(10)
+```
+
+## Records
+
+### Create
+``` go
+//@TODO
+```
+
+### Edit
+``` go
+record.SetField("fieldname", "new data")
+
+err := conn.Commit(record)
+if err != nil {
+  fmt.Println("Error:", err.Error())
+}
+```
+
+### Delete
+``` go
+//@TODO
 ```
