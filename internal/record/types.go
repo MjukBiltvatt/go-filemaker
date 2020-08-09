@@ -10,6 +10,6 @@ type FieldChange struct {
 type Record struct {
 	ID            string
 	Layout        string
-	FieldData     map[string]interface{}
 	StagedChanges map[string]interface{}
+	fieldData     map[string]interface{}
 }
