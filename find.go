@@ -53,13 +53,15 @@ func NewFindCriterion(fieldName string, value string) FindCriterion {
 }
 
 //SetLimit sets the limit for the number of records returned by the findcommand
-func (c FindCommand) SetLimit(limit int) {
+func (c FindCommand) SetLimit(limit int) FindCommand {
 	c["limit"] = limit
+	return c
 }
 
 //SetOffset sets the offset for the records returned by the findcommand
-func (c FindCommand) SetOffset(offset int) {
+func (c FindCommand) SetOffset(offset int) FindCommand {
 	c["offset"] = offset
+	return c
 }
 
 //Omit sets the findrequest to omit matching records

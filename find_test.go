@@ -40,8 +40,7 @@ func TestFindLimit(t *testing.T) {
 		NewFindRequest(
 			NewFindCriterion("D001_Registreringsnummer", ".."),
 		),
-	)
-	command.SetLimit(1)
+	).SetLimit(1)
 
 	records, err := conn.PerformFind("fmi_appcars", command)
 	if err != nil {
@@ -63,8 +62,7 @@ func TestFindOffset(t *testing.T) {
 		NewFindRequest(
 			NewFindCriterion("D001_Registreringsnummer", ".."),
 		),
-	)
-	command.SetOffset(2)
+	).SetOffset(2)
 
 	records, err := conn.PerformFind("fmi_appcars", command)
 	if err != nil {
