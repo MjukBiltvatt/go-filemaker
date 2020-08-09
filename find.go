@@ -10,9 +10,13 @@ type FindCriterion struct {
 type FindRequest map[string]string
 
 //FindCommand represents the findcommand
-type FindCommand struct {
-	Query []interface{} `json:"query"`
-}
+// type FindCommand struct {
+// 	Query          []interface{} `json:"query"`
+// 	Limit          int           `json:"limit"`
+// 	Offset         int           `json:"offset"`
+// 	ResponseLayout string        `json:"layout.response"`
+// }
+type FindCommand map[string]interface{}
 
 //NewFindCommand returns a findrequest
 func NewFindCommand(requests ...interface{}) FindCommand {
@@ -22,9 +26,11 @@ func NewFindCommand(requests ...interface{}) FindCommand {
 		query = append(query, request)
 	}
 
-	return FindCommand{
-		query,
+	var command = FindCommand{
+		"query": query,
 	}
+
+	return command
 }
 
 //NewFindRequest returns a new findrequest
@@ -46,12 +52,12 @@ func NewFindCriterion(fieldName string, value string) FindCriterion {
 	}
 }
 
-//AddFindCriterion adds a findcriterion to a findrequest
-func (r FindRequest) AddFindCriterion(fieldName string, value string) {
-	r[fieldName] = value
+//SetLimit sets the limit for the number of records returned by the findcommand
+func (c FindCommand) SetLimit(limit int) {
+	c["limit"] = limit
 }
 
-//AddRequest adds a findrequest to a findcommand
-func (c FindCommand) AddRequest(request FindRequest) {
-	c.Query = append(c.Query, request)
+//SetOffset sets the offset for the records returned by the findcommand
+func (c FindCommand) SetOffset(offset int) {
+	c["offset"] = offset
 }
