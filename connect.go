@@ -1,6 +1,6 @@
 package filemaker
 
-import "github.com/jomla97/go-fm-rest/internal/connection"
+import "github.com/jomla97/go-filemaker/internal/connection"
 
 //Connect starts a database session
 func Connect(host string, database string, username string, password string) (*connection.Connection, error) {
