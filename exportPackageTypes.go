@@ -1,8 +1,8 @@
 package filemaker
 
 import (
-	"github.com/jomla97/go-filemaker/internal/connection"
-	"github.com/jomla97/go-filemaker/internal/record"
+	"github.com/jomla97/go-filemaker/pkg/connection"
+	"github.com/jomla97/go-filemaker/pkg/record"
 )
 
 //Record represents the record object returned by performed findcommands

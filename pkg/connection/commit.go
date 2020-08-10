@@ -8,7 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/jomla97/go-filemaker/internal/record"
+	"github.com/jomla97/go-filemaker/pkg/record"
 )
 
 //Commit saves changes to the given record
