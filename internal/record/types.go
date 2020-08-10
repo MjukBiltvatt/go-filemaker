@@ -11,5 +11,5 @@ type Record struct {
 	ID            string
 	Layout        string
 	StagedChanges map[string]interface{}
-	fieldData     map[string]interface{}
+	FieldData     map[string]interface{}
 }

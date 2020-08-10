@@ -28,7 +28,7 @@ func TestCommitEdit(t *testing.T) {
 	var record = records[0]
 	record.SetField("D001_Registreringsnummer", "FOOBAR")
 
-	err = conn.Commit(record)
+	err = conn.Commit(&record)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}
@@ -45,7 +45,7 @@ func TestCommitCreate(t *testing.T) {
 	var record = CreateRecord("fmi_appcars")
 	record.SetField("D001_Registreringsnummer", "FOOBAR")
 
-	err = conn.Commit(record)
+	err = conn.Commit(&record)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}

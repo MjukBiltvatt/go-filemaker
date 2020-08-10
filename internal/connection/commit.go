@@ -12,7 +12,7 @@ import (
 )
 
 //Commit saves changes to the given record
-func (conn *Connection) Commit(r record.Record) error {
+func (conn *Connection) Commit(r *record.Record) error {
 	if r.ID != "" {
 		return conn.CommitChanges(r)
 	}
@@ -21,7 +21,7 @@ func (conn *Connection) Commit(r record.Record) error {
 }
 
 //CommitChanges saves changes to the given existing record
-func (conn *Connection) CommitChanges(r record.Record) error {
+func (conn *Connection) CommitChanges(r *record.Record) error {
 	var fieldData = make(map[string]interface{})
 
 	for fieldName, value := range r.StagedChanges {
@@ -75,7 +75,7 @@ func (conn *Connection) CommitChanges(r record.Record) error {
 }
 
 //CommitNew uploads a new local record to the server
-func (conn *Connection) CommitNew(r record.Record) error {
+func (conn *Connection) CommitNew(r *record.Record) error {
 	var fieldData = make(map[string]interface{})
 
 	for fieldName, value := range r.StagedChanges {

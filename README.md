@@ -69,7 +69,7 @@ command := filemaker.NewFindCommand(
 record := filemaker.CreateRecord("layoutname")
 record.SetField("fieldname", "data")
 
-err = conn.Commit(record)
+err = conn.Commit(&record) //Need to pass record by pointer
 if err != nil {
   fmt.Println("Error:", err.Error())
 }
@@ -81,7 +81,7 @@ fmt.Println("Record ID:", record.ID)
 ``` go
 record.SetField("fieldname", "new data")
 
-err := conn.Commit(record)
+err := conn.Commit(&record) //Need to pass record by pointer
 if err != nil {
   fmt.Println("Error:", err.Error())
 }
@@ -89,5 +89,8 @@ if err != nil {
 
 ### Delete
 ``` go
-//@TODO
+err = conn.Delete(record.Layout, record.ID)
+if err != nil {
+	fmt.Println("Error:", err.Error())
+}
 ```
