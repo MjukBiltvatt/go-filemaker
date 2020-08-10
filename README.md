@@ -16,7 +16,7 @@ command := filemaker.NewFindCommand(
   filemaker.NewFindRequest(
     filemaker.NewFindCriterion("fieldname", "=matchthis"),
   ),
-  //...
+  //... more requests go here
 )
 
 records, err := conn.PerformFind("layoutname", command)
@@ -78,10 +78,11 @@ record.SetField("fieldname", "data")
 
 err = conn.Commit(&record) //Need to pass record by pointer
 if err != nil {
-  fmt.Println("Error:", err.Error())
+  //... handle error
+  return
 }
 
-fmt.Println("Record ID:", record.ID)
+fmt.Println("Record ID:", record.ID) //Record now contains an ID
 ```
 
 ### Edit
@@ -89,15 +90,9 @@ fmt.Println("Record ID:", record.ID)
 record.SetField("fieldname", "new data")
 
 err := conn.Commit(&record) //Need to pass record by pointer
-if err != nil {
-  fmt.Println("Error:", err.Error())
-}
 ```
 
 ### Delete
 ``` go
 err = conn.Delete(record.Layout, record.ID)
-if err != nil {
-  fmt.Println("Error:", err.Error())
-}
 ```
