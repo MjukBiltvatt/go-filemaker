@@ -98,6 +98,6 @@ if err != nil {
 ``` go
 err = conn.Delete(record.Layout, record.ID)
 if err != nil {
-	fmt.Println("Error:", err.Error())
+  fmt.Println("Error:", err.Error())
 }
 ```
