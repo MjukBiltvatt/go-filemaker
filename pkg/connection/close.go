@@ -36,7 +36,7 @@ func (conn *Connection) Close() error {
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return errors.New("Failed at host: " + jsonRes.Messages[0].Message)
+		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
 	}
 
 	return nil

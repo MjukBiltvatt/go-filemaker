@@ -58,7 +58,7 @@ func New(host string, database string, username string, password string) (*Conne
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return nil, errors.New("Failed at host: " + jsonRes.Messages[0].Message)
+		return nil, errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
 	}
 
 	return &Connection{

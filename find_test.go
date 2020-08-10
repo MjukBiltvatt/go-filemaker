@@ -20,7 +20,7 @@ func TestFind(t *testing.T) {
 		),
 	)
 
-	records, err := conn.PerformFind("fmi_appcars", command)
+	records, err := conn.PerformFind("fmi_cars", command)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}
@@ -42,7 +42,7 @@ func TestFindLimit(t *testing.T) {
 		),
 	).SetLimit(1)
 
-	records, err := conn.PerformFind("fmi_appcars", command)
+	records, err := conn.PerformFind("fmi_cars", command)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}
@@ -64,7 +64,7 @@ func TestFindOffset(t *testing.T) {
 		),
 	).SetOffset(2)
 
-	records, err := conn.PerformFind("fmi_appcars", command)
+	records, err := conn.PerformFind("fmi_cars", command)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}
@@ -89,9 +89,38 @@ func TestFindOmit(t *testing.T) {
 		).Omit(),
 	)
 
-	records, err := conn.PerformFind("fmi_appcars", command)
+	records, err := conn.PerformFind("fmi_cars", command)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
+	}
+
+	fmt.Println("Records:", records)
+}
+
+func TestFindNotFound(t *testing.T) {
+	conn, err := Connect(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
+	if err != nil {
+		fmt.Println("Error:", err.Error())
+		return
+	}
+	defer conn.Close()
+
+	var command = NewFindCommand(
+		NewFindRequest(
+			NewFindCriterion("D001_Registreringsnummer", "=foooooooooobaaaaaaaaaarrrrrrr"),
+		),
+	)
+
+	records, err := conn.PerformFind("fmi_cars", command)
+	if err != nil {
+		switch err.(type) {
+		case *ErrorNotFound:
+			fmt.Println("Records not found!")
+		default:
+			fmt.Println("Error:", err.Error())
+		}
+
+		return
 	}
 
 	fmt.Println("Records:", records)
