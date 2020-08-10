@@ -15,6 +15,7 @@ defer conn.Close()
 command := filemaker.NewFindCommand(
   filemaker.NewFindRequest(
     filemaker.NewFindCriterion("fieldname", "=matchthis"),
+    //... more criterions go here
   ),
   //... more requests go here
 )
