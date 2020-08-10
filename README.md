@@ -76,7 +76,7 @@ command := filemaker.NewFindCommand(
 record := filemaker.CreateRecord("layoutname")
 record.SetField("fieldname", "data")
 
-err = conn.Commit(&record) //Need to pass record by pointer
+err := conn.Commit(&record) //Need to pass record by pointer
 if err != nil {
   //... handle error
   return
@@ -94,5 +94,5 @@ err := conn.Commit(&record) //Need to pass record by pointer
 
 ### Delete
 ``` go
-err = conn.Delete(record.Layout, record.ID)
+err := conn.Delete(record.Layout, record.ID)
 ```
