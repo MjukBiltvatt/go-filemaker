@@ -62,6 +62,21 @@ command := filemaker.NewFindCommand(
 ).SetLimit(10).SetOffset(10)
 ```
 
+### Error handling
+``` go
+records, err := conn.PerformFind("layoutname", command)
+if err != nil {
+  switch err.(type) {
+  case *ErrorNotFound:
+    fmt.Println("Records not found!")
+  default:
+    fmt.Println("Unknown error:", err.Error())
+  }
+
+  return
+}
+```
+
 ## Records
 
 ### Create
