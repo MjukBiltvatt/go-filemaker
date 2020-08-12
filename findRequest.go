@@ -19,3 +19,8 @@ func (r FindRequest) Omit() FindRequest {
 	r["omit"] = "true"
 	return r
 }
+
+//AddCriterion appends a specified FindCriterion to the FindRequest
+func (r *FindRequest) AddCriterion(criterion FindCriterion) {
+	(*r)[criterion.FieldName] = criterion.Value
+}
