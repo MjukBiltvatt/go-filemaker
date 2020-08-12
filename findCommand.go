@@ -29,3 +29,13 @@ func (c FindCommand) SetOffset(offset int) FindCommand {
 	c["offset"] = offset
 	return c
 }
+
+//AddRequest appends a specified FindRequest to the FindCommand
+func (c *FindCommand) AddRequest(request FindRequest) {
+	if query, ok := (*c)["query"]; ok {
+		(*c)["query"] = append(query.([]interface{}), request)
+	} else {
+		var query []interface{}
+		(*c)["query"] = append(query, request)
+	}
+}
