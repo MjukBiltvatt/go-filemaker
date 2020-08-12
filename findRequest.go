@@ -13,3 +13,9 @@ func NewFindRequest(criterions ...FindCriterion) FindRequest {
 
 	return request
 }
+
+//Omit sets the findrequest to omit matching records
+func (r FindRequest) Omit() FindRequest {
+	r["omit"] = "true"
+	return r
+}

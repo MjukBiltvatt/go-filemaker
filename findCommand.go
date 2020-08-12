@@ -29,9 +29,3 @@ func (c FindCommand) SetOffset(offset int) FindCommand {
 	c["offset"] = offset
 	return c
 }
-
-//Omit sets the findrequest to omit matching records
-func (r FindRequest) Omit() FindRequest {
-	r["omit"] = "true"
-	return r
-}
