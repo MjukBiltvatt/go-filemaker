@@ -52,18 +52,14 @@ if len(records) > 0 {
 While being able to pass findrequests into the `NewFindCommand` method, they can also be added to the findcommand after instantiation.
 ``` go
 command := filemaker.NewFindCommand()
-command.AddRequest(
-  //...
-)
+command.AddRequest(request)
 ```
 
 ### FindRequest
 While being able to pass findcriterions into the `NewFindRequest` method, they can also be added to the findrequest after instantiation.
 ``` go
 command := filemaker.NewFindRequest()
-command.AddCriterion(
-  //...
-)
+command.AddCriterion(criterion)
 ```
 
 ### Omit
