@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/jomla97/go-filemaker/pkg/errortypes"
 	"github.com/jomla97/go-filemaker/pkg/record"
 )
 
@@ -45,9 +44,12 @@ func (sess *Session) PerformFind(layout string, findCommand interface{}) ([]reco
 		return nil, errors.New("Failed to decode response body as json: " + err.Error())
 	}
 
+	//Check for errors
 	if jsonRes.Messages[0].Code == "401" {
-		return nil, errortypes.NewNotFound()
+		//No records found, return empty slice
+		return []record.Record{}, nil
 	} else if jsonRes.Messages[0].Code != "0" {
+		//Unknown error
 		return nil, errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
 	}
 

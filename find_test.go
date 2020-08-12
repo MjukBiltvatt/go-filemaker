@@ -113,15 +113,13 @@ func TestFindNotFound(t *testing.T) {
 
 	records, err := sess.PerformFind("fmi_cars", command)
 	if err != nil {
-		switch err.(type) {
-		case *ErrorNotFound:
-			fmt.Println("Records not found!")
-		default:
-			fmt.Println("Error:", err.Error())
-		}
-
+		fmt.Println("Error:", err.Error())
 		return
 	}
 
-	fmt.Println("Records:", records)
+	if len(records) > 0 {
+		fmt.Println("Records:", records)
+	} else {
+		fmt.Println("No records found")
+	}
 }
