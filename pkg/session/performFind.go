@@ -1,4 +1,4 @@
-package connection
+package session
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 )
 
 //PerformFind performs the specified findcommand on the specified layout
-func (conn *Connection) PerformFind(layout string, findCommand interface{}) ([]record.Record, error) {
+func (sess *Session) PerformFind(layout string, findCommand interface{}) ([]record.Record, error) {
 	if layout == "" {
 		return nil, errors.New("No layout specified")
 	}
@@ -24,9 +24,9 @@ func (conn *Connection) PerformFind(layout string, findCommand interface{}) ([]r
 	}
 
 	//Build and send request to the host
-	req, err := http.NewRequest("POST", conn.Protocol+conn.Host+"/fmi/data/v1/databases/"+conn.Database+"/layouts/"+layout+"/_find", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", sess.Protocol+sess.Host+"/fmi/data/v1/databases/"+sess.Database+"/layouts/"+layout+"/_find", bytes.NewBuffer(requestBody))
 	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Bearer "+conn.Token)
+	req.Header.Add("Authorization", "Bearer "+sess.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, errors.New("Failed to send POST request: " + err.Error())

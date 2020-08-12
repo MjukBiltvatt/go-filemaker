@@ -1,9 +1,9 @@
 package filemaker
 
 import (
-	"github.com/jomla97/go-filemaker/pkg/connection"
 	"github.com/jomla97/go-filemaker/pkg/errortypes"
 	"github.com/jomla97/go-filemaker/pkg/record"
+	"github.com/jomla97/go-filemaker/pkg/session"
 )
 
 //Record represents the record object returned by performed findcommands
@@ -12,10 +12,10 @@ type Record = record.Record
 //FieldChange represents the object returned by record.SetField()
 type FieldChange = record.FieldChange
 
-//Connection represents the connection object returned by filemaker.Connect()
-type Connection = connection.Connection
+//Session represents the session struct returned by filemaker.New()
+type Session = session.Session
 
 //----------- Errors -----------
 
-//ErrorNotFound is returned by Connection.PerformFind() when no records match the request
+//ErrorNotFound is returned by Session.PerformFind() when no records match the request
 type ErrorNotFound = errortypes.ErrorNotFound

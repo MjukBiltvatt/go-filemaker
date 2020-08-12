@@ -2,6 +2,11 @@ go-filemaker is a simple Go wrapper for the [FileMaker Data API](https://fmhelp.
 
 # Getting started
 
+## Installation
+```
+go get github.com/jomla97/go-filemaker
+```
+
 ## Importing
 ``` go
 import "github.com/jomla97/go-filemaker"
@@ -9,12 +14,12 @@ import "github.com/jomla97/go-filemaker"
 
 ## Starting/destroying session
 ``` go
-conn, err := filemaker.Connect("https://example.com", "database", "username", "password")
+fm, err := filemaker.New("https://example.com", "database", "username", "password")
 if err != nil {
   fmt.Println("Error:", err.Error())
   return
 }
-defer conn.Close()
+defer fm.Destroy()
 ```
 
 ## Perform find
@@ -27,7 +32,7 @@ command := filemaker.NewFindCommand(
   //... more requests go here
 )
 
-records, err := conn.PerformFind("layoutname", command)
+records, err := fm.PerformFind("layoutname", command)
 if err != nil {
   switch err.(type) {
   case *ErrorNotFound:
@@ -84,7 +89,7 @@ command := filemaker.NewFindCommand(
 record := filemaker.CreateRecord("layoutname")
 record.SetField("fieldname", "data")
 
-err := conn.Commit(&record) //Need to pass record by pointer
+err := fm.Commit(&record) //Need to pass record by pointer
 if err != nil {
   //... handle error
   return
@@ -97,10 +102,10 @@ fmt.Println("Record ID:", record.ID) //Record now contains an ID
 ``` go
 record.SetField("fieldname", "new data")
 
-err := conn.Commit(&record) //Need to pass record by pointer
+err := fm.Commit(&record) //Need to pass record by pointer
 ```
 
 ### Delete
 ``` go
-err := conn.Delete(record.Layout, record.ID)
+err := fm.Delete(record.Layout, record.ID)
 ```

@@ -7,22 +7,22 @@ import (
 )
 
 func TestDelete(t *testing.T) {
-	conn, err := Connect(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
+	sess, err := New(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 		return
 	}
-	defer conn.Close()
+	defer sess.Destroy()
 
 	var record = CreateRecord("fmi_appcars")
 	record.SetField("D001_Registreringsnummer", "FOOBAR")
 
-	err = conn.Commit(&record)
+	err = sess.Commit(&record)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}
 
-	err = conn.Delete(record.Layout, record.ID)
+	err = sess.Delete(record.Layout, record.ID)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}

@@ -1,4 +1,4 @@
-package connection
+package session
 
 import (
 	"bytes"
@@ -8,11 +8,11 @@ import (
 	"net/http"
 )
 
-//Close logs out of the database session
-func (conn *Connection) Close() error {
+//Delete the given record
+func (sess *Session) Delete(layout string, id string) error {
 	//Build and send request to the host
-	req, err := http.NewRequest("DELETE", conn.Protocol+conn.Host+"/fmi/data/v1/databases/"+conn.Database+"/sessions/"+conn.Token, bytes.NewBuffer([]byte{}))
-	req.Header.Add("Content-Type", "application/json")
+	req, err := http.NewRequest("DELETE", sess.Protocol+sess.Host+"/fmi/data/v1/databases/"+sess.Database+"/layouts/"+layout+"/records/"+id, bytes.NewBuffer([]byte{}))
+	req.Header.Add("Authorization", "Bearer "+sess.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return errors.New("Failed to send DELETE request: " + err.Error())

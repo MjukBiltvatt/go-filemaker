@@ -1,7 +1,7 @@
-package connection
+package session
 
-//Connection is a connection struct used for subsequent requests to the host
-type Connection struct {
+//Session is used for subsequent requests to the host
+type Session struct {
 	Token    string
 	Protocol string
 	Host     string

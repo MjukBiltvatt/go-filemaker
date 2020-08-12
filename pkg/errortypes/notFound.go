@@ -1,6 +1,6 @@
 package errortypes
 
-//ErrorNotFound is returned by Connection.PerformFind() when no records match the request
+//ErrorNotFound is returned by Session.PerformFind() when no records match the request
 type ErrorNotFound struct {
 	message string
 }

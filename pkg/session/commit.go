@@ -1,4 +1,4 @@
-package connection
+package session
 
 import (
 	"bytes"
@@ -11,16 +11,16 @@ import (
 )
 
 //Commit saves changes to the given record
-func (conn *Connection) Commit(r *record.Record) error {
+func (sess *Session) Commit(r *record.Record) error {
 	if r.ID != "" {
-		return conn.CommitChanges(r)
+		return sess.CommitChanges(r)
 	}
 
-	return conn.CommitNew(r)
+	return sess.CommitNew(r)
 }
 
 //CommitChanges saves changes to the given existing record
-func (conn *Connection) CommitChanges(r *record.Record) error {
+func (sess *Session) CommitChanges(r *record.Record) error {
 	var fieldData = make(map[string]interface{})
 
 	for fieldName, value := range r.StagedChanges {
@@ -40,9 +40,9 @@ func (conn *Connection) CommitChanges(r *record.Record) error {
 	}
 
 	//Build and send request to the host
-	req, err := http.NewRequest("PATCH", conn.Protocol+conn.Host+"/fmi/data/v1/databases/"+conn.Database+"/layouts/"+r.Layout+"/records/"+r.ID, bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("PATCH", sess.Protocol+sess.Host+"/fmi/data/v1/databases/"+sess.Database+"/layouts/"+r.Layout+"/records/"+r.ID, bytes.NewBuffer(requestBody))
 	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Bearer "+conn.Token)
+	req.Header.Add("Authorization", "Bearer "+sess.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return errors.New("Failed to send PATCH request: " + err.Error())
@@ -69,7 +69,7 @@ func (conn *Connection) CommitChanges(r *record.Record) error {
 }
 
 //CommitNew uploads a new local record to the server
-func (conn *Connection) CommitNew(r *record.Record) error {
+func (sess *Session) CommitNew(r *record.Record) error {
 	var fieldData = make(map[string]interface{})
 
 	for fieldName, value := range r.StagedChanges {
@@ -89,9 +89,9 @@ func (conn *Connection) CommitNew(r *record.Record) error {
 	}
 
 	//Build and send request to the host
-	req, err := http.NewRequest("POST", conn.Protocol+conn.Host+"/fmi/data/v1/databases/"+conn.Database+"/layouts/"+r.Layout+"/records", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", sess.Protocol+sess.Host+"/fmi/data/v1/databases/"+sess.Database+"/layouts/"+r.Layout+"/records", bytes.NewBuffer(requestBody))
 	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Bearer "+conn.Token)
+	req.Header.Add("Authorization", "Bearer "+sess.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return errors.New("Failed to send POST request: " + err.Error())

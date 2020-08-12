@@ -1,4 +1,4 @@
-package connection
+package session
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 )
 
 //New starts a database session
-func New(host string, database string, username string, password string) (*Connection, error) {
+func New(host string, database string, username string, password string) (*Session, error) {
 	if host == "" {
 		return nil, errors.New("No host specified")
 	} else if database == "" {
@@ -57,7 +57,7 @@ func New(host string, database string, username string, password string) (*Conne
 		return nil, errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
 	}
 
-	return &Connection{
+	return &Session{
 		Token:    jsonRes.Response.Token,
 		Protocol: protocol,
 		Host:     host,

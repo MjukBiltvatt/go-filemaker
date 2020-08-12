@@ -7,12 +7,12 @@ import (
 )
 
 func TestCommitEdit(t *testing.T) {
-	conn, err := Connect(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
+	sess, err := New(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 		return
 	}
-	defer conn.Close()
+	defer sess.Destroy()
 
 	var command = NewFindCommand(
 		NewFindRequest(
@@ -20,7 +20,7 @@ func TestCommitEdit(t *testing.T) {
 		),
 	).SetLimit(1)
 
-	records, err := conn.PerformFind("fmi_appcars", command)
+	records, err := sess.PerformFind("fmi_appcars", command)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}
@@ -28,24 +28,24 @@ func TestCommitEdit(t *testing.T) {
 	var record = records[0]
 	record.SetField("D001_Registreringsnummer", "FOOBAR")
 
-	err = conn.Commit(&record)
+	err = sess.Commit(&record)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}
 }
 
 func TestCommitCreate(t *testing.T) {
-	conn, err := Connect(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
+	sess, err := New(os.Getenv("HOST"), os.Getenv("DATABASE"), os.Getenv("USERNAME"), os.Getenv("PASSWORD"))
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 		return
 	}
-	defer conn.Close()
+	defer sess.Destroy()
 
 	var record = CreateRecord("fmi_appcars")
 	record.SetField("D001_Registreringsnummer", "FOOBAR")
 
-	err = conn.Commit(&record)
+	err = sess.Commit(&record)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
 	}
