@@ -34,18 +34,16 @@ command := filemaker.NewFindCommand(
 
 records, err := fm.PerformFind("layoutname", command)
 if err != nil {
-  switch err.(type) {
-  case *filemaker.ErrorNotFound:
-    fmt.Println("Records not found!")
-  default:
-    fmt.Println("Unknown error:", err.Error())
-  }
-
+  fmt.Println("Error:", err.Error())
   return
 }
 
-for _, record := range records {
-  fmt.Println(record.GetField("fieldname"))
+if len(records) > 0 {
+  for _, record := range records {
+    fmt.Println(record.GetField("fieldname"))
+  }
+} else {
+  fmt.Println("No records found")
 }
 ```
 
