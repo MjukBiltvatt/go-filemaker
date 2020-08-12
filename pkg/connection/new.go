@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 )
@@ -41,14 +40,11 @@ func New(host string, database string, username string, password string) (*Conne
 		return nil, errors.New("Failed to send POST request: " + err.Error())
 	}
 
-	fmt.Printf("\nCreating new connection: " + res.Status + "\n")
-
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return nil, errors.New("Failed to read response body: " + err.Error())
 	}
-	fmt.Println("Response body: ", string(resBodyBytes))
 
 	//Unmarshal json body
 	var jsonRes ResponseBody

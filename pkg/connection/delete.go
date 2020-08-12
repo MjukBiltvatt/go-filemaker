@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 )
@@ -19,14 +18,11 @@ func (conn *Connection) Delete(layout string, id string) error {
 		return errors.New("Failed to send DELETE request: " + err.Error())
 	}
 
-	fmt.Printf("\nDeleting record: " + res.Status + "\n")
-
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return errors.New("Failed to read response body: " + err.Error())
 	}
-	fmt.Println("Response body:", string(resBodyBytes))
 
 	//Unmarshal json body
 	var jsonRes ResponseBody

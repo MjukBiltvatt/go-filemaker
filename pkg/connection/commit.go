@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 
@@ -49,16 +48,11 @@ func (conn *Connection) CommitChanges(r *record.Record) error {
 		return errors.New("Failed to send PATCH request: " + err.Error())
 	}
 
-	fmt.Printf("\nCommitting record: " + res.Status + "\n")
-
-	fmt.Println("requestBody: ", bytes.NewBuffer(requestBody))
-
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return errors.New("Failed to read response body: " + err.Error())
 	}
-	fmt.Println("Response body:", string(resBodyBytes))
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
@@ -103,16 +97,11 @@ func (conn *Connection) CommitNew(r *record.Record) error {
 		return errors.New("Failed to send POST request: " + err.Error())
 	}
 
-	fmt.Printf("\nCommitting record: " + res.Status + "\n")
-
-	fmt.Println("requestBody: ", bytes.NewBuffer(requestBody))
-
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return errors.New("Failed to read response body: " + err.Error())
 	}
-	fmt.Println("Response body:", string(resBodyBytes))
 
 	//Unmarshal json body
 	var jsonRes ResponseBody

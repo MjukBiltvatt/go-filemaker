@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 
@@ -33,16 +32,11 @@ func (conn *Connection) PerformFind(layout string, findCommand interface{}) ([]r
 		return nil, errors.New("Failed to send POST request: " + err.Error())
 	}
 
-	fmt.Printf("\nPerforming find: " + res.Status + "\n")
-
-	fmt.Println("requestBody: ", bytes.NewBuffer(requestBody))
-
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return nil, errors.New("Failed to read response body: " + err.Error())
 	}
-	fmt.Println("Response body:", string(resBodyBytes))
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
