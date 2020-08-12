@@ -4,6 +4,7 @@ go-filemaker is a simple Go wrapper for the [FileMaker Data API](https://fmhelp.
 
 ## Installation
 ```
+go mod init github.com/my/repo
 go get github.com/jomla97/go-filemaker
 ```
 
