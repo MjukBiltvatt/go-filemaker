@@ -40,7 +40,7 @@ if err != nil {
 
 if len(records) > 0 {
   for _, record := range records {
-    fmt.Println(record.GetField("fieldname"))
+    fmt.Println(record.GetField("fieldname").(string))
   }
 } else {
   fmt.Println("No records found")
