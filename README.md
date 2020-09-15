@@ -58,8 +58,8 @@ command.AddRequest(request)
 ### FindRequest
 While being able to pass findcriterions into the `NewFindRequest` method, they can also be added to the findrequest after instantiation.
 ``` go
-command := filemaker.NewFindRequest()
-command.AddCriterion(criterion)
+request := filemaker.NewFindRequest()
+request.AddCriterion(criterion)
 ```
 
 ### Omit
