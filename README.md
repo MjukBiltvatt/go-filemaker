@@ -22,6 +22,22 @@ if err != nil {
 }
 defer fm.Destroy()
 ```
+## Resuming a session
+A session can be resumed as long as it hasn't been destroyed. All that's needed in addition to all parameters in `New()` is the session token string.
+``` go
+fm, err := filemaker.New("https://example.com", "database", "username", "password")
+if err != nil {
+  fmt.Println("Error:", err.Error())
+  return
+}
+token := fm.Token
+
+fmResumed, err := filemaker.Resume("https://example.com", "database", "username", "password", token)
+if err != nil {
+  fmt.Println("Error:", err.Error())
+  return
+}
+```
 
 ## Perform find
 ``` go
