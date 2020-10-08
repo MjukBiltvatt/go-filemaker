@@ -115,13 +115,12 @@ command := filemaker.NewFindCommand(
 
 ### Create
 ``` go
-record := filemaker.CreateRecord("layoutname")
+record := fm.CreateRecord("layoutname")
 record.SetField("fieldname", "data")
 
-err := fm.Commit(&record) //Need to pass record by pointer
+err := record.Commit()
 if err != nil {
   //... handle error
-  return
 }
 
 fmt.Println("Record ID:", record.ID) //Record now contains an ID
@@ -131,10 +130,29 @@ fmt.Println("Record ID:", record.ID) //Record now contains an ID
 ``` go
 record.SetField("fieldname", "new data")
 
-err := fm.Commit(&record) //Need to pass record by pointer
+err := record.Commit()
+if err != nil {
+  //... handle error
+}
+```
+
+### Get field data
+Type assertion should be used here since otherwise you'll get an `interface{}`
+``` go
+record.GetField("some text field").(string)
+record.GetField("some number field").(int)
+```
+
+### Revert uncommitted changes
+``` go
+record.SetField("fieldname", "new data")
+record.Revert()
 ```
 
 ### Delete
 ``` go
-err := fm.Delete(record.Layout, record.ID)
+err := record.Delete()
+if err != nil {
+  //... handle error
+}
 ```
