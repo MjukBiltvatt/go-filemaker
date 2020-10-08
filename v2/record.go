@@ -29,12 +29,16 @@ func newRecord(layout string, data interface{}, session Session) Record {
 }
 
 //SetField sets the value of a specified field in the given record
-func (r Record) SetField(fieldName string, value interface{}) {
+func (r *Record) SetField(fieldName string, value interface{}) {
 	r.StagedChanges[fieldName] = value
 }
 
 //GetField gets the value of a field in the given record
-func (r Record) GetField(fieldName string) interface{} {
+func (r *Record) GetField(fieldName string) interface{} {
+	if val, ok := r.StagedChanges[fieldName]; ok {
+		return val
+	}
+
 	return r.FieldData[fieldName]
 }
 
@@ -43,8 +47,12 @@ func (r *Record) Revert() {
 	r.StagedChanges = map[string]interface{}{}
 }
 
-//Commit commits the changes made to the record using the same session the record was retrieved with
+//Commit commits the changes made to the record using the same session the record was retrieved/created with
 func (r *Record) Commit() error {
+	if len(r.StagedChanges) == 0 {
+		return nil
+	}
+
 	if r.ID == "" {
 		return r.Create()
 	}
@@ -92,6 +100,8 @@ func (r *Record) Commit() error {
 	if jsonRes.Messages[0].Code != "0" {
 		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
 	}
+
+	r.FieldData = fieldData
 
 	return nil
 }
@@ -173,6 +183,11 @@ func (r *Record) Delete() error {
 	if jsonRes.Messages[0].Code != "0" {
 		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
 	}
+
+	//Empty the local record instance
+	r.ID = ""
+	r.StagedChanges = map[string]interface{}{}
+	r.FieldData = map[string]interface{}{}
 
 	return nil
 }
