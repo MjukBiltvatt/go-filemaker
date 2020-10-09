@@ -14,7 +14,7 @@ type Record struct {
 	Layout        string
 	StagedChanges map[string]interface{}
 	FieldData     map[string]interface{}
-	Session       Session
+	Session       *Session
 }
 
 //newRecord returns a new instance of an existing record
@@ -24,7 +24,7 @@ func newRecord(layout string, data interface{}, session Session) Record {
 		Layout:        layout,
 		StagedChanges: make(map[string]interface{}),
 		FieldData:     data.(map[string]interface{})["fieldData"].(map[string]interface{}),
-		Session:       session,
+		Session:       &session,
 	}
 }
 

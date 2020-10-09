@@ -127,6 +127,6 @@ func (s *Session) CreateRecord(layout string) Record {
 	return Record{
 		Layout:        layout,
 		StagedChanges: make(map[string]interface{}),
-		Session:       *s,
+		Session:       s,
 	}
 }
