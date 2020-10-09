@@ -140,7 +140,7 @@ if err != nil {
 Type assertion should be used here since otherwise you'll get an `interface{}`
 ``` go
 record.GetField("some text field").(string)
-record.GetField("some number field").(int)
+record.GetField("some number field").(float64) //FileMaker number fields are float64
 ```
 
 ### Revert uncommitted changes
