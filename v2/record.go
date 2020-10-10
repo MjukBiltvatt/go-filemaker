@@ -3,7 +3,7 @@ package filemaker
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 )
@@ -33,7 +33,7 @@ func (r *Record) SetField(fieldName string, value interface{}) {
 	r.StagedChanges[fieldName] = value
 }
 
-//GetField gets the value of a field in the given record
+//GetField gets the value of a field in the given record and returns it as an `interface{}`
 func (r *Record) GetField(fieldName string) interface{} {
 	if val, ok := r.StagedChanges[fieldName]; ok {
 		return val
@@ -44,7 +44,7 @@ func (r *Record) GetField(fieldName string) interface{} {
 
 //Revert discards all uncommited changes made to the record
 func (r *Record) Revert() {
-	r.StagedChanges = map[string]interface{}{}
+	r.StagedChanges = make(map[string]interface{})
 }
 
 //Commit commits the changes made to the record using the same session the record was retrieved/created with
@@ -72,7 +72,7 @@ func (r *Record) Commit() error {
 	//Create the request json body
 	var requestBody, err = json.Marshal(jsonData)
 	if err != nil {
-		return errors.New("Failed to marshal request body: " + err.Error())
+		return fmt.Errorf("failed to marshal request body: %v", err.Error())
 	}
 
 	//Build and send request to the host
@@ -81,24 +81,24 @@ func (r *Record) Commit() error {
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return errors.New("Failed to send PATCH request: " + err.Error())
+		return fmt.Errorf("failed to send PATCH request: %v", err.Error())
 	}
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return errors.New("Failed to read response body: " + err.Error())
+		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
-		return errors.New("Failed to decode response body as json: " + err.Error())
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
 	r.FieldData = fieldData
@@ -123,7 +123,7 @@ func (r *Record) Create() error {
 	//Create the request json body
 	var requestBody, err = json.Marshal(jsonData)
 	if err != nil {
-		return errors.New("Failed to marshal request body: " + err.Error())
+		return fmt.Errorf("failed to marshal request body: %v", err.Error())
 	}
 
 	//Build and send request to the host
@@ -132,24 +132,24 @@ func (r *Record) Create() error {
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return errors.New("Failed to send POST request: " + err.Error())
+		return fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return errors.New("Failed to read response body: " + err.Error())
+		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
-		return errors.New("Failed to decode response body as json: " + err.Error())
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
 	r.ID = jsonRes.Response.RecordID
@@ -164,24 +164,24 @@ func (r *Record) Delete() error {
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return errors.New("Failed to send DELETE request: " + err.Error())
+		return fmt.Errorf("failed to send DELETE request: %v", err.Error())
 	}
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return errors.New("Failed to read response body: " + err.Error())
+		return fmt.Errorf("failed to read respones body: %v", err.Error())
 	}
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
-		return errors.New("Failed to decode response body as json: " + err.Error())
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
 	//Empty the local record instance
@@ -190,4 +190,106 @@ func (r *Record) Delete() error {
 	r.FieldData = map[string]interface{}{}
 
 	return nil
+}
+
+/*
+String gets the data in the specified field and returns it as a string.
+The FileMaker database field needs to be a text field.
+*/
+func (r *Record) String(fieldName string) (string, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(string); ok {
+		return val, nil
+	}
+
+	return "", fmt.Errorf("field `%v` value is not of type string: %v", fieldName, data)
+}
+
+/*
+Int gets the data in the specified field and returns it as an int.
+The FileMaker database field needs to be a number field.
+*/
+func (r *Record) Int(fieldName string) (int, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return int(val), nil
+	}
+
+	return 0, fmt.Errorf("field `%v` value is not of type int: %v", fieldName, data)
+}
+
+/*
+Int32 gets the data in the specified field and returns it as an int32.
+The FileMaker database field needs to be a number field.
+*/
+func (r *Record) Int32(fieldName string) (int32, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return int32(val), nil
+	}
+
+	return 0, fmt.Errorf("field `%v` value is not of type int32: %v", fieldName, data)
+}
+
+/*
+Int64 gets the data in the specified field and returns it as an int64.
+The FileMaker database field needs to be a number field.
+*/
+func (r *Record) Int64(fieldName string) (int64, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return int64(val), nil
+	}
+
+	return 0, fmt.Errorf("field `%v` value is not of type int64: %v", fieldName, data)
+}
+
+/*
+Float32 gets the data in the specified field and returns it as an float32.
+The FileMaker database field needs to be a number field.
+*/
+func (r *Record) Float32(fieldName string) (float32, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return float32(val), nil
+	}
+
+	return 0, fmt.Errorf("field `%v` value is not of type float32: %v", fieldName, data)
+}
+
+/*
+Float64 gets the data in the specified field and returns it as an float64.
+The FileMaker database field needs to be a number field.
+*/
+func (r *Record) Float64(fieldName string) (float64, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return val, nil
+	}
+
+	return 0, fmt.Errorf("field `%v` value is not of type float64: %v", fieldName, data)
+}
+
+/*
+Bool gets the data in the specified field and returns it as an bool.
+The FileMaker database field needs to be a number field. Numbers
+larger than `0` return `true` and `0` or below returns `false`.
+*/
+func (r *Record) Bool(fieldName string) (bool, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		if val > 0 {
+			return true, nil
+		}
+		return false, nil
+	}
+
+	return false, fmt.Errorf("field `%v` value is not of type bool: %v", fieldName, data)
 }

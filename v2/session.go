@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 )
@@ -47,24 +48,24 @@ func (s *Session) Destroy() error {
 	req.Header.Add("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return errors.New("Failed to send DELETE request: " + err.Error())
+		return fmt.Errorf("failed to send DELETE request: %v", err.Error())
 	}
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return errors.New("Failed to read response body: " + err.Error())
+		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
-		return errors.New("Failed to decode response body as json: " + err.Error())
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
 	return nil
@@ -79,7 +80,7 @@ func (s *Session) PerformFind(layout string, findCommand interface{}) ([]Record,
 	//Create the request json body
 	var requestBody, err = json.Marshal(findCommand)
 	if err != nil {
-		return nil, errors.New("Failed to marshal request body: " + err.Error())
+		return nil, fmt.Errorf("failed to marshal request body: %v", err.Error())
 	}
 
 	//Build and send request to the host
@@ -88,20 +89,20 @@ func (s *Session) PerformFind(layout string, findCommand interface{}) ([]Record,
 	req.Header.Add("Authorization", "Bearer "+s.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, errors.New("Failed to send POST request: " + err.Error())
+		return nil, fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return nil, errors.New("Failed to read response body: " + err.Error())
+		return nil, fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
-		return nil, errors.New("Failed to decode response body as json: " + err.Error())
+		return nil, fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	//Check for errors
@@ -110,7 +111,7 @@ func (s *Session) PerformFind(layout string, findCommand interface{}) ([]Record,
 		return []Record{}, nil
 	} else if jsonRes.Messages[0].Code != "0" {
 		//Unknown error
-		return nil, errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
+		return nil, fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
 	var records []Record
