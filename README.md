@@ -1,4 +1,4 @@
-go-filemaker is a simple Go wrapper for the [FileMaker Data API](https://fmhelp.filemaker.com/docs/18/en/dataapi), heavily inspired by the FileMaker PHP API.
+go-filemaker is a simple Go wrapper for the [FileMaker Data API](https://fmhelp.filemaker.com/docs/18/en/dataapi), inspired by the FileMaker PHP API.
 
 # Getting started
 
@@ -136,13 +136,6 @@ if err != nil {
 }
 ```
 
-### Get field data
-Type assertion should be used here since otherwise you'll get an `interface{}`
-``` go
-record.GetField("some text field").(string)
-record.GetField("some number field").(float64) //FileMaker number fields are float64
-```
-
 ### Revert uncommitted changes
 ``` go
 record.SetField("fieldname", "new data")
@@ -155,4 +148,54 @@ err := record.Delete()
 if err != nil {
   //... handle error
 }
+```
+
+### Get field data
+
+#### String
+The FileMaker database field needs to be of type text.
+``` go
+val, err := record.String("fieldname")
+```
+
+#### Int
+The FileMaker database field needs to be of type number.
+``` go
+val, err := record.Int("fieldname")
+```
+
+#### Int32
+The FileMaker database field needs to be of type number.
+``` go
+val, err := record.Int32("fieldname")
+```
+
+#### Int64
+The FileMaker database field needs to be of type number.
+``` go
+val, err := record.Int64("fieldname")
+```
+
+#### Float32
+The FileMaker database field needs to be of type number.
+``` go
+val, err := record.Float32("fieldname")
+```
+
+#### Float64
+The FileMaker database field needs to be of type number.
+``` go
+val, err := record.Float64("fieldname")
+```
+
+#### Bool
+The FileMaker database field needs to be of type number. Values greater than `0` will return `true`, otherwise `false`.
+``` go
+val, err := record.Bool("fieldname")
+```
+
+#### Interface
+If for some reason you want an `interface{}` use the `GetField()` method. Good to know here is that FileMaker number fields will always be of type `float64`.
+``` go
+val := record.GetField("some text field")
 ```
