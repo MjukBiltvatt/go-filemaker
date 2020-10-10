@@ -197,7 +197,7 @@ val, err := record.Bool("fieldname")
 #### Interface
 If for some reason you want an `interface{}` use the `GetField()` method. Good to know here is that FileMaker number fields will always be of type `float64`.
 ``` go
-val := record.GetField("some text field")
+val := record.GetField("fieldname")
 ```
 ### Map field data to struct
 ``` go
