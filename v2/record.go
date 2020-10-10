@@ -214,3 +214,14 @@ func (r *Record) Int(fieldName string) (int, error) {
 
 	return 0, fmt.Errorf("field `%v` value is not of type int: %v", fieldName, data)
 }
+
+//Int32 gets the data in the specified field and returns it as an int32
+func (r *Record) Int32(fieldName string) (int32, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return int32(val), nil
+	}
+
+	return 0, fmt.Errorf("field `%v` value is not of type int32: %v", fieldName, data)
+}
