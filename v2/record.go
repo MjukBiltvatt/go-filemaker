@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 )
@@ -190,4 +191,15 @@ func (r *Record) Delete() error {
 	r.FieldData = map[string]interface{}{}
 
 	return nil
+}
+
+//String gets the data in the specified field and returns it as a string
+func (r *Record) String(fieldName string) (string, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(string); ok {
+		return val, nil
+	}
+
+	return "", fmt.Errorf("field `%v` value is not of type string: %v", fieldName, data)
 }
