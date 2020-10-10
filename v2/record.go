@@ -34,7 +34,7 @@ func (r *Record) SetField(fieldName string, value interface{}) {
 	r.StagedChanges[fieldName] = value
 }
 
-//GetField gets the value of a field in the given record
+//GetField gets the value of a field in the given record and returns it as an `interface{}`
 func (r *Record) GetField(fieldName string) interface{} {
 	if val, ok := r.StagedChanges[fieldName]; ok {
 		return val
@@ -193,7 +193,10 @@ func (r *Record) Delete() error {
 	return nil
 }
 
-//String gets the data in the specified field and returns it as a string
+/*
+String gets the data in the specified field and returns it as a string.
+The FileMaker database field needs to be a text field.
+*/
 func (r *Record) String(fieldName string) (string, error) {
 	data := r.GetField(fieldName)
 
@@ -204,7 +207,10 @@ func (r *Record) String(fieldName string) (string, error) {
 	return "", fmt.Errorf("field `%v` value is not of type string: %v", fieldName, data)
 }
 
-//Int gets the data in the specified field and returns it as an int
+/*
+Int gets the data in the specified field and returns it as an int.
+The FileMaker database field needs to be a number field.
+*/
 func (r *Record) Int(fieldName string) (int, error) {
 	data := r.GetField(fieldName)
 
@@ -215,7 +221,10 @@ func (r *Record) Int(fieldName string) (int, error) {
 	return 0, fmt.Errorf("field `%v` value is not of type int: %v", fieldName, data)
 }
 
-//Int32 gets the data in the specified field and returns it as an int32
+/*
+Int32 gets the data in the specified field and returns it as an int32.
+The FileMaker database field needs to be a number field.
+*/
 func (r *Record) Int32(fieldName string) (int32, error) {
 	data := r.GetField(fieldName)
 
@@ -226,7 +235,10 @@ func (r *Record) Int32(fieldName string) (int32, error) {
 	return 0, fmt.Errorf("field `%v` value is not of type int32: %v", fieldName, data)
 }
 
-//Int64 gets the data in the specified field and returns it as an int64
+/*
+Int64 gets the data in the specified field and returns it as an int64.
+The FileMaker database field needs to be a number field.
+*/
 func (r *Record) Int64(fieldName string) (int64, error) {
 	data := r.GetField(fieldName)
 
@@ -237,7 +249,10 @@ func (r *Record) Int64(fieldName string) (int64, error) {
 	return 0, fmt.Errorf("field `%v` value is not of type int64: %v", fieldName, data)
 }
 
-//Float32 gets the data in the specified field and returns it as an float32
+/*
+Float32 gets the data in the specified field and returns it as an float32.
+The FileMaker database field needs to be a number field.
+*/
 func (r *Record) Float32(fieldName string) (float32, error) {
 	data := r.GetField(fieldName)
 
@@ -248,7 +263,10 @@ func (r *Record) Float32(fieldName string) (float32, error) {
 	return 0, fmt.Errorf("field `%v` value is not of type float32: %v", fieldName, data)
 }
 
-//Float64 gets the data in the specified field and returns it as an float64
+/*
+Float64 gets the data in the specified field and returns it as an float64.
+The FileMaker database field needs to be a number field.
+*/
 func (r *Record) Float64(fieldName string) (float64, error) {
 	data := r.GetField(fieldName)
 
@@ -257,4 +275,22 @@ func (r *Record) Float64(fieldName string) (float64, error) {
 	}
 
 	return 0, fmt.Errorf("field `%v` value is not of type float64: %v", fieldName, data)
+}
+
+/*
+Bool gets the data in the specified field and returns it as an bool.
+The FileMaker database field needs to be a number field. Numbers
+larger than `0` return `true` and `0` or below returns `false`.
+*/
+func (r *Record) Bool(fieldName string) (bool, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		if val > 0 {
+			return true, nil
+		}
+		return false, nil
+	}
+
+	return false, fmt.Errorf("field `%v` value is not of type bool: %v", fieldName, data)
 }
