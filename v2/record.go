@@ -203,3 +203,14 @@ func (r *Record) String(fieldName string) (string, error) {
 
 	return "", fmt.Errorf("field `%v` value is not of type string: %v", fieldName, data)
 }
+
+//Int gets the data in the specified field and returns it as an int
+func (r *Record) Int(fieldName string) (int, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return int(val), nil
+	}
+
+	return 0, fmt.Errorf("field `%v` value is not of type int: %v", fieldName, data)
+}
