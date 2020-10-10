@@ -3,7 +3,6 @@ package filemaker
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -73,7 +72,7 @@ func (r *Record) Commit() error {
 	//Create the request json body
 	var requestBody, err = json.Marshal(jsonData)
 	if err != nil {
-		return errors.New("Failed to marshal request body: " + err.Error())
+		return fmt.Errorf("failed to marshal request body: %v", err.Error())
 	}
 
 	//Build and send request to the host
@@ -82,24 +81,24 @@ func (r *Record) Commit() error {
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return errors.New("Failed to send PATCH request: " + err.Error())
+		return fmt.Errorf("failed to send PATCH request: %v", err.Error())
 	}
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return errors.New("Failed to read response body: " + err.Error())
+		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
-		return errors.New("Failed to decode response body as json: " + err.Error())
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
 	r.FieldData = fieldData
@@ -124,7 +123,7 @@ func (r *Record) Create() error {
 	//Create the request json body
 	var requestBody, err = json.Marshal(jsonData)
 	if err != nil {
-		return errors.New("Failed to marshal request body: " + err.Error())
+		return fmt.Errorf("failed to marshal request body: %v", err.Error())
 	}
 
 	//Build and send request to the host
@@ -133,24 +132,24 @@ func (r *Record) Create() error {
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return errors.New("Failed to send POST request: " + err.Error())
+		return fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return errors.New("Failed to read response body: " + err.Error())
+		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
-		return errors.New("Failed to decode response body as json: " + err.Error())
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
 	r.ID = jsonRes.Response.RecordID
@@ -165,24 +164,24 @@ func (r *Record) Delete() error {
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return errors.New("Failed to send DELETE request: " + err.Error())
+		return fmt.Errorf("failed to send DELETE request: %v", err.Error())
 	}
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return errors.New("Failed to read response body: " + err.Error())
+		return fmt.Errorf("failed to read respones body: %v", err.Error())
 	}
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
-		return errors.New("Failed to decode response body as json: " + err.Error())
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
 	//Empty the local record instance

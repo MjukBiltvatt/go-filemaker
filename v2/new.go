@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 )
@@ -22,7 +23,7 @@ func New(host string, database string, username string, password string) (*Sessi
 	//Create an empty json body
 	var requestBody, err = json.Marshal(struct{}{})
 	if err != nil {
-		return nil, errors.New("Failed to marshal request body: " + err.Error())
+		return nil, fmt.Errorf("failed to marshal request body: %v", err.Error())
 	}
 
 	//Determine protocol scheme
@@ -37,24 +38,24 @@ func New(host string, database string, username string, password string) (*Sessi
 	req.Header.Add("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, errors.New("Failed to send POST request: " + err.Error())
+		return nil, fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return nil, errors.New("Failed to read response body: " + err.Error())
+		return nil, fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
 	//Unmarshal json body
 	var jsonRes ResponseBody
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
-		return nil, errors.New("Failed to decode response body as json: " + err.Error())
+		return nil, fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return nil, errors.New("Failed at host: " + jsonRes.Messages[0].Message + " (" + jsonRes.Messages[0].Code + ")")
+		return nil, fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
 	return &Session{
