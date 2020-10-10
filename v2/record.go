@@ -349,8 +349,6 @@ func (r *Record) Map(obj interface{}) error {
 
 		tag := typeOfObj.Field(i).Tag.Get("fm")
 
-		fmt.Println("tag value", tag)
-
 		switch field.Interface().(type) {
 		case string:
 			val, err := r.String(tag)
@@ -378,9 +376,6 @@ func (r *Record) Map(obj interface{}) error {
 			field.SetBool(val)
 		}
 	}
-
-	fmt.Println("obj", obj)
-	fmt.Println("record", r)
 
 	return nil
 }
