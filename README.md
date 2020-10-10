@@ -199,3 +199,17 @@ If for some reason you want an `interface{}` use the `GetField()` method. Good t
 ``` go
 val := record.GetField("some text field")
 ```
+### Map field data to struct
+``` go
+type Person struct {
+  Firstname string `fm:"firstname"`
+  Lastname  string `fm:"lastname"`
+  Age       int    `fm:"age"`
+}
+
+myPerson := Person{}
+fmt.Println(myPerson) //Output: {  0}
+
+record.Map(&myPerson)
+fmt.Println(myPerson) //Output: {Test Testsson 23}
+```
