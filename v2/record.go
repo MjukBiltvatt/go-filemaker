@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"reflect"
 )
 
 //Record interface for some magic with methods
@@ -30,6 +31,25 @@ func newRecord(layout string, data interface{}, session Session) Record {
 
 //SetField sets the value of a specified field in the given record
 func (r *Record) SetField(fieldName string, value interface{}) {
+	switch value.(type) {
+	case int:
+		value = float64(value.(int))
+	case int32:
+		value = float64(value.(int32))
+	case int64:
+		value = float64(value.(int64))
+	case float32:
+		value = float64(value.(float32))
+	case float64:
+		value = float64(value.(float32))
+	case bool:
+		if value.(bool) {
+			value = float64(1)
+		} else {
+			value = float64(0)
+		}
+	}
+
 	r.StagedChanges[fieldName] = value
 }
 
@@ -292,4 +312,75 @@ func (r *Record) Bool(fieldName string) (bool, error) {
 	}
 
 	return false, fmt.Errorf("field `%v` value is not of type bool: %v", fieldName, data)
+}
+
+/*
+Map takes a struct and inserts the field data of the record
+in the struct fields with an `fm`-tag matching the record field name.
+
+Example struct:
+```
+type example struct {
+	Name string `fm:"Name"`
+	Age int `fm:"Age"`
+}
+```
+
+- A pointer to the object must be passed (i.e `Record.Map(&obj)`).
+- Nested structs are allowed.
+
+Supported types:
+- string
+- int
+- int64
+- float64
+- bool
+*/
+func (r *Record) Map(obj interface{}) error {
+	v := reflect.Indirect(reflect.ValueOf(obj))
+	typeOfObj := v.Type()
+
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+
+		if !field.IsValid() || !field.CanSet() {
+			continue
+		}
+
+		tag := typeOfObj.Field(i).Tag.Get("fm")
+
+		fmt.Println("tag value", tag)
+
+		switch field.Interface().(type) {
+		case string:
+			val, err := r.String(tag)
+			if err != nil {
+				return err
+			}
+			field.SetString(val)
+		case int, int64:
+			val, err := r.Int64(tag)
+			if err != nil {
+				return err
+			}
+			field.SetInt(val)
+		case float64:
+			val, err := r.Float64(tag)
+			if err != nil {
+				return err
+			}
+			field.SetFloat(val)
+		case bool:
+			val, err := r.Bool(tag)
+			if err != nil {
+				return err
+			}
+			field.SetBool(val)
+		}
+	}
+
+	fmt.Println("obj", obj)
+	fmt.Println("record", r)
+
+	return nil
 }
