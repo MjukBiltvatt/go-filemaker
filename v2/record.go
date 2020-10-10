@@ -245,5 +245,16 @@ func (r *Record) Float32(fieldName string) (float32, error) {
 		return float32(val), nil
 	}
 
-	return 0, fmt.Errorf("field `%v` value is not of type int: %v", fieldName, data)
+	return 0, fmt.Errorf("field `%v` value is not of type float32: %v", fieldName, data)
+}
+
+//Float64 gets the data in the specified field and returns it as an float64
+func (r *Record) Float64(fieldName string) (float64, error) {
+	data := r.GetField(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return val, nil
+	}
+
+	return 0, fmt.Errorf("field `%v` value is not of type float64: %v", fieldName, data)
 }
