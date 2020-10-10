@@ -44,7 +44,7 @@ func (r *Record) GetField(fieldName string) interface{} {
 
 //Revert discards all uncommited changes made to the record
 func (r *Record) Revert() {
-	r.StagedChanges = map[string]interface{}{}
+	r.StagedChanges = make(map[string]interface{})
 }
 
 //Commit commits the changes made to the record using the same session the record was retrieved/created with
