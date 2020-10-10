@@ -327,7 +327,7 @@ type example struct {
 ```
 
 - A pointer to the object must be passed (i.e `Record.Map(&obj)`).
-- Nested structs are allowed.
+- Nested structs are not supported.
 
 Supported types:
 - string
