@@ -319,21 +319,27 @@ Map takes a struct and inserts the field data of the record
 in the struct fields with an `fm`-tag matching the record field name.
 
 Example struct:
-```
+`
 type example struct {
 	Name string `fm:"Name"`
 	Age int `fm:"Age"`
 }
-```
+`
 
 - A pointer to the object must be passed (i.e `Record.Map(&obj)`).
+
 - Nested structs are not supported.
 
 Supported types:
+
 - string
+
 - int
+
 - int64
+
 - float64
+
 - bool
 */
 func (r *Record) Map(obj interface{}) error {
