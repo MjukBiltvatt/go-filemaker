@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 )
 
@@ -124,6 +128,87 @@ func (r *Record) Commit() error {
 	for fieldName, value := range fieldData {
 		r.FieldData[fieldName] = value
 	}
+
+	return nil
+}
+
+//CommitFileToContainer commits the changes made to the record using the same session the record was retrieved/created with
+func (r *Record) CommitFileToContainer() error {
+	if len(r.StagedChanges) == 0 {
+		return nil
+	}
+
+	if r.ID == "" {
+		return r.Create()
+	}
+
+	// var fieldData = make(map[string]interface{})
+
+	// for fieldName, value := range r.StagedChanges {
+	// 	fieldData[fieldName] = value
+	// }
+
+	// var mimeData = struct {
+	// 	FieldData map[string]interface{} `multipart/form-data:"fieldData"`
+	// }{
+	// 	fieldData,
+	// }
+
+	// fmt.Printf(mimeData)
+
+	// fileDir, _ := os.Getwd()
+	// fileName := "7007.pdf"
+	// filePath := path.Join(fileDir, fileName)
+	file, _ := os.Open("/Users/mjuk/MJUK-APPAR/go-filemaker/v2/7007.pdf")
+
+	fmt.Println(file)
+	defer file.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, _ := writer.CreateFormFile("upload", filepath.Base(file.Name()))
+	// data := make([]byte, 100)
+	part.Write([]byte("Value"))
+	io.Copy(part, file)
+	writer.Close()
+
+	//Build and send request to the host
+	req, _ := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+"PDF_specifikation"+"/"+"1", body)
+	// req, _ := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+"PDF_specifikation"+"/"+"1", &body)
+	req.Header.Add("Content-Type", writer.FormDataContentType())
+	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Printf("ERROR: %v", err)
+	}
+	defer res.Body.Close()
+	// client := &http.Client{}
+
+	// client.Do(req)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to send PATCH request: %v", err.Error())
+	// }
+
+	//Read the body
+	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err.Error())
+	}
+
+	//Unmarshal json body
+	var jsonRes ResponseBody
+	err = json.Unmarshal(resBodyBytes, &jsonRes)
+	if err != nil {
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
+	}
+
+	if jsonRes.Messages[0].Code != "0" {
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+	}
+
+	// for fieldName, value := range fieldData {
+	// 	r.FieldData[fieldName] = value
+	// }
 
 	return nil
 }
