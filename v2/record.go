@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"mime/multipart"
 	"net/http"
 	"reflect"
 )
@@ -130,14 +131,22 @@ func (r *Record) Commit() error {
 }
 
 //CommitToContainer commits the specified bytes buffer to the specified container field in the record
-func (r *Record) CommitToContainer(fieldName string, buff bytes.Buffer) error {
+func (r *Record) CommitToContainer(fieldName string, b bytes.Buffer) error {
 	if r.ID == "" {
 		return errors.New("Record needs to be created first")
 	}
 
+	writer := multipart.NewWriter(&b)
+
+	if fw, err := writer.CreateFormField("upload"); err != nil {
+		return err
+	}
+
+	writer.Close()
+
 	//Build and send request to the host
-	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, &buff)
-	req.Header.Add("Content-Type", "multipart/form-data")
+	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, &b)
+	req.Header.Add("Content-Type", writer.FormDataContentType())
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
