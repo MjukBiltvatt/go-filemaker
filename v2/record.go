@@ -131,10 +131,6 @@ func (r *Record) Commit() error {
 
 //CommitToContainer commits the specified bytes buffer to the specified container field in the record
 func (r *Record) CommitToContainer(fieldName string, buff bytes.Buffer) error {
-	if len(r.StagedChanges) == 0 {
-		return nil
-	}
-
 	if r.ID == "" {
 		return errors.New("Record needs to be created first")
 	}
