@@ -3,6 +3,7 @@ package filemaker
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -124,6 +125,47 @@ func (r *Record) Commit() error {
 	for fieldName, value := range fieldData {
 		r.FieldData[fieldName] = value
 	}
+
+	return nil
+}
+
+//CommitToContainer commits the specified bytes buffer to the specified container field in the record
+func (r *Record) CommitToContainer(fieldName string, buff bytes.Buffer) error {
+	if len(r.StagedChanges) == 0 {
+		return nil
+	}
+
+	if r.ID == "" {
+		return errors.New("Record needs to be created first")
+	}
+
+	//Build and send request to the host
+	req, err := http.NewRequest("PATCH", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, buff)
+	req.Header.Add("Content-Type", "multipart/form-data")
+	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send PATCH request: %v", err.Error())
+	}
+
+	//Read the body
+	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err.Error())
+	}
+
+	//Unmarshal json body
+	var jsonRes ResponseBody
+	err = json.Unmarshal(resBodyBytes, &jsonRes)
+	if err != nil {
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
+	}
+
+	if jsonRes.Messages[0].Code != "0" {
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+	}
+
+	r.FieldData[fieldName] = buff
 
 	return nil
 }
