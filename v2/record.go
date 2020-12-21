@@ -136,12 +136,12 @@ func (r *Record) CommitToContainer(fieldName string, buff bytes.Buffer) error {
 	}
 
 	//Build and send request to the host
-	req, err := http.NewRequest("PATCH", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, &buff)
+	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, &buff)
 	req.Header.Add("Content-Type", "multipart/form-data")
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to send PATCH request: %v", err.Error())
+		return fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
 
 	//Read the body
