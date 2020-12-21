@@ -3,13 +3,13 @@ package filemaker
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
 	"reflect"
 )
 
@@ -132,62 +132,63 @@ func (r *Record) Commit() error {
 	return nil
 }
 
-//CommitFileToContainer commits the changes made to the record using the same session the record was retrieved/created with
-func (r *Record) CommitFileToContainer() error {
-	if len(r.StagedChanges) == 0 {
-		return nil
+//CommitToContainer commits the specified bytes buffer to the specified container field in the record
+func (r *Record) CommitToContainer(fieldName, path, fileName string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return errors.New("Could not read path")
 	}
-
 	if r.ID == "" {
-		return r.Create()
+		return errors.New("Record needs to be created first")
 	}
-
-	// var fieldData = make(map[string]interface{})
-
-	// for fieldName, value := range r.StagedChanges {
-	// 	fieldData[fieldName] = value
-	// }
-
-	// var mimeData = struct {
-	// 	FieldData map[string]interface{} `multipart/form-data:"fieldData"`
-	// }{
-	// 	fieldData,
-	// }
-
-	// fmt.Printf(mimeData)
-
-	// fileDir, _ := os.Getwd()
-	// fileName := "7007.pdf"
-	// filePath := path.Join(fileDir, fileName)
-	file, _ := os.Open("/Users/mjuk/MJUK-APPAR/go-filemaker/v2/7007.pdf")
-
-	fmt.Println(file)
-	defer file.Close()
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, _ := writer.CreateFormFile("upload", filepath.Base(file.Name()))
-	// data := make([]byte, 100)
-	part.Write([]byte("Value"))
-	io.Copy(part, file)
-	writer.Close()
+	part, err := writer.CreateFormFile("upload", file.Name())
+	if err != nil {
+		return err
+	}
+
+	// writer.WriteField("upload", part)
+	_, err = io.Copy(part, file)
+	if err != nil {
+		return err
+	}
+	// writer.WriteField("upload", buf.String())
+	// if err != nil {
+	// 	fmt.Println("ERROR: ", err)
+	// }
+
+	err = writer.Close()
+	if err != nil {
+		return err
+	}
+	// //Build and send request to the host
+	// req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, &buf)
+	// req.Header.Add("Content-Type", writer.FormDataContentType())
+	// req.Header.Add("Authorization", "Bearer "+r.Session.Token)
+	// // req.Form.Add("upload", buf.String())
+	// // req.Form.Add("upload", buf.String())
+	// res, err := http.DefaultClient.Do(req)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to send POST request: %v", err.Error())
+	// }
+
+	// var buf []byte
+	// b.Read(buf)
+	// fw.Write(buf)
+	// writer.Close()
 
 	//Build and send request to the host
-	req, _ := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+"PDF_specifikation"+"/"+"1", body)
-	// req, _ := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+"PDF_specifikation"+"/"+"1", &body)
-	req.Header.Add("Content-Type", writer.FormDataContentType())
+	// req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, &b)
+	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	// req.Header.Add("Content-Type", "multipart/form-data")
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		fmt.Printf("ERROR: %v", err)
+		return fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
-	defer res.Body.Close()
-	// client := &http.Client{}
-
-	// client.Do(req)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to send PATCH request: %v", err.Error())
-	// }
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
@@ -206,9 +207,7 @@ func (r *Record) CommitFileToContainer() error {
 		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
-	// for fieldName, value := range fieldData {
-	// 	r.FieldData[fieldName] = value
-	// }
+	r.FieldData[fieldName] = body
 
 	return nil
 }
@@ -404,7 +403,6 @@ func (r *Record) Bool(fieldName string) (bool, error) {
 /*
 Map takes a struct and inserts the field data of the record
 in the struct fields with an `fm`-tag matching the record field name.
-
 Example struct:
 `
 type example struct {
@@ -412,21 +410,13 @@ type example struct {
 	Age int `fm:"Age"`
 }
 `
-
 - A pointer to the object must be passed (i.e `Record.Map(&obj)`).
-
 - Nested structs are not supported.
-
 Supported types:
-
 - string
-
 - int
-
 - int64
-
 - float64
-
 - bool
 */
 func (r *Record) Map(obj interface{}) error {
