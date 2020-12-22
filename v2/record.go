@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"reflect"
 )
 
@@ -130,22 +132,25 @@ func (r *Record) Commit() error {
 	return nil
 }
 
-//CommitToContainer commits the specified bytes buffer to the specified container field in the record
-func (r *Record) CommitToContainer(fieldName string, b bytes.Buffer) error {
+//CommitToContainer commits the specified bytes buffer to the specified container field in the record. WORK IN PROGRESS.
+func (r *Record) CommitToContainer(fieldName string, dataBuf bytes.Buffer) error {
 	if r.ID == "" {
 		return errors.New("Record needs to be created first")
 	}
 
-	writer := multipart.NewWriter(&b)
-
-	if fw, err := writer.CreateFormField("upload"); err != nil {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	fw, err := writer.CreateFormField("upload")
+	if err != nil {
 		return err
 	}
-
+	var b []byte
+	dataBuf.Read(b)
+	fw.Write(b)
 	writer.Close()
 
 	//Build and send request to the host
-	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, &b)
+	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, &buf)
 	req.Header.Add("Content-Type", writer.FormDataContentType())
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
@@ -170,7 +175,77 @@ func (r *Record) CommitToContainer(fieldName string, b bytes.Buffer) error {
 		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
-	r.FieldData[fieldName] = buff
+	r.FieldData[fieldName] = buf
+
+	return nil
+}
+
+//CommitFileToContainer commits the specified file to specified container field in the record
+func (r *Record) CommitFileToContainer(fieldName, filepath string) error {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %v", err)
+	}
+
+	//Record is empty and not created yet
+	if r.ID == "" {
+		return errors.New("record needs to be created first")
+	}
+
+	//Create a body to write bytes to
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("upload", file.Name())
+	if err != nil {
+		return err
+	}
+
+	//Copy bytestream of file to multipart/form-data object
+	_, err = io.Copy(part, file)
+	if err != nil {
+		return err
+	}
+
+	//Close writer
+	err = writer.Close()
+	if err != nil {
+		return err
+	}
+
+	//Build and send request to the host
+	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send POST request: %v", err.Error())
+	}
+
+	//Read the body
+	resBody, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err.Error())
+	}
+
+	//Response will be empty if everything is fine, check for errors
+	if len(resBody) > 0 {
+		//Read the body
+		resBodyBytes, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %v", err.Error())
+		}
+
+		//Unmarshal json body
+		var jsonRes ResponseBody
+		err = json.Unmarshal(resBodyBytes, &jsonRes)
+		if err != nil {
+			return fmt.Errorf("failed to decode response body as json: %v", err.Error())
+		}
+
+		if jsonRes.Messages[0].Code != "0" {
+			return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+		}
+	}
 
 	return nil
 }
