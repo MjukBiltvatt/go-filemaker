@@ -132,8 +132,9 @@ func (r *Record) Commit() error {
 	return nil
 }
 
-//CommitFileToContainer commits the specified bytes buffer to the specified container field in the record
-func (r *Record) CommitFileToContainer(fieldName, path, fileName string) error {
+//CommitFileToContainer commits the specified file to specified container field in the record
+func (r *Record) CommitFileToContainer(fieldName, path string) error {
+
 	file, err := os.Open(path)
 	if err != nil {
 		return errors.New("Could not read path")
@@ -142,6 +143,7 @@ func (r *Record) CommitFileToContainer(fieldName, path, fileName string) error {
 		return errors.New("Record needs to be created first")
 	}
 
+	//Create a body to write bytes to
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile("upload", file.Name())
@@ -149,6 +151,7 @@ func (r *Record) CommitFileToContainer(fieldName, path, fileName string) error {
 		return err
 	}
 
+	//Copy bytestream of file to multipart/form-data object.
 	_, err = io.Copy(part, file)
 	if err != nil {
 		return err
@@ -161,6 +164,7 @@ func (r *Record) CommitFileToContainer(fieldName, path, fileName string) error {
 
 	//Build and send request to the host
 	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, body)
+	//Set Content-Type to the custom header containing field 'upload'
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
@@ -169,23 +173,15 @@ func (r *Record) CommitFileToContainer(fieldName, path, fileName string) error {
 	}
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBody, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
-	//Unmarshal json body
-	var jsonRes ResponseBody
-	err = json.Unmarshal(resBodyBytes, &jsonRes)
-	if err != nil {
-		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
+	//Response will be empty if everything is fine
+	if len(resBody) == 0 {
+		return nil
 	}
-
-	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
-	}
-
-	r.FieldData[fieldName] = jsonRes
 
 	return nil
 }
