@@ -141,12 +141,12 @@ func (r *Record) CommitToContainer(fieldName string, dataBuf bytes.Buffer) error
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	fw, err := writer.CreateFormFile("upload", "PDF")
+	fw, err := writer.CreateFormFile("upload", "file")
 	if err != nil {
 		return errors.New("failed to write to field 'upload'")
 	}
 
-	//Copy bytestream of file to multipart/form-data object
+	//Build multipart/form-data header for request
 	if _, err := io.Copy(fw, &dataBuf); err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func (r *Record) CommitToContainer(fieldName string, dataBuf bytes.Buffer) error
 
 	//Build and send request to the host
 	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, body)
-	cd := mime.FormatMediaType("attachment", map[string]string{"filename": "PDF"})
+	cd := mime.FormatMediaType("attachment", map[string]string{"filename": "file"})
 	req.Header.Set("Content-Disposition", cd)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
@@ -174,7 +174,7 @@ func (r *Record) CommitToContainer(fieldName string, dataBuf bytes.Buffer) error
 
 	// //Unmarshal json body
 	jsonRes := &ResponseBody{}
-	if err = json.Unmarshal(resBodyBytes, &jsonRes); err != nil {
+	if err := json.Unmarshal(resBodyBytes, &jsonRes); err != nil {
 		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
