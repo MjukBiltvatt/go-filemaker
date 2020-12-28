@@ -433,7 +433,7 @@ larger than `0` return `true` and `0` or below returns `false`.
 func (r *Record) Bool(fieldName string) (bool, error) {
 	data := r.GetField(fieldName)
 
-	if val, ok := data.(float64); ok {
+	if val, ok := data.(float64); ok || data == nil {
 		if val > 0 {
 			return true, nil
 		}
