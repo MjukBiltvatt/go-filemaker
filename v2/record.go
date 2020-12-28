@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strconv"
 )
 
 //Record interface for some magic with methods
@@ -348,11 +349,26 @@ The FileMaker database field needs to be a text field.
 func (r *Record) String(fieldName string) (string, error) {
 	data := r.GetField(fieldName)
 
-	if val, ok := data.(string); ok {
-		return val, nil
+	switch data.(type) {
+	case string:
+		return data.(string), nil
+	case int:
+		return strconv.FormatInt(int64(data.(int)), 10), nil
+	case int16:
+		return strconv.FormatInt(int64(data.(int16)), 10), nil
+	case int32:
+		return strconv.FormatInt(int64(data.(int32)), 10), nil
+	case int64:
+		return strconv.FormatInt(int64(data.(int64)), 10), nil
+	case float32:
+		return strconv.FormatFloat(float64(data.(float32)), 'f', -1, 32), nil
+	case float64:
+		return strconv.FormatFloat(data.(float64), 'f', -1, 64), nil
+	case nil:
+		return "", nil
 	}
 
-	return "", fmt.Errorf("field `%v` value is not of type string: %v", fieldName, data)
+	return "", fmt.Errorf("field `%v` could not be asserted as or converted to string: %v", fieldName, data)
 }
 
 /*
