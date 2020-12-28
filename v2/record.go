@@ -46,7 +46,7 @@ func (r *Record) SetField(fieldName string, value interface{}) {
 	case float32:
 		value = float64(value.(float32))
 	case float64:
-		value = float64(value.(float32))
+		value = float64(value.(float64))
 	case bool:
 		if value.(bool) {
 			value = float64(1)
