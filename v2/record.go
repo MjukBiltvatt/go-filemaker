@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -132,26 +133,33 @@ func (r *Record) Commit() error {
 	return nil
 }
 
-//CommitToContainer commits the specified bytes buffer to the specified container field in the record. WORK IN PROGRESS.
+//CommitToContainer commits the specified bytes buffer to the specified container field in the record.
 func (r *Record) CommitToContainer(fieldName string, dataBuf bytes.Buffer) error {
 	if r.ID == "" {
 		return errors.New("Record needs to be created first")
 	}
 
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	fw, err := writer.CreateFormField("upload")
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	fw, err := writer.CreateFormFile("upload", "file")
 	if err != nil {
+		return errors.New("failed to write to field 'upload'")
+	}
+
+	//Build multipart/form-data header for request
+	if _, err := io.Copy(fw, &dataBuf); err != nil {
 		return err
 	}
-	var b []byte
-	dataBuf.Read(b)
-	fw.Write(b)
-	writer.Close()
+
+	if err := writer.Close(); err != nil {
+		return err
+	}
 
 	//Build and send request to the host
-	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, &buf)
-	req.Header.Add("Content-Type", writer.FormDataContentType())
+	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, body)
+	cd := mime.FormatMediaType("attachment", map[string]string{"filename": "file"})
+	req.Header.Set("Content-Disposition", cd)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -164,18 +172,15 @@ func (r *Record) CommitToContainer(fieldName string, dataBuf bytes.Buffer) error
 		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
-	//Unmarshal json body
-	var jsonRes ResponseBody
-	err = json.Unmarshal(resBodyBytes, &jsonRes)
-	if err != nil {
+	// //Unmarshal json body
+	jsonRes := &ResponseBody{}
+	if err := json.Unmarshal(resBodyBytes, &jsonRes); err != nil {
 		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
 		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
-
-	r.FieldData[fieldName] = buf
 
 	return nil
 }
