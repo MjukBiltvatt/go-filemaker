@@ -449,10 +449,12 @@ larger than `0` return `true` and `0` or below returns `false`.
 func (r *Record) Bool(fieldName string) (bool, error) {
 	data := r.GetField(fieldName)
 
-	if val, ok := data.(float64); ok || data == nil {
-		if val > 0 {
-			return true, nil
-		}
+	switch data.(type) {
+	case string:
+		return len(data.(string)) > 0, nil
+	case float64:
+		return data.(float64) > 0, nil
+	case nil:
 		return false, nil
 	}
 
