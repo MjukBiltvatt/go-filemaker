@@ -126,10 +126,6 @@ func (r *Record) Commit() error {
 		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
-	for fieldName, value := range fieldData {
-		r.FieldData[fieldName] = value
-	}
-
 	return nil
 }
 
