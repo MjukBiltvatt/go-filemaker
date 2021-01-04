@@ -127,6 +127,7 @@ func (s *Session) PerformFind(layout string, findCommand interface{}) ([]Record,
 func (s *Session) CreateRecord(layout string) Record {
 	return Record{
 		Layout:        layout,
+		FieldData:     make(map[string]interface{}),
 		StagedChanges: make(map[string]interface{}),
 		Session:       s,
 	}
