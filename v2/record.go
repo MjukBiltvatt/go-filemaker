@@ -276,7 +276,7 @@ func (r *Record) Create() error {
 		return fmt.Errorf("failed to marshal request body: %v", err.Error())
 	}
 
-	//Build and send request to the host
+	//Build and send request to the host to create record
 	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records", bytes.NewBuffer(requestBody))
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
@@ -298,11 +298,44 @@ func (r *Record) Create() error {
 		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
+	//Check for errors in the response
 	if jsonRes.Messages[0].Code != "0" {
 		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
+	//Set the ID returned by the API
 	r.ID = jsonRes.Response.RecordID
+
+	//Build and send request to the host to get the default field data for the created record
+	req, err = http.NewRequest("GET", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID, bytes.NewBuffer([]byte{}))
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send GET request: %v", err.Error())
+	}
+
+	//Read the body
+	resBodyBytes, err = ioutil.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err.Error())
+	}
+
+	//Unmarshal json body
+	err = json.Unmarshal(resBodyBytes, &jsonRes)
+	if err != nil {
+		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
+	}
+
+	//Check for errors in the response
+	if jsonRes.Messages[0].Code != "0" {
+		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+	}
+
+	//Parse the field data for the record
+	for fieldname, val := range jsonRes.Response.Data[0].(map[string]interface{})["fieldData"].(map[string]interface{}) {
+		r.FieldData[fieldname] = val
+	}
 
 	return nil
 }
