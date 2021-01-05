@@ -83,16 +83,10 @@ func (r *Record) Commit() error {
 		return r.Create()
 	}
 
-	var fieldData = make(map[string]interface{})
-
-	for fieldName, value := range r.StagedChanges {
-		fieldData[fieldName] = value
-	}
-
 	var jsonData = struct {
 		FieldData map[string]interface{} `json:"fieldData"`
 	}{
-		fieldData,
+		r.StagedChanges,
 	}
 
 	//Create the request json body
@@ -127,7 +121,7 @@ func (r *Record) Commit() error {
 		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
 	}
 
-	for fieldName, value := range fieldData {
+	for fieldName, value := range r.StagedChanges {
 		r.FieldData[fieldName] = value
 	}
 
@@ -258,16 +252,10 @@ func (r *Record) CommitFileToContainer(fieldName, filepath string) error {
 
 //Create inserts the record into the database if it doesn't exist
 func (r *Record) Create() error {
-	var fieldData = make(map[string]interface{})
-
-	for fieldName, value := range r.StagedChanges {
-		fieldData[fieldName] = value
-	}
-
 	var jsonData = struct {
 		FieldData map[string]interface{} `json:"fieldData"`
 	}{
-		fieldData,
+		r.StagedChanges,
 	}
 
 	//Create the request json body
@@ -301,6 +289,11 @@ func (r *Record) Create() error {
 	//Check for errors in the response
 	if jsonRes.Messages[0].Code != "0" {
 		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+	}
+
+	//Update local record field data with staged changes
+	for fieldName, value := range r.StagedChanges {
+		r.FieldData[fieldName] = value
 	}
 
 	//Set the ID returned by the API
