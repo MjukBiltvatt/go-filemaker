@@ -150,6 +150,16 @@ if err != nil {
 }
 ```
 
+### Commit file or byte buffer to container field
+Container fields are a little bit different from normal fields, so we can't simply set the container field data and commit it with the rest of the record data. We instead need to commit the container field data seperately. The record must already be committed or be the result of a find command. An error will be returned if attempting this before committing a newly created record.
+``` go
+//Commit a byte buffer
+err := record.CommitToContainer("fieldname", "filename.pdf", buf)
+
+//Commit a file, the contents will be copied
+err := record.CommitFileToContainer("fieldname", "/path/to/my/file.pdf")
+```
+
 ### Get field data
 
 #### String
