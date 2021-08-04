@@ -1,4 +1,4 @@
-go-filemaker is a simple Go wrapper for the [FileMaker Data API](https://fmhelp.filemaker.com/docs/18/en/dataapi), inspired by the FileMaker PHP API.
+go-filemaker is a simple Go wrapper for the [FileMaker Data API](https://fmhelp.filemaker.com/docs/18/en/dataapi), inspired by the FileMaker PHP API. See the source code [here](https://github.com/jomla97/go-filemaker)].
 
 # Getting started
 
@@ -223,3 +223,5 @@ fmt.Println(myPerson) //Output: {  0}
 record.Map(&myPerson)
 fmt.Println(myPerson) //Output: {Test Testsson 23}
 ```
+
+Author: Johannes Nyman - <https://jomla97.github.io>
