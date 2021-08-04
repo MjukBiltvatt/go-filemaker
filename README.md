@@ -1,1 +1,1 @@
-# [The documentation can be found here. Click me!](https://jomla97.github.io/go-filemaker/).
+# [The documentation can be found here. Click me!](https://jomla97.github.io/go-filemaker/)
