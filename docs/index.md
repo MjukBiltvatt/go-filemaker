@@ -1,4 +1,3 @@
-# A complete Go wrapper for FileMaker
 go-filemaker is a simple Go wrapper for the [FileMaker Data API](https://fmhelp.filemaker.com/docs/18/en/dataapi), inspired by the FileMaker PHP API.
 
 # Getting started
