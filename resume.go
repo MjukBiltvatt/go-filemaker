@@ -1,7 +1,7 @@
 package filemaker
 
 import (
-	"github.com/jomla97/go-filemaker/pkg/session"
+	"github.com/MjukBiltvatt/go-filemaker/pkg/session"
 )
 
 //Resume resumes a database session with the specified token
