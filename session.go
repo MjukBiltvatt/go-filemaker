@@ -103,8 +103,8 @@ func (s *Session) Destroy() error {
 	return nil
 }
 
-//PerformFind performs the specified findcommand on the specified layout
-func (s *Session) PerformFind(layout string, findCommand interface{}) ([]Record, error) {
+//Find performs the specified findcommand on the specified layout
+func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error) {
 	if layout == "" {
 		return nil, errors.New("No layout specified")
 	}
