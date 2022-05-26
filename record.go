@@ -545,45 +545,51 @@ func (r *Record) Bool(fieldName string) bool {
 
 /*
 TimeE gets the data in the specified field and attempts to parse it as a `time.Time` object
-and returns any errors that occur
+and returns any errors that occur. Location is only used when parsing strings (text, date, timestamp fields),
+in case of number fields it will be parsed as unix (UTC).
 */
-func (r Record) TimeE(fieldName string) (time.Time, error) {
+func (r Record) TimeE(fieldName string, loc *time.Location) (time.Time, error) {
 	data := r.String(fieldName)
 
 	//Attempt to parse as timestamp in format MM/dd/yyyy HH:mm:ss
 	if match, err := regexp.MatchString(`^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$`, data); err != nil {
 		return time.Time{}, err
 	} else if match {
-		return time.ParseInLocation("01/02/2006 15:04:05", data, time.Local)
+		return time.ParseInLocation("01/02/2006 15:04:05", data, loc)
 	}
 
 	//Attempt to parse as date in format MM/dd/yyyy
 	if match, err := regexp.MatchString(`^\d{2}\/\d{2}\/\d{4}$`, data); err != nil {
 		return time.Time{}, err
 	} else if match {
-		return time.ParseInLocation("01/02/2006", data, time.Local)
+		return time.ParseInLocation("01/02/2006", data, loc)
 	}
 
 	//Attempt to parse as timestamp in format yyyy-MM-dd HH:mm:ss
 	if match, err := regexp.MatchString(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`, data); err != nil {
 		return time.Time{}, err
 	} else if match {
-		return time.ParseInLocation("2006-01-02 15:04:05", data, time.Local)
+		return time.ParseInLocation("2006-01-02 15:04:05", data, loc)
 	}
 
 	//Attempt to parse as date in format yyyy-MM-dd
 	if match, err := regexp.MatchString(`^\d{4}-\d{2}-\d{2}$`, data); err != nil {
 		return time.Time{}, err
 	} else if match {
-		return time.ParseInLocation("2006-01-02", data, time.Local)
+		return time.ParseInLocation("2006-01-02", data, loc)
+	}
+
+	//Attempt to parse number as unix
+	if reflect.ValueOf(r.Get(fieldName)).Kind() == reflect.Float64 {
+		return time.Unix(r.Int64(fieldName), 0).UTC(), nil
 	}
 
 	return time.Time{}, ErrUnknownFormat
 }
 
 //Time gets the data in the specified field and attempts to parse it as a `time.Time` object.
-func (r *Record) Time(fieldName string) time.Time {
-	t, _ := r.TimeE(fieldName)
+func (r *Record) Time(fieldName string, loc *time.Location) time.Time {
+	t, _ := r.TimeE(fieldName, loc)
 	return t
 }
 
@@ -625,7 +631,7 @@ Supported types:
 
 - time.Time (date and timestamp fields)
 */
-func (r *Record) Map(obj interface{}) {
+func (r *Record) Map(obj interface{}, timeLoc *time.Location) {
 	v := reflect.ValueOf(obj).Elem()
 
 	//Loop through all struct fields
@@ -651,7 +657,7 @@ func (r *Record) Map(obj interface{}) {
 		case bool:
 			field.SetBool(r.Bool(tag))
 		case time.Time:
-			field.Set(reflect.ValueOf(r.Time(tag)))
+			field.Set(reflect.ValueOf(r.Time(tag, timeLoc)))
 		}
 	}
 }

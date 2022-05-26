@@ -253,9 +253,14 @@ val := record.Bool("field name")
 ```
 
 #### Time
-*The FileMaker database field needs to be of type text, date or timestamp.*
 
-Will attempt to parse field value into a `time.Time` object.
+Will attempt to parse field value into a `time.Time` object. Supported formats:
+
+- `01/02/2006`
+- `01/02/2006 15:04:05`
+- `2006-01-02`
+- `2006-01-02 15:04:05`
+- Number (unix)
 
 ``` go
 val := record.Time("field name")
