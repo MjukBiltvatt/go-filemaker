@@ -12,6 +12,7 @@ func newTestRecord() Record {
 			"recordId": "recordId",
 			"fieldData": map[string]interface{}{
 				"string":              "string",
+				"string_2":            "string2",
 				"int":                 float64(100),
 				"int8":                float64(8),
 				"int16":               float64(16),
@@ -30,6 +31,7 @@ func newTestRecord() Record {
 				"timestamp_1":         "01/02/2006 15:04:05",
 				"timestamp_2":         "2006-01-02 15:04:05",
 				"time_invalid":        "january 1 2006 15 pm",
+				"related::string":     "related",
 			},
 		},
 		Session{
@@ -62,6 +64,12 @@ type testRecordStruct struct {
 	Timestamp1       time.Time `fm:"timestamp_1"`
 	Timestamp2       time.Time `fm:"timestamp_2"`
 	TimeInvalid      time.Time `fm:"time_invalid"`
+	Nested           struct {
+		String string `fm:"related::string"`
+		Nested struct {
+			String string `fm:"string_2"`
+		}
+	}
 }
 
 //TestRecordMap tests the `Record.Map` method
@@ -222,6 +230,22 @@ func TestRecordMap(t *testing.T) {
 	t.Run("time_invalid", func(t *testing.T) {
 		got := value.TimeInvalid
 		expect := time.Time{}
+		if got != expect {
+			t.Errorf("got: %v, expected: %v", got, expect)
+		}
+	})
+
+	t.Run("nested_related_string", func(t *testing.T) {
+		got := value.Nested.String
+		expect := "related"
+		if got != expect {
+			t.Errorf("got: %v, expected: %v", got, expect)
+		}
+	})
+
+	t.Run("nested_nested_string", func(t *testing.T) {
+		got := value.Nested.Nested.String
+		expect := "string2"
 		if got != expect {
 			t.Errorf("got: %v, expected: %v", got, expect)
 		}
