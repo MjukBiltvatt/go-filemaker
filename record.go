@@ -545,8 +545,7 @@ func (r *Record) Bool(fieldName string) bool {
 
 /*
 TimeE gets the data in the specified field and attempts to parse it as a `time.Time` object
-and returns any errors that occur. Location is only used when parsing strings (text, date, timestamp fields),
-in case of number fields it will be parsed as unix (UTC).
+and returns any errors that occur.
 */
 func (r Record) TimeE(fieldName string, loc *time.Location) (time.Time, error) {
 	data := r.String(fieldName)
@@ -577,11 +576,6 @@ func (r Record) TimeE(fieldName string, loc *time.Location) (time.Time, error) {
 		return time.Time{}, err
 	} else if match {
 		return time.ParseInLocation("2006-01-02", data, loc)
-	}
-
-	//Attempt to parse number as unix
-	if reflect.ValueOf(r.Get(fieldName)).Kind() == reflect.Float64 {
-		return time.Unix(r.Int64(fieldName), 0).UTC(), nil
 	}
 
 	return time.Time{}, ErrUnknownFormat

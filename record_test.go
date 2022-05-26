@@ -30,7 +30,6 @@ func newTestRecord() Record {
 				"timestamp_1":         "01/02/2006 15:04:05",
 				"timestamp_2":         "2006-01-02 15:04:05",
 				"time_invalid":        "january 1 2006 15 pm",
-				"unix_time":           float64(1136214245),
 			},
 		},
 		Session{
@@ -63,7 +62,6 @@ type testRecordStruct struct {
 	Timestamp1       time.Time `fm:"timestamp_1"`
 	Timestamp2       time.Time `fm:"timestamp_2"`
 	TimeInvalid      time.Time `fm:"time_invalid"`
-	UnixTime         time.Time `fm:"unix_time"`
 }
 
 //TestRecordMap tests the `Record.Map` method
@@ -215,14 +213,6 @@ func TestRecordMap(t *testing.T) {
 
 	t.Run("timestamp_2", func(t *testing.T) {
 		got := value.Timestamp2
-		expect := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
-
-	t.Run("unix_time", func(t *testing.T) {
-		got := value.UnixTime
 		expect := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
 		if got != expect {
 			t.Errorf("got: %v, expected: %v", got, expect)
