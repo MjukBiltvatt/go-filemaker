@@ -364,21 +364,35 @@ func (r *Record) Delete() error {
 	return nil
 }
 
-/*
-String gets the data in the specified field and returns it as a string.
-The FileMaker database field needs to be a text field.
-*/
-func (r *Record) String(fieldName string) string {
+//StringE behaves like String but returns ErrNotString if the value is not a string.
+func (r Record) StringE(fieldName string) (string, error) {
 	data := r.Get(fieldName)
 
-	switch data.(type) {
-	case string:
-		return data.(string)
-	case nil:
-		return ""
+	if reflect.ValueOf(data).Kind() == reflect.String {
+		return data.(string), nil
 	}
 
-	return ""
+	return "", ErrNotString
+}
+
+/*
+String gets the data in the specified field and returns it as a string.
+The FileMaker database field needs to be a text field. Ignores any errors.
+*/
+func (r Record) String(fieldName string) string {
+	s, _ := r.StringE(fieldName)
+	return s
+}
+
+//IntE behaves like Int but returns ErrNotNumber if the value is not a number.
+func (r Record) IntE(fieldName string) (int, error) {
+	data := r.Get(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return int(val), nil
+	}
+
+	return 0, ErrNotNumber
 }
 
 /*
@@ -386,13 +400,19 @@ Int gets the data in the specified field and returns it as an int.
 The FileMaker database field needs to be a number field.
 */
 func (r *Record) Int(fieldName string) int {
+	i, _ := r.IntE(fieldName)
+	return i
+}
+
+//Int32E behaves like Int32 but returns ErrNotNumber if the value is not a number.
+func (r Record) Int32E(fieldName string) (int32, error) {
 	data := r.Get(fieldName)
 
 	if val, ok := data.(float64); ok {
-		return int(val)
+		return int32(val), nil
 	}
 
-	return 0
+	return 0, ErrNotNumber
 }
 
 /*
@@ -400,13 +420,19 @@ Int32 gets the data in the specified field and returns it as an int32.
 The FileMaker database field needs to be a number field.
 */
 func (r *Record) Int32(fieldName string) int32 {
+	i, _ := r.Int32E(fieldName)
+	return i
+}
+
+//Int64E behaves like Int64 but returns ErrNotNumber if the value is not a number.
+func (r Record) Int64E(fieldName string) (int64, error) {
 	data := r.Get(fieldName)
 
 	if val, ok := data.(float64); ok {
-		return int32(val)
+		return int64(val), nil
 	}
 
-	return 0
+	return 0, ErrNotNumber
 }
 
 /*
@@ -414,13 +440,19 @@ Int64 gets the data in the specified field and returns it as an int64.
 The FileMaker database field needs to be a number field.
 */
 func (r *Record) Int64(fieldName string) int64 {
+	i, _ := r.Int64E(fieldName)
+	return i
+}
+
+//Float32E behaves like Float32 but returns ErrNotNumber if the value is not a number.
+func (r Record) Float32E(fieldName string) (float32, error) {
 	data := r.Get(fieldName)
 
 	if val, ok := data.(float64); ok {
-		return int64(val)
+		return float32(val), nil
 	}
 
-	return 0
+	return 0, ErrNotNumber
 }
 
 /*
@@ -428,13 +460,19 @@ Float32 gets the data in the specified field and returns it as an float32.
 The FileMaker database field needs to be a number field.
 */
 func (r *Record) Float32(fieldName string) float32 {
+	i, _ := r.Float32E(fieldName)
+	return i
+}
+
+//Float64E behaves like Float64 but returns ErrNotNumber if the value is not a number.
+func (r Record) Float64E(fieldName string) (float64, error) {
 	data := r.Get(fieldName)
 
 	if val, ok := data.(float64); ok {
-		return float32(val)
+		return val, nil
 	}
 
-	return 0
+	return 0, ErrNotNumber
 }
 
 /*
@@ -442,13 +480,8 @@ Float64 gets the data in the specified field and returns it as an float64.
 The FileMaker database field needs to be a number field.
 */
 func (r *Record) Float64(fieldName string) float64 {
-	data := r.Get(fieldName)
-
-	if val, ok := data.(float64); ok {
-		return val
-	}
-
-	return 0
+	i, _ := r.Float64E(fieldName)
+	return i
 }
 
 /*
@@ -469,21 +502,28 @@ func (r *Record) Bool(fieldName string) bool {
 	return false
 }
 
-//Time gets the data in the specified field and attempts to parse it as a `time.Time` object.
-func (r *Record) Time(fieldName string) time.Time {
+/*
+TimeE gets the data in the specified field and attempts to parse it as a `time.Time` object
+and returns any errors that occur
+*/
+func (r Record) TimeE(fieldName string) (time.Time, error) {
 	data := r.String(fieldName)
 
 	if len(data) == 19 {
 		//Attempt to parse as timestamp
-		t, _ := time.ParseInLocation("01/02/2006 15:04:05", data, time.Local)
-		return t
+		return time.ParseInLocation("01/02/2006 15:04:05", data, time.Local)
 	} else if len(data) == 10 {
 		//Attempt to parse as date
-		t, _ := time.ParseInLocation("01/02/2006", data, time.Local)
-		return t
+		return time.ParseInLocation("01/02/2006", data, time.Local)
 	}
 
-	return time.Time{}
+	return time.Time{}, errors.New("could not determine format")
+}
+
+//Time gets the data in the specified field and attempts to parse it as a `time.Time` object.
+func (r *Record) Time(fieldName string) time.Time {
+	t, _ := r.TimeE(fieldName)
+	return t
 }
 
 /*
