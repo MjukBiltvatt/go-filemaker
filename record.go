@@ -404,6 +404,46 @@ func (r *Record) Int(fieldName string) int {
 	return i
 }
 
+//Int8E behaves like Int8 but returns ErrNotNumber if the value is not a number.
+func (r Record) Int8E(fieldName string) (int8, error) {
+	data := r.Get(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return int8(val), nil
+	}
+
+	return 0, ErrNotNumber
+}
+
+/*
+Int8 gets the data in the specified field and returns it as an int8.
+The FileMaker database field needs to be a number field.
+*/
+func (r *Record) Int8(fieldName string) int8 {
+	i, _ := r.Int8E(fieldName)
+	return i
+}
+
+//Int16E behaves like Int16 but returns ErrNotNumber if the value is not a number.
+func (r Record) Int16E(fieldName string) (int16, error) {
+	data := r.Get(fieldName)
+
+	if val, ok := data.(float64); ok {
+		return int16(val), nil
+	}
+
+	return 0, ErrNotNumber
+}
+
+/*
+Int16 gets the data in the specified field and returns it as an int16.
+The FileMaker database field needs to be a number field.
+*/
+func (r *Record) Int16(fieldName string) int16 {
+	i, _ := r.Int16E(fieldName)
+	return i
+}
+
 //Int32E behaves like Int32 but returns ErrNotNumber if the value is not a number.
 func (r Record) Int32E(fieldName string) (int32, error) {
 	data := r.Get(fieldName)
