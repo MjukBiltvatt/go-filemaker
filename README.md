@@ -5,7 +5,7 @@ go-filemaker is a simple Go (Golang) wrapper for the [FileMaker Data API](https:
 ## Installation
 ```
 go mod init github.com/my/repo
-go get github.com/MjukBiltvatt/go-filemaker/v2
+go get github.com/MjukBiltvatt/go-filemaker/v3
 ```
 
 ## Importing
@@ -21,22 +21,6 @@ if err != nil {
   return
 }
 defer fm.Destroy()
-```
-## Resuming a session
-A session can be resumed as long as it hasn't been destroyed. All that's needed in addition to all parameters in `New()` is the session token string.
-``` go
-fm, err := filemaker.New("https://example.com", "database", "username", "password")
-if err != nil {
-  fmt.Println("Error:", err.Error())
-  return
-}
-token := fm.Token
-
-fmResumed, err := filemaker.Resume("https://example.com", "database", "username", "password", token)
-if err != nil {
-  fmt.Println("Error:", err.Error())
-  return
-}
 ```
 
 ## Perform find

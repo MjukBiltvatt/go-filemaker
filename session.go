@@ -13,7 +13,6 @@ import (
 //Session is used for subsequent requests to the host
 type Session struct {
 	Token    string
-	Protocol string
 	Host     string
 	Database string
 	Username string
@@ -42,18 +41,36 @@ type ResponseBody struct {
 	} `json:"response"`
 }
 
+//baseURL builds the base of the data API URL, containing protocol, host and database
+func (s Session) baseURL() string {
+	return fmt.Sprintf(
+		"%s/fmi/data/v1/databases/%s",
+		s.Host,
+		s.Database,
+	)
+}
+
+//recordsURL builds a data API URL used to access record(s)
+func (s Session) recordsURL(layout, id string) string {
+	base := fmt.Sprintf(
+		"%s/layouts/%s/records",
+		s.baseURL(),
+		layout,
+	)
+
+	if id == "" {
+		return base
+	}
+
+	return fmt.Sprintf("%s/%s", base, id)
+}
+
 //Destroy logs out of the database session
 func (s *Session) Destroy() error {
 	//Build and send request to the host
 	req, err := http.NewRequest(
 		"DELETE",
-		fmt.Sprintf(
-			"%s%s/fmi/data/v1/databases/%s/sessions/%s",
-			s.Protocol,
-			s.Host,
-			s.Database,
-			s.Token,
-		),
+		fmt.Sprintf("%s/sessions/%s", s.baseURL(), s.Token),
 		bytes.NewBuffer([]byte{}),
 	)
 	req.Header.Add("Content-Type", "application/json")
@@ -101,13 +118,7 @@ func (s *Session) PerformFind(layout string, findCommand interface{}) ([]Record,
 	//Build and send request to the host
 	req, err := http.NewRequest(
 		"POST",
-		fmt.Sprintf(
-			"%s%s/fmi/data/v1/databases/%s/layouts/%s/_find",
-			s.Protocol,
-			s.Host,
-			s.Database,
-			layout,
-		),
+		fmt.Sprintf("%s/layouts/%s/_find", s.baseURL(), layout),
 		bytes.NewBuffer(requestBody),
 	)
 	req.Header.Add("Content-Type", "application/json")
@@ -163,7 +174,7 @@ func (s *Session) NewRecord(layout string) Record {
 }
 
 //New starts a database session
-func New(host string, database string, username string, password string) (*Session, error) {
+func New(host, database, username, password string) (*Session, error) {
 	if host == "" {
 		return nil, errors.New("No host specified")
 	} else if database == "" {
@@ -179,15 +190,14 @@ func New(host string, database string, username string, password string) (*Sessi
 	}
 
 	//Determine protocol scheme
-	var protocol = "https://"
-	if len(host) >= 8 && host[:8] == "https://" {
-		protocol = ""
+	if len(host) < 8 || host[:8] != "https://" {
+		host = fmt.Sprintf("https://%s", host)
 	}
 
 	//Build and send request to the host
 	req, err := http.NewRequest(
 		"POST",
-		protocol+host+"/fmi/data/v1/databases/"+database+"/sessions",
+		fmt.Sprintf("%s/fmi/data/v1/databases/%s/sessions", host, database),
 		bytes.NewBuffer(requestBody),
 	)
 	req.Header.Add("Content-Type", "application/json")
@@ -213,6 +223,7 @@ func New(host string, database string, username string, password string) (*Sessi
 		return nil, fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
+	//Check the response code
 	if jsonRes.Messages[0].Code != "0" {
 		return nil, fmt.Errorf(
 			"failed at host: %v (%v)",
@@ -223,7 +234,6 @@ func New(host string, database string, username string, password string) (*Sessi
 
 	return &Session{
 		Token:    jsonRes.Response.Token,
-		Protocol: protocol,
 		Host:     host,
 		Database: database,
 		Username: username,

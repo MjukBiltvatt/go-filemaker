@@ -100,14 +100,7 @@ func (r *Record) Commit() error {
 	//Build and send request to the host
 	req, err := http.NewRequest(
 		"PATCH",
-		fmt.Sprintf(
-			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records/%s",
-			r.Session.Protocol,
-			r.Session.Host,
-			r.Session.Database,
-			r.Layout,
-			r.ID,
-		),
+		r.Session.recordsURL(r.Layout, r.ID),
 		bytes.NewBuffer(requestBody),
 	)
 	req.Header.Add("Content-Type", "application/json")
@@ -171,12 +164,8 @@ func (r *Record) CommitToContainer(fieldName, filename string, dataBuf bytes.Buf
 	req, err := http.NewRequest(
 		"POST",
 		fmt.Sprintf(
-			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records/%s/containers/%s",
-			r.Session.Protocol,
-			r.Session.Host,
-			r.Session.Database,
-			r.Layout,
-			r.ID,
+			"%s/containers/%s",
+			r.Session.recordsURL(r.Layout, r.ID),
 			fieldName,
 		),
 		body,
@@ -249,13 +238,7 @@ func (r *Record) Create() error {
 	//Build and send request to the host to create record
 	req, err := http.NewRequest(
 		"POST",
-		fmt.Sprintf(
-			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records",
-			r.Session.Protocol,
-			r.Session.Host,
-			r.Session.Database,
-			r.Layout,
-		),
+		r.Session.recordsURL(r.Layout, ""),
 		bytes.NewBuffer(requestBody),
 	)
 	req.Header.Add("Content-Type", "application/json")
@@ -298,14 +281,7 @@ func (r *Record) Create() error {
 	//Build and send request to the host to get the default field data for the created record
 	req, err = http.NewRequest(
 		"GET",
-		fmt.Sprintf(
-			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records/%s",
-			r.Session.Protocol,
-			r.Session.Host,
-			r.Session.Database,
-			r.Layout,
-			r.ID,
-		),
+		r.Session.recordsURL(r.Layout, r.ID),
 		bytes.NewBuffer([]byte{}),
 	)
 	req.Header.Add("Content-Type", "application/json")
@@ -349,14 +325,7 @@ func (r *Record) Delete() error {
 	//Build and send request to the host
 	req, err := http.NewRequest(
 		"DELETE",
-		fmt.Sprintf(
-			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records/%s",
-			r.Session.Protocol,
-			r.Session.Host,
-			r.Session.Database,
-			r.Layout,
-			r.ID,
-		),
+		r.Session.recordsURL(r.Layout, r.ID),
 		bytes.NewBuffer([]byte{}),
 	)
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
@@ -368,7 +337,7 @@ func (r *Record) Delete() error {
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read respones body: %v", err.Error())
+		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
 
 	//Unmarshal json body
@@ -378,6 +347,7 @@ func (r *Record) Delete() error {
 		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
 	}
 
+	//Check response code
 	if jsonRes.Messages[0].Code != "0" {
 		return fmt.Errorf(
 			"failed at host: %v (%v)",
@@ -540,15 +510,19 @@ Supported types:
 func (r *Record) Map(obj interface{}) {
 	v := reflect.ValueOf(obj).Elem()
 
+	//Loop through all struct fields
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
 
+		//Skip the field if it cannot be set
 		if !field.IsValid() || !field.CanSet() {
 			continue
 		}
 
+		//Get the `fm` tag of the field
 		tag := v.Type().Field(i).Tag.Get("fm")
 
+		//Set the struct field value depending on the underlying type
 		switch field.Interface().(type) {
 		case string:
 			field.SetString(r.String(tag))
@@ -560,8 +534,10 @@ func (r *Record) Map(obj interface{}) {
 			field.SetBool(r.Bool(tag))
 		case time.Time:
 			if t, err := time.ParseInLocation("01/02/2006 15:04:05", r.String(tag), time.Local); err == nil {
+				//Time object parsed from timestamp
 				field.Set(reflect.ValueOf(t))
 			} else if t, err := time.ParseInLocation("01/02/2006", r.String(tag), time.Local); err == nil {
+				//Time object parsed from date
 				field.Set(reflect.ValueOf(t))
 			}
 		}
