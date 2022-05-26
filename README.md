@@ -12,7 +12,7 @@ go get github.com/MjukBiltvatt/go-filemaker/v3
 ## Importing
 
 ``` go
-import "github.com/MjukBiltvatt/go-filemaker/v2"
+import "github.com/MjukBiltvatt/go-filemaker/v3"
 ```
 
 ## Quickstart
