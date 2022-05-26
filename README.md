@@ -3,45 +3,65 @@ go-filemaker is a simple Go (Golang) wrapper for the [FileMaker Data API](https:
 # Getting started
 
 ## Installation
+
 ```
 go mod init github.com/my/repo
 go get github.com/MjukBiltvatt/go-filemaker/v3
 ```
 
 ## Importing
+
 ``` go
 import "github.com/MjukBiltvatt/go-filemaker/v2"
 ```
 
-## Starting/destroying session
-``` go
-fm, err := filemaker.New("https://example.com", "database", "username", "password")
-if err != nil {
-  fmt.Println("Error:", err.Error())
-  return
-}
-defer fm.Destroy()
-```
+## Quickstart
+***By default the returned records limit is 100.*** This can however be controlled with [Limit](#limit).
 
-## Perform find
 ``` go
-command := filemaker.NewFindCommand(
-  filemaker.NewFindRequest(
-    filemaker.NewFindCriterion("fieldname", "=matchthis"),
-    //... more criterions go here
-  ),
-  //... more requests go here
+//Create a session
+fm, err := filemaker.New(
+  "https://my.host.com",
+  "database",
+  "username",
+  "password",
 )
-
-records, err := fm.PerformFind("layoutname", command)
+//Handle any errors
 if err != nil {
-  fmt.Println("Error:", err.Error())
+  fmt.Printf("Failed to start session: %s", err.Error())
+  return
+}
+//Destroy the session when we're done with it
+defer fm.Destroy()
+
+//Perform find command
+records, err := fm.PerformFind(
+  "layoutname",
+  filemaker.NewFindCommand(
+    filemaker.NewFindRequest(
+      filemaker.NewFindCriterion("Firstname", "Mark"),
+      filemaker.NewFindCriterion("HasCat", ".."),
+      filemaker.NewFindCriterion("Age", "*"),
+    ),
+    filemaker.NewFindRequest(
+      filemaker.NewFindCriterion("Lastname", "==Johnson"),
+    ).Omit()
+  ).Limit(10)
+)
+//Handle any errors
+if err != nil {
+  fmt.Printf("Failed to perform find: %s", err.Error())
   return
 }
 
+//Evaluate result
 if len(records) > 0 {
   for _, record := range records {
-    fmt.Println(record.GetField("fieldname").(string))
+    fmt.Printf(
+      "%s is %d years old.",
+      record.String("Firstname"),
+      record.Int("Age"),
+    )
   }
 } else {
   fmt.Println("No records found")
@@ -50,6 +70,9 @@ if len(records) > 0 {
 
 ### FindCommand
 While being able to pass findrequests into the `NewFindCommand` method, they can also be added to the findcommand after instantiation.
+
+***By default the limit is 100.***
+
 ``` go
 command := filemaker.NewFindCommand()
 command.AddRequest(request)
@@ -57,153 +80,217 @@ command.AddRequest(request)
 
 ### FindRequest
 While being able to pass findcriterions into the `NewFindRequest` method, they can also be added to the findrequest after instantiation.
+
 ``` go
 request := filemaker.NewFindRequest()
 request.AddCriterion(criterion)
 ```
 
 ### Omit
+Omit any records that match the find request.
+
 ``` go
 command := filemaker.NewFindCommand(
   filemaker.NewFindRequest(
-    filemaker.NewFindCriterion("fieldname", "somethinglikethis"),
+    filemaker.NewFindCriterion("field name", "somethinglikethis"),
   ),
   filemaker.NewFindRequest(
-    filemaker.NewFindCriterion("otherfieldname", "=notsomethinglikethis"),
+    filemaker.NewFindCriterion("otherfieldname", "notsomethinglikethis"),
   ).Omit(), //Omit request
 )
 ```
 
 ### Limit
+Will limit the number of records returned from a find command.
+
+***By default the limit is 100.***
+
 ``` go
 command := filemaker.NewFindCommand(
   //...
-).SetLimit(10)
+).Limit(10)
 ```
 
 ### Offset
+Will offset the records returned from a find command.
+
 ``` go
 command := filemaker.NewFindCommand(
   //...
-).SetOffset(10)
+).Offset(10)
 ```
 
 ### Limit and offset (chaining)
+Both of these can be chained, allowing them to be used directly in the `PerformFind` method.
+
 ``` go
-command := filemaker.NewFindCommand(
-  //...
-).SetLimit(10).SetOffset(10)
+records, err := fm.PerformFind(
+  "layout name",
+  filemaker.NewFindCommand(
+    //...
+  ).Limit(10).Offset(10)
+)
 ```
 
 ## Records
 
 ### Create
+
 ``` go
-record := fm.CreateRecord("layoutname")
-record.SetField("fieldname", "data")
+//Create a new empty record for the specified layout
+record := fm.CreateRecord("layout name")
 
+//Set field data
+record.Set("field name", "data")
+
+//Create the record
 err := record.Commit()
-if err != nil {
-  //... handle error
-}
 
-fmt.Println("Record ID:", record.ID) //Record now contains an ID
+//Record now contains an ID
+fmt.Println("Record ID:", record.ID)
 ```
 
 ### Edit
-``` go
-record.SetField("fieldname", "new data")
 
+``` go
+//Set field data
+record.Set("field name", "new data")
+
+//Commit changes
 err := record.Commit()
-if err != nil {
-  //... handle error
-}
 ```
 
 ### Revert uncommitted changes
+
 ``` go
-record.SetField("fieldname", "new data")
-record.Revert()
+//Set field data
+record.Set("field name", "new data")
+
+//Reset the record
+record.Reset()
 ```
 
 ### Delete
+
 ``` go
 err := record.Delete()
-if err != nil {
-  //... handle error
-}
 ```
 
 ### Commit file or byte buffer to container field
 Container fields are a little bit different from normal fields, so we can't simply set the container field data and commit it with the rest of the record data. We instead need to commit the container field data seperately. The record must already be committed or be the result of a find command. An error will be returned if attempting this before committing a newly created record.
+
 ``` go
 //Commit a byte buffer
-err := record.CommitToContainer("fieldname", "filename.pdf", buf)
+err := record.CommitToContainer("field name", "filename.pdf", buf)
 
 //Commit a file, the contents will be copied
-err := record.CommitFileToContainer("fieldname", "/path/to/my/file.pdf")
+err := record.CommitFileToContainer("field name", "/path/to/my/file.pdf")
 ```
 
 ### Get field data
 
 #### String
-The FileMaker database field needs to be of type text.
+*The FileMaker database field needs to be of type text.*
+
 ``` go
-val, err := record.String("fieldname")
+val := record.String("field name")
 ```
 
 #### Int
-The FileMaker database field needs to be of type number.
+*The FileMaker database field needs to be of type number.*
+
 ``` go
-val, err := record.Int("fieldname")
+val := record.Int("field name")
+```
+
+#### Int8
+*The FileMaker database field needs to be of type number.*
+
+``` go
+val := record.Int8("field name")
+```
+
+#### Int16
+*The FileMaker database field needs to be of type number.*
+
+``` go
+val := record.Int16("field name")
 ```
 
 #### Int32
-The FileMaker database field needs to be of type number.
+*The FileMaker database field needs to be of type number.*
+
 ``` go
-val, err := record.Int32("fieldname")
+val := record.Int32("field name")
 ```
 
 #### Int64
-The FileMaker database field needs to be of type number.
+*The FileMaker database field needs to be of type number.*
+
 ``` go
-val, err := record.Int64("fieldname")
+val := record.Int64("field name")
 ```
 
 #### Float32
-The FileMaker database field needs to be of type number.
+*The FileMaker database field needs to be of type number.*
+
 ``` go
-val, err := record.Float32("fieldname")
+val := record.Float32("field name")
 ```
 
 #### Float64
-The FileMaker database field needs to be of type number.
+*The FileMaker database field needs to be of type number.*
+
 ``` go
-val, err := record.Float64("fieldname")
+val := record.Float64("field name")
 ```
 
 #### Bool
-The FileMaker database field needs to be of type number. Values greater than `0` will return `true`, otherwise `false`.
+Will return `false` for empty fields and number fields that evaluate to `0` or less - will return `true` otherwise.
+
 ``` go
-val, err := record.Bool("fieldname")
+val := record.Bool("field name")
+```
+
+#### Time
+*The FileMaker database field needs to be of type text, date or timestamp.*
+
+Will attempt to parse field value into a `time.Time` object.
+
+``` go
+val := record.Time("field name")
 ```
 
 #### Interface
-If for some reason you want an `interface{}` use the `GetField()` method. Good to know here is that FileMaker number fields will always be of type `float64`.
+If for some reason you want an `interface{}`, use the `Get()` method. Good to know here is that FileMaker number fields will always be of type `float64` - text, date and timestamp fields will be of `string` type.
+
 ``` go
-val := record.GetField("fieldname")
+val := record.Get("field name")
 ```
+
 ### Map field data to struct
+
 ``` go
-type Person struct {
-  Firstname string `fm:"firstname"`
-  Lastname  string `fm:"lastname"`
-  Age       int    `fm:"age"`
+type Hero struct {
+  TimestampCreated  time.Time   `fm:"TimestampCreated"`
+  Firstname         string      `fm:"Firstname"`
+  Lastname          string      `fm:"Lastname"`
+  Age               int         `fm:"Age"`
+  BadassRating      float64     `fm:"BadassRatingOf100"`
+  DateFirstPurchase time.Time   `fm:"DateFirstProductPurchase"`
+  IsBadass          bool        `fm:"Badass"`
 }
 
-myPerson := Person{}
-fmt.Println(myPerson) //Output: {  0}
+var hero Hero
 
-record.Map(&myPerson)
-fmt.Println(myPerson) //Output: {Test Testsson 23}
+//Print before
+//Output: {TimestampCreated:0001-01-01 00:00:00 +0000 UTC Firstname: Lastname: Age:0 BadassRating:0 DateFirstPurchase:0001-01-01 00:00:00 +0000 UTC IsBadass:false}
+fmt.Printf("%+v\n", hero)
+
+//Map record fields to struct fields
+record.Map(&hero)
+
+//Print after
+//Output: {TimestampCreated:2006-01-02 15:04:05 +0100 CET Firstname:Volodymyr Lastname:Zelenskyj Age:44 BadassRating:99.99 DateFirstPurchase:2006-01-02 00:00:00 +0100 CET IsBadass:true}
+fmt.Printf("%+v\n", hero)
 ```
