@@ -288,6 +288,9 @@ Will attempt to parse field value into a `time.Time` object. Supported formats:
 
 ``` go
 val := record.Time("field name")
+
+//With error (ErrUnknownFormat if not a valid format. May also return time.Parse errors.)
+val, err := record.TimeE("field name")
 ```
 
 #### Interface
