@@ -195,6 +195,9 @@ err := record.CommitFileToContainer("field name", "/path/to/my/file.pdf")
 
 ``` go
 val := record.String("field name")
+
+//With error (ErrNotString if not a string)
+val, err := record.StringE("field name")
 ```
 
 #### Int
@@ -202,6 +205,9 @@ val := record.String("field name")
 
 ``` go
 val := record.Int("field name")
+
+//With error (ErrNotNumber if not a number)
+val, err := record.IntE("field name")
 ```
 
 #### Int8
@@ -209,6 +215,9 @@ val := record.Int("field name")
 
 ``` go
 val := record.Int8("field name")
+
+//With error (ErrNotNumber if not a number)
+val, err := record.Int8E("field name")
 ```
 
 #### Int16
@@ -216,6 +225,9 @@ val := record.Int8("field name")
 
 ``` go
 val := record.Int16("field name")
+
+//With error (ErrNotNumber if not a number)
+val, err := record.Int16E("field name")
 ```
 
 #### Int32
@@ -223,6 +235,9 @@ val := record.Int16("field name")
 
 ``` go
 val := record.Int32("field name")
+
+//With error (ErrNotNumber if not a number)
+val, err := record.Int32E("field name")
 ```
 
 #### Int64
@@ -230,6 +245,9 @@ val := record.Int32("field name")
 
 ``` go
 val := record.Int64("field name")
+
+//With error (ErrNotNumber if not a number)
+val, err := record.Int64E("field name")
 ```
 
 #### Float32
@@ -237,6 +255,9 @@ val := record.Int64("field name")
 
 ``` go
 val := record.Float32("field name")
+
+//With error (ErrNotNumber if not a number)
+val, err := record.Float32E("field name")
 ```
 
 #### Float64
@@ -244,6 +265,9 @@ val := record.Float32("field name")
 
 ``` go
 val := record.Float64("field name")
+
+//With error (ErrNotNumber if not a number)
+val, err := record.Float64E("field name")
 ```
 
 #### Bool
