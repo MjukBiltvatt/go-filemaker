@@ -1,3 +1,3 @@
-module github.com/MjukBiltvatt/go-filemaker
+module github.com/MjukBiltvatt/go-filemaker/v3
 
-go 1.14
+go 1.18

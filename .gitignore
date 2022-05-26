@@ -16,5 +16,3 @@
 
 .env
 .DS_Store
-
-*_test.go

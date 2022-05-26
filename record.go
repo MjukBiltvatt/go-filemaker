@@ -11,8 +11,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"reflect"
-	"strconv"
 	"strings"
+	"time"
 )
 
 //Record interface for some magic with methods
@@ -35,19 +35,21 @@ func newRecord(layout string, data interface{}, session Session) Record {
 	}
 }
 
-//SetField sets the value of a specified field in the given record
-func (r *Record) SetField(fieldName string, value interface{}) {
+//Set sets the value of a specified field in the given record
+func (r *Record) Set(fieldName string, value interface{}) {
 	switch value.(type) {
 	case int:
 		value = float64(value.(int))
+	case int8:
+		value = float64(value.(int8))
+	case int16:
+		value = float64(value.(int16))
 	case int32:
 		value = float64(value.(int32))
 	case int64:
 		value = float64(value.(int64))
 	case float32:
 		value = float64(value.(float32))
-	case float64:
-		value = float64(value.(float64))
 	case bool:
 		if value.(bool) {
 			value = float64(1)
@@ -59,8 +61,8 @@ func (r *Record) SetField(fieldName string, value interface{}) {
 	r.StagedChanges[fieldName] = value
 }
 
-//GetField gets the value of a field in the given record and returns it as an `interface{}`
-func (r *Record) GetField(fieldName string) interface{} {
+//Get gets the value of a field in the given record and returns it as an `interface{}`
+func (r *Record) Get(fieldName string) interface{} {
 	if val, ok := r.StagedChanges[fieldName]; ok {
 		return val
 	}
@@ -68,8 +70,8 @@ func (r *Record) GetField(fieldName string) interface{} {
 	return r.FieldData[fieldName]
 }
 
-//Revert discards all uncommited changes made to the record
-func (r *Record) Revert() {
+//Reset discards all uncommited changes made to the record
+func (r *Record) Reset() {
 	r.StagedChanges = make(map[string]interface{})
 }
 
@@ -96,7 +98,18 @@ func (r *Record) Commit() error {
 	}
 
 	//Build and send request to the host
-	req, err := http.NewRequest("PATCH", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID, bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest(
+		"PATCH",
+		fmt.Sprintf(
+			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records/%s",
+			r.Session.Protocol,
+			r.Session.Host,
+			r.Session.Database,
+			r.Layout,
+			r.ID,
+		),
+		bytes.NewBuffer(requestBody),
+	)
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
@@ -118,7 +131,11 @@ func (r *Record) Commit() error {
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+		return fmt.Errorf(
+			"failed at host: %v (%v)",
+			jsonRes.Messages[0].Message,
+			jsonRes.Messages[0].Code,
+		)
 	}
 
 	for fieldName, value := range r.StagedChanges {
@@ -129,7 +146,7 @@ func (r *Record) Commit() error {
 }
 
 //CommitToContainer commits the specified bytes buffer to the specified container field in the record.
-func (r *Record) CommitToContainer(fieldName string, filename string, dataBuf bytes.Buffer) error {
+func (r *Record) CommitToContainer(fieldName, filename string, dataBuf bytes.Buffer) error {
 	if r.ID == "" {
 		return errors.New("Record needs to be created first")
 	}
@@ -151,7 +168,19 @@ func (r *Record) CommitToContainer(fieldName string, filename string, dataBuf by
 	}
 
 	//Build and send request to the host
-	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID+"/containers/"+fieldName, body)
+	req, err := http.NewRequest(
+		"POST",
+		fmt.Sprintf(
+			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records/%s/containers/%s",
+			r.Session.Protocol,
+			r.Session.Host,
+			r.Session.Database,
+			r.Layout,
+			r.ID,
+			fieldName,
+		),
+		body,
+	)
 	cd := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
 	req.Header.Set("Content-Disposition", cd)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -174,7 +203,11 @@ func (r *Record) CommitToContainer(fieldName string, filename string, dataBuf by
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+		return fmt.Errorf(
+			"failed at host: %v (%v)",
+			jsonRes.Messages[0].Message,
+			jsonRes.Messages[0].Code,
+		)
 	}
 
 	return nil
@@ -214,7 +247,17 @@ func (r *Record) Create() error {
 	}
 
 	//Build and send request to the host to create record
-	req, err := http.NewRequest("POST", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest(
+		"POST",
+		fmt.Sprintf(
+			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records",
+			r.Session.Protocol,
+			r.Session.Host,
+			r.Session.Database,
+			r.Layout,
+		),
+		bytes.NewBuffer(requestBody),
+	)
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
@@ -237,7 +280,11 @@ func (r *Record) Create() error {
 
 	//Check for errors in the response
 	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+		return fmt.Errorf(
+			"failed at host: %v (%v)",
+			jsonRes.Messages[0].Message,
+			jsonRes.Messages[0].Code,
+		)
 	}
 
 	//Update local record field data with staged changes
@@ -249,7 +296,18 @@ func (r *Record) Create() error {
 	r.ID = jsonRes.Response.RecordID
 
 	//Build and send request to the host to get the default field data for the created record
-	req, err = http.NewRequest("GET", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID, bytes.NewBuffer([]byte{}))
+	req, err = http.NewRequest(
+		"GET",
+		fmt.Sprintf(
+			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records/%s",
+			r.Session.Protocol,
+			r.Session.Host,
+			r.Session.Database,
+			r.Layout,
+			r.ID,
+		),
+		bytes.NewBuffer([]byte{}),
+	)
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err = http.DefaultClient.Do(req)
@@ -271,7 +329,11 @@ func (r *Record) Create() error {
 
 	//Check for errors in the response
 	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+		return fmt.Errorf(
+			"failed at host: %v (%v)",
+			jsonRes.Messages[0].Message,
+			jsonRes.Messages[0].Code,
+		)
 	}
 
 	//Parse the field data for the record
@@ -285,7 +347,18 @@ func (r *Record) Create() error {
 //Delete deletes the record using the same session the record was retrieved with
 func (r *Record) Delete() error {
 	//Build and send request to the host
-	req, err := http.NewRequest("DELETE", r.Session.Protocol+r.Session.Host+"/fmi/data/v1/databases/"+r.Session.Database+"/layouts/"+r.Layout+"/records/"+r.ID, bytes.NewBuffer([]byte{}))
+	req, err := http.NewRequest(
+		"DELETE",
+		fmt.Sprintf(
+			"%s%s/fmi/data/v1/databases/%s/layouts/%s/records/%s",
+			r.Session.Protocol,
+			r.Session.Host,
+			r.Session.Database,
+			r.Layout,
+			r.ID,
+		),
+		bytes.NewBuffer([]byte{}),
+	)
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -306,7 +379,11 @@ func (r *Record) Delete() error {
 	}
 
 	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf("failed at host: %v (%v)", jsonRes.Messages[0].Message, jsonRes.Messages[0].Code)
+		return fmt.Errorf(
+			"failed at host: %v (%v)",
+			jsonRes.Messages[0].Message,
+			jsonRes.Messages[0].Code,
+		)
 	}
 
 	//Empty the local record instance
@@ -321,119 +398,105 @@ func (r *Record) Delete() error {
 String gets the data in the specified field and returns it as a string.
 The FileMaker database field needs to be a text field.
 */
-func (r *Record) String(fieldName string) (string, error) {
-	data := r.GetField(fieldName)
+func (r *Record) String(fieldName string) string {
+	data := r.Get(fieldName)
 
 	switch data.(type) {
 	case string:
-		return data.(string), nil
-	case int:
-		return strconv.FormatInt(int64(data.(int)), 10), nil
-	case int16:
-		return strconv.FormatInt(int64(data.(int16)), 10), nil
-	case int32:
-		return strconv.FormatInt(int64(data.(int32)), 10), nil
-	case int64:
-		return strconv.FormatInt(int64(data.(int64)), 10), nil
-	case float32:
-		return strconv.FormatFloat(float64(data.(float32)), 'f', -1, 32), nil
-	case float64:
-		return strconv.FormatFloat(data.(float64), 'f', -1, 64), nil
+		return data.(string)
 	case nil:
-		return "", nil
+		return ""
 	}
 
-	return "", fmt.Errorf("field `%v` could not be asserted as or converted to string: %v", fieldName, data)
+	return ""
 }
 
 /*
 Int gets the data in the specified field and returns it as an int.
 The FileMaker database field needs to be a number field.
 */
-func (r *Record) Int(fieldName string) (int, error) {
-	data := r.GetField(fieldName)
+func (r *Record) Int(fieldName string) int {
+	data := r.Get(fieldName)
 
 	if val, ok := data.(float64); ok {
-		return int(val), nil
+		return int(val)
 	}
 
-	return 0, fmt.Errorf("field `%v` value is not of type int: %v", fieldName, data)
+	return 0
 }
 
 /*
 Int32 gets the data in the specified field and returns it as an int32.
 The FileMaker database field needs to be a number field.
 */
-func (r *Record) Int32(fieldName string) (int32, error) {
-	data := r.GetField(fieldName)
+func (r *Record) Int32(fieldName string) int32 {
+	data := r.Get(fieldName)
 
 	if val, ok := data.(float64); ok {
-		return int32(val), nil
+		return int32(val)
 	}
 
-	return 0, fmt.Errorf("field `%v` value is not of type int32: %v", fieldName, data)
+	return 0
 }
 
 /*
 Int64 gets the data in the specified field and returns it as an int64.
 The FileMaker database field needs to be a number field.
 */
-func (r *Record) Int64(fieldName string) (int64, error) {
-	data := r.GetField(fieldName)
+func (r *Record) Int64(fieldName string) int64 {
+	data := r.Get(fieldName)
 
 	if val, ok := data.(float64); ok {
-		return int64(val), nil
+		return int64(val)
 	}
 
-	return 0, fmt.Errorf("field `%v` value is not of type int64: %v", fieldName, data)
+	return 0
 }
 
 /*
 Float32 gets the data in the specified field and returns it as an float32.
 The FileMaker database field needs to be a number field.
 */
-func (r *Record) Float32(fieldName string) (float32, error) {
-	data := r.GetField(fieldName)
+func (r *Record) Float32(fieldName string) float32 {
+	data := r.Get(fieldName)
 
 	if val, ok := data.(float64); ok {
-		return float32(val), nil
+		return float32(val)
 	}
 
-	return 0, fmt.Errorf("field `%v` value is not of type float32: %v", fieldName, data)
+	return 0
 }
 
 /*
 Float64 gets the data in the specified field and returns it as an float64.
 The FileMaker database field needs to be a number field.
 */
-func (r *Record) Float64(fieldName string) (float64, error) {
-	data := r.GetField(fieldName)
+func (r *Record) Float64(fieldName string) float64 {
+	data := r.Get(fieldName)
 
 	if val, ok := data.(float64); ok {
-		return val, nil
+		return val
 	}
 
-	return 0, fmt.Errorf("field `%v` value is not of type float64: %v", fieldName, data)
+	return 0
 }
 
 /*
-Bool gets the data in the specified field and returns it as an bool.
-The FileMaker database field needs to be a number field. Numbers
-larger than `0` return `true` and `0` or below returns `false`.
+Bool gets the data in the specified field and parses it as a bool, with empty
+fields evaluating to `false` and non-empty text fields and number fields with
+a value greater than 0 evaluating to `true`.
 */
-func (r *Record) Bool(fieldName string) (bool, error) {
-	data := r.GetField(fieldName)
+func (r *Record) Bool(fieldName string) bool {
+	data := r.Get(fieldName)
 
 	switch data.(type) {
 	case string:
-		return len(data.(string)) > 0, nil
+		return len(data.(string)) > 0
 	case float64:
-		return data.(float64) > 0, nil
-	case nil:
-		return false, nil
+		return data.(float64) > 0
 	}
 
-	return false, fmt.Errorf("field `%v` value is not of type bool: %v", fieldName, data)
+	return false
 }
 
 /*
@@ -458,15 +521,24 @@ Supported types:
 
 - int
 
+- int8
+
+- int16
+
+- int32
+
 - int64
+
+- float32
 
 - float64
 
 - bool
+
+- time.Time (date and timestamp fields)
 */
-func (r *Record) Map(obj interface{}) error {
-	v := reflect.Indirect(reflect.ValueOf(obj))
-	typeOfObj := v.Type()
+func (r *Record) Map(obj interface{}) {
+	v := reflect.ValueOf(obj).Elem()
 
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
@@ -475,35 +547,23 @@ func (r *Record) Map(obj interface{}) error {
 			continue
 		}
 
-		tag := typeOfObj.Field(i).Tag.Get("fm")
+		tag := v.Type().Field(i).Tag.Get("fm")
 
 		switch field.Interface().(type) {
 		case string:
-			val, err := r.String(tag)
-			if err != nil {
-				return err
-			}
-			field.SetString(val)
-		case int, int64:
-			val, err := r.Int64(tag)
-			if err != nil {
-				return err
-			}
-			field.SetInt(val)
-		case float64:
-			val, err := r.Float64(tag)
-			if err != nil {
-				return err
-			}
-			field.SetFloat(val)
+			field.SetString(r.String(tag))
+		case int, int8, int16, int32, int64:
+			field.SetInt(r.Int64(tag))
+		case float32, float64:
+			field.SetFloat(r.Float64(tag))
 		case bool:
-			val, err := r.Bool(tag)
-			if err != nil {
-				return err
+			field.SetBool(r.Bool(tag))
+		case time.Time:
+			if t, err := time.ParseInLocation("01/02/2006 15:04:05", r.String(tag), time.Local); err == nil {
+				field.Set(reflect.ValueOf(t))
+			} else if t, err := time.ParseInLocation("01/02/2006", r.String(tag), time.Local); err == nil {
+				field.Set(reflect.ValueOf(t))
 			}
-			field.SetBool(val)
 		}
 	}
-
-	return nil
 }

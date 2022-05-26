@@ -18,14 +18,14 @@ func NewFindCommand(requests ...interface{}) FindCommand {
 	return command
 }
 
-//SetLimit sets the limit for the number of records returned by the findcommand
-func (c FindCommand) SetLimit(limit int) FindCommand {
+//Limit sets the limit for the number of records returned by the findcommand
+func (c FindCommand) Limit(limit int) FindCommand {
 	c["limit"] = limit
 	return c
 }
 
-//SetOffset sets the offset for the records returned by the findcommand
-func (c FindCommand) SetOffset(offset int) FindCommand {
+//Offset sets the offset for the records returned by the findcommand
+func (c FindCommand) Offset(offset int) FindCommand {
 	c["offset"] = offset
 	return c
 }
