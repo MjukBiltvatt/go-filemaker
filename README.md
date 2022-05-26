@@ -26,7 +26,6 @@ fm, err := filemaker.New(
   "username",
   "password",
 )
-//Handle any errors
 if err != nil {
   fmt.Printf("Failed to start session: %s", err.Error())
   return
@@ -35,7 +34,7 @@ if err != nil {
 defer fm.Destroy()
 
 //Perform find command
-records, err := fm.PerformFind(
+records, err := fm.Find(
   "layoutname",
   filemaker.NewFindCommand(
     filemaker.NewFindRequest(
@@ -48,7 +47,6 @@ records, err := fm.PerformFind(
     ).Omit()
   ).Limit(10)
 )
-//Handle any errors
 if err != nil {
   fmt.Printf("Failed to perform find: %s", err.Error())
   return
@@ -95,7 +93,7 @@ command := filemaker.NewFindCommand(
     filemaker.NewFindCriterion("field name", "somethinglikethis"),
   ),
   filemaker.NewFindRequest(
-    filemaker.NewFindCriterion("otherfieldname", "notsomethinglikethis"),
+    filemaker.NewFindCriterion("other field name", "notsomethinglikethis"),
   ).Omit(), //Omit request
 )
 ```
@@ -121,10 +119,10 @@ command := filemaker.NewFindCommand(
 ```
 
 ### Limit and offset (chaining)
-Both of these can be chained, allowing them to be used directly in the `PerformFind` method.
+Both of these can be chained, allowing them to be used directly in the `Find` method.
 
 ``` go
-records, err := fm.PerformFind(
+records, err := fm.Find(
   "layout name",
   filemaker.NewFindCommand(
     //...
@@ -138,7 +136,7 @@ records, err := fm.PerformFind(
 
 ``` go
 //Create a new empty record for the specified layout
-record := fm.CreateRecord("layout name")
+record := fm.NewRecord("layout name")
 
 //Set field data
 record.Set("field name", "data")
@@ -146,8 +144,8 @@ record.Set("field name", "data")
 //Create the record
 err := record.Commit()
 
-//Record now contains an ID
-fmt.Println("Record ID:", record.ID)
+//Record now contains an ID after committing
+fmt.Printf("Record ID: %v", record.ID)
 ```
 
 ### Edit
@@ -168,6 +166,9 @@ record.Set("field name", "new data")
 
 //Reset the record
 record.Reset()
+
+fmt.Println(record.String("field name"))
+//Output: original data
 ```
 
 ### Delete
@@ -266,13 +267,15 @@ val := record.Time("field name")
 ```
 
 #### Interface
-If for some reason you want an `interface{}`, use the `Get()` method. Good to know here is that FileMaker number fields will always be of type `float64` - text, date and timestamp fields will be of `string` type.
+If for some reason you want an `interface{}`, use the `Get()` method. Keep in mind though that FileMaker number fields will be of type `float64` - text, date and timestamp fields will be of type `string`.
 
 ``` go
 val := record.Get("field name")
 ```
 
 ### Map field data to struct
+
+Infinitely nested structs are supported.
 
 ``` go
 type Hero struct {
