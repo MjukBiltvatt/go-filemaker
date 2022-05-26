@@ -469,6 +469,23 @@ func (r *Record) Bool(fieldName string) bool {
 	return false
 }
 
+//Time gets the data in the specified field and attempts to parse it as a `time.Time` object.
+func (r *Record) Time(fieldName string) time.Time {
+	data := r.String(fieldName)
+
+	if len(data) == 19 {
+		//Attempt to parse as timestamp
+		t, _ := time.ParseInLocation("01/02/2006 15:04:05", data, time.Local)
+		return t
+	} else if len(data) == 10 {
+		//Attempt to parse as date
+		t, _ := time.ParseInLocation("01/02/2006", data, time.Local)
+		return t
+	}
+
+	return time.Time{}
+}
+
 /*
 Map takes a struct and inserts the field data of the record
 in the struct fields with an `fm`-tag matching the record field name.
@@ -533,13 +550,7 @@ func (r *Record) Map(obj interface{}) {
 		case bool:
 			field.SetBool(r.Bool(tag))
 		case time.Time:
-			if t, err := time.ParseInLocation("01/02/2006 15:04:05", r.String(tag), time.Local); err == nil {
-				//Time object parsed from timestamp
-				field.Set(reflect.ValueOf(t))
-			} else if t, err := time.ParseInLocation("01/02/2006", r.String(tag), time.Local); err == nil {
-				//Time object parsed from date
-				field.Set(reflect.ValueOf(t))
-			}
+			field.Set(reflect.ValueOf(r.Time(tag)))
 		}
 	}
 }
