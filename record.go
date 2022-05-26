@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -549,15 +550,35 @@ and returns any errors that occur
 func (r Record) TimeE(fieldName string) (time.Time, error) {
 	data := r.String(fieldName)
 
-	if len(data) == 19 {
-		//Attempt to parse as timestamp
+	//Attempt to parse as timestamp in format MM/dd/yyyy HH:mm:ss
+	if match, err := regexp.MatchString(`^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$`, data); err != nil {
+		return time.Time{}, err
+	} else if match {
 		return time.ParseInLocation("01/02/2006 15:04:05", data, time.Local)
-	} else if len(data) == 10 {
-		//Attempt to parse as date
+	}
+
+	//Attempt to parse as date in format MM/dd/yyyy
+	if match, err := regexp.MatchString(`^\d{2}\/\d{2}\/\d{4}$`, data); err != nil {
+		return time.Time{}, err
+	} else if match {
 		return time.ParseInLocation("01/02/2006", data, time.Local)
 	}
 
-	return time.Time{}, errors.New("could not determine format")
+	//Attempt to parse as timestamp in format yyyy-MM-dd HH:mm:ss
+	if match, err := regexp.MatchString(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`, data); err != nil {
+		return time.Time{}, err
+	} else if match {
+		return time.ParseInLocation("2006-01-02 15:04:05", data, time.Local)
+	}
+
+	//Attempt to parse as date in format yyyy-MM-dd
+	if match, err := regexp.MatchString(`^\d{4}-\d{2}-\d{2}$`, data); err != nil {
+		return time.Time{}, err
+	} else if match {
+		return time.ParseInLocation("2006-01-02", data, time.Local)
+	}
+
+	return time.Time{}, ErrUnknownFormat
 }
 
 //Time gets the data in the specified field and attempts to parse it as a `time.Time` object.

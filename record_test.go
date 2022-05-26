@@ -25,8 +25,11 @@ func newTestRecord() Record {
 				"bool_true_num_1":     float64(1),
 				"bool_true_num_123":   float64(123),
 				"bool_false_num_0":    float64(0),
-				"date":                "01/02/2006",
-				"timestamp":           "01/02/2006 15:04:05",
+				"date_1":              "01/02/2006",
+				"date_2":              "2006-01-02",
+				"timestamp_1":         "01/02/2006 15:04:05",
+				"timestamp_2":         "2006-01-02 15:04:05",
+				"time_invalid":        "january 1 2006 15 pm",
 			},
 		},
 		Session{
@@ -54,10 +57,11 @@ type testRecordStruct struct {
 	BoolTrueNum1     bool      `fm:"bool_true_num_1"`
 	BoolTrueNum123   bool      `fm:"bool_true_num_123"`
 	BoolFalseNum0    bool      `fm:"bool_false_num_0"`
-	Date             time.Time `fm:"date"`
-	DateInvalid      time.Time `fm:"date_invalid"`
-	Timestamp        time.Time `fm:"timestamp"`
-	TimestampInvalid time.Time `fm:"timestamp_invalid"`
+	Date1            time.Time `fm:"date_1"`
+	Date2            time.Time `fm:"date_2"`
+	Timestamp1       time.Time `fm:"timestamp_1"`
+	Timestamp2       time.Time `fm:"timestamp_2"`
+	TimeInvalid      time.Time `fm:"time_invalid"`
 }
 
 //TestRecordMap tests the `Record.Map` method
@@ -183,32 +187,40 @@ func TestRecordMap(t *testing.T) {
 		}
 	})
 
-	t.Run("date", func(t *testing.T) {
-		got := value.Date
+	t.Run("date_1", func(t *testing.T) {
+		got := value.Date1
 		expect := time.Date(2006, 1, 2, 0, 0, 0, 0, time.Local)
 		if got != expect {
 			t.Errorf("got: %v, expected: %v", got, expect)
 		}
 	})
 
-	t.Run("date_invalid", func(t *testing.T) {
-		got := value.DateInvalid
-		expect := time.Time{}
+	t.Run("date_2", func(t *testing.T) {
+		got := value.Date2
+		expect := time.Date(2006, 1, 2, 0, 0, 0, 0, time.Local)
 		if got != expect {
 			t.Errorf("got: %v, expected: %v", got, expect)
 		}
 	})
 
-	t.Run("timestamp", func(t *testing.T) {
-		got := value.Timestamp
+	t.Run("timestamp_1", func(t *testing.T) {
+		got := value.Timestamp1
 		expect := time.Date(2006, 1, 2, 15, 4, 5, 0, time.Local)
 		if got != expect {
 			t.Errorf("got: %v, expected: %v", got, expect)
 		}
 	})
 
-	t.Run("timestamp_invalid", func(t *testing.T) {
-		got := value.TimestampInvalid
+	t.Run("timestamp_2", func(t *testing.T) {
+		got := value.Timestamp2
+		expect := time.Date(2006, 1, 2, 15, 4, 5, 0, time.Local)
+		if got != expect {
+			t.Errorf("got: %v, expected: %v", got, expect)
+		}
+	})
+
+	t.Run("time_invalid", func(t *testing.T) {
+		got := value.TimeInvalid
 		expect := time.Time{}
 		if got != expect {
 			t.Errorf("got: %v, expected: %v", got, expect)
