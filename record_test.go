@@ -12,7 +12,6 @@ func newTestRecord() Record {
 			"recordId": "recordId",
 			"fieldData": map[string]interface{}{
 				"string":              "string",
-				"string_2":            "string2",
 				"int":                 float64(100),
 				"int8":                float64(8),
 				"int16":               float64(16),
@@ -31,7 +30,6 @@ func newTestRecord() Record {
 				"timestamp_1":         "01/02/2006 15:04:05",
 				"timestamp_2":         "2006-01-02 15:04:05",
 				"time_invalid":        "january 1 2006 15 pm",
-				"related::string":     "related",
 			},
 		},
 		Session{
@@ -49,29 +47,31 @@ type nestedStructPointer struct {
 }
 
 type testRecordStruct struct {
-	String           string    `fm:"string"`
-	Int              int       `fm:"int"`
-	Int8             int8      `fm:"int8"`
-	Int16            int16     `fm:"int16"`
-	Int32            int32     `fm:"int32"`
-	Int64            int64     `fm:"int64"`
-	Float32          float32   `fm:"float32"`
-	Float64          float64   `fm:"float64"`
-	BoolTrueTxtTest  bool      `fm:"bool_true_txt_test"`
-	BoolTrueTxtFalse bool      `fm:"bool_true_txt_false"`
-	BoolFalseTxt     bool      `fm:"bool_false_txt"`
-	BoolTrueNum1     bool      `fm:"bool_true_num_1"`
-	BoolTrueNum123   bool      `fm:"bool_true_num_123"`
-	BoolFalseNum0    bool      `fm:"bool_false_num_0"`
-	Date1            time.Time `fm:"date_1"`
-	Date2            time.Time `fm:"date_2"`
-	Timestamp1       time.Time `fm:"timestamp_1"`
-	Timestamp2       time.Time `fm:"timestamp_2"`
-	TimeInvalid      time.Time `fm:"time_invalid"`
-	Nested           struct {
-		String string `fm:"related::string"`
+	String             string     `fm:"string"`
+	Int                int        `fm:"int"`
+	Int8               int8       `fm:"int8"`
+	Int16              int16      `fm:"int16"`
+	Int32              int32      `fm:"int32"`
+	Int64              int64      `fm:"int64"`
+	Float32            float32    `fm:"float32"`
+	Float64            float64    `fm:"float64"`
+	BoolTrueTxtTest    bool       `fm:"bool_true_txt_test"`
+	BoolTrueTxtFalse   bool       `fm:"bool_true_txt_false"`
+	BoolFalseTxt       bool       `fm:"bool_false_txt"`
+	BoolTrueNum1       bool       `fm:"bool_true_num_1"`
+	BoolTrueNum123     bool       `fm:"bool_true_num_123"`
+	BoolFalseNum0      bool       `fm:"bool_false_num_0"`
+	Date1              time.Time  `fm:"date_1"`
+	Date2              time.Time  `fm:"date_2"`
+	Timestamp1         time.Time  `fm:"timestamp_1"`
+	Timestamp2         time.Time  `fm:"timestamp_2"`
+	TimeInvalid        time.Time  `fm:"time_invalid"`
+	TimePointer        *time.Time `fm:"timestamp_1"`
+	TimePointerInvalid *time.Time `fm:"time_invalid"`
+	Nested             struct {
+		String string `fm:"string"`
 		Nested struct {
-			String string `fm:"string_2"`
+			String string `fm:"string"`
 		}
 	}
 	NestedStructPointer    *nestedStructPointer
@@ -242,9 +242,24 @@ func TestRecordMap(t *testing.T) {
 		}
 	})
 
-	t.Run("nested_related_string", func(t *testing.T) {
+	t.Run("time_pointer", func(t *testing.T) {
+		got := value.TimePointer
+		expect := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
+		if got == nil || *got != expect {
+			t.Errorf("got: %v, expected: %v", got, expect)
+		}
+	})
+
+	t.Run("time_pointer_invalid", func(t *testing.T) {
+		got := value.TimePointerInvalid
+		if got != nil {
+			t.Errorf("got: %v, expected: %v", got, nil)
+		}
+	})
+
+	t.Run("nested_string", func(t *testing.T) {
 		got := value.Nested.String
-		expect := "related"
+		expect := "string"
 		if got != expect {
 			t.Errorf("got: '%v', expected: '%v'", got, expect)
 		}
@@ -252,7 +267,7 @@ func TestRecordMap(t *testing.T) {
 
 	t.Run("nested_nested_string", func(t *testing.T) {
 		got := value.Nested.Nested.String
-		expect := "string2"
+		expect := "string"
 		if got != expect {
 			t.Errorf("got: '%v', expected: '%v'", got, expect)
 		}

@@ -654,7 +654,6 @@ func (r *Record) Map(obj interface{}, timeLoc *time.Location) {
 			field.Set(reflect.ValueOf(r.Time(tag, timeLoc)))
 		}
 
-		//Nested structs
 		if field.Kind() == reflect.Struct {
 			//Map nested struct
 			r.Map(field.Addr().Interface(), timeLoc)
@@ -662,6 +661,21 @@ func (r *Record) Map(obj interface{}, timeLoc *time.Location) {
 		} else if field.Kind() == reflect.Pointer && field.Elem().Kind() == reflect.Struct {
 			//Map nested pointer to struct
 			r.Map(field.Interface(), timeLoc)
+			continue
+		} else if field.Kind() == reflect.Pointer &&
+			field.Type().Elem() == reflect.TypeOf(time.Time{}) {
+			//Field is a time.Time pointer
+			t := r.Time(tag, timeLoc)
+
+			//Only set field if time is not zero
+			if field.IsNil() && !t.IsZero() {
+				//Nil pointer
+				field.Set(reflect.ValueOf(&t))
+			} else if !t.IsZero() {
+				//Value pointer
+				field.Elem().Set(reflect.ValueOf(t))
+			}
+
 			continue
 		}
 	}
