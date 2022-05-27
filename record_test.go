@@ -44,6 +44,10 @@ func newTestRecord() Record {
 	)
 }
 
+type nestedStructPointer struct {
+	String string `fm:"string"`
+}
+
 type testRecordStruct struct {
 	String           string    `fm:"string"`
 	Int              int       `fm:"int"`
@@ -70,6 +74,8 @@ type testRecordStruct struct {
 			String string `fm:"string_2"`
 		}
 	}
+	NestedStructPointer    *nestedStructPointer
+	NestedNilStructPointer *nestedStructPointer
 }
 
 //TestRecordMap tests the `Record.Map` method
@@ -79,6 +85,7 @@ func TestRecordMap(t *testing.T) {
 
 	//Create a struct to map the dummy record to
 	var value testRecordStruct
+	value.NestedStructPointer = &nestedStructPointer{}
 
 	//Map the dummy record to the struct
 	record.Map(&value, time.UTC)
@@ -239,7 +246,7 @@ func TestRecordMap(t *testing.T) {
 		got := value.Nested.String
 		expect := "related"
 		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
+			t.Errorf("got: '%v', expected: '%v'", got, expect)
 		}
 	})
 
@@ -247,7 +254,22 @@ func TestRecordMap(t *testing.T) {
 		got := value.Nested.Nested.String
 		expect := "string2"
 		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
+			t.Errorf("got: '%v', expected: '%v'", got, expect)
+		}
+	})
+
+	t.Run("nested_pointer_string", func(t *testing.T) {
+		got := value.NestedStructPointer.String
+		expect := "string"
+		if got != expect {
+			t.Errorf("got: '%v', expected: '%v'", got, expect)
+		}
+	})
+
+	t.Run("nested_nil_pointer", func(t *testing.T) {
+		got := value.NestedNilStructPointer
+		if got != nil {
+			t.Errorf("got: %v, expected: %v", got, nil)
 		}
 	})
 }

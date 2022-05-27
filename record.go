@@ -654,9 +654,14 @@ func (r *Record) Map(obj interface{}, timeLoc *time.Location) {
 			field.Set(reflect.ValueOf(r.Time(tag, timeLoc)))
 		}
 
-		//Map nested structs
+		//Nested structs
 		if field.Kind() == reflect.Struct {
+			//Map nested struct
 			r.Map(field.Addr().Interface(), timeLoc)
+			continue
+		} else if field.Kind() == reflect.Pointer && field.Elem().Kind() == reflect.Struct {
+			//Map nested pointer to struct
+			r.Map(field.Interface(), timeLoc)
 			continue
 		}
 	}
