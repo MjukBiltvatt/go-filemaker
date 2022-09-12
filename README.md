@@ -322,7 +322,7 @@ var hero Hero
 fmt.Printf("%+v\n", hero)
 
 //Map record fields to struct fields
-record.Map(&hero)
+record.Map(&hero, time.Local)
 
 //Print after
 //Output: {TimestampCreated:2006-01-02 15:04:05 +0100 CET Firstname:Volodymyr Lastname:Zelenskyj Age:44 BadassRating:99.99 DateFirstPurchase:2006-01-02 00:00:00 +0100 CET IsBadass:true}
