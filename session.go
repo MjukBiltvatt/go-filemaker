@@ -8,18 +8,20 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"time"
 )
 
-//Session is used for subsequent requests to the host
+// Session is used for subsequent requests to the host
 type Session struct {
-	Token    string
-	Host     string
-	Database string
-	Username string
-	Password string
+	Token        string
+	Host         string
+	Database     string
+	Username     string
+	Password     string
+	lastActivity time.Time
 }
 
-//ResponseBody represents the json body received from http requests to the filemaker api
+// ResponseBody represents the json body received from http requests to the filemaker api
 type ResponseBody struct {
 	Messages []struct {
 		Code    string `json:"code"`
@@ -41,7 +43,7 @@ type ResponseBody struct {
 	} `json:"response"`
 }
 
-//baseURL builds the base of the data API URL, containing protocol, host and database
+// baseURL builds the base of the data API URL, containing protocol, host and database
 func (s Session) baseURL() string {
 	return fmt.Sprintf(
 		"%s/fmi/data/v1/databases/%s",
@@ -50,7 +52,7 @@ func (s Session) baseURL() string {
 	)
 }
 
-//recordsURL builds a data API URL used to access record(s)
+// recordsURL builds a data API URL used to access record(s)
 func (s Session) recordsURL(layout, id string) string {
 	base := fmt.Sprintf(
 		"%s/layouts/%s/records",
@@ -65,7 +67,7 @@ func (s Session) recordsURL(layout, id string) string {
 	return fmt.Sprintf("%s/%s", base, id)
 }
 
-//Destroy logs out of the database session
+// Destroy logs out of the database session
 func (s *Session) Destroy() error {
 	//Build and send request to the host
 	req, err := http.NewRequest(
@@ -78,6 +80,9 @@ func (s *Session) Destroy() error {
 	if err != nil {
 		return fmt.Errorf("failed to send DELETE request: %v", err.Error())
 	}
+
+	//Update last activity time object in session
+	s.lastActivity = time.Now()
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
@@ -103,7 +108,7 @@ func (s *Session) Destroy() error {
 	return nil
 }
 
-//Find performs the specified findcommand on the specified layout
+// Find performs the specified findcommand on the specified layout
 func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error) {
 	if layout == "" {
 		return nil, errors.New("No layout specified")
@@ -127,6 +132,9 @@ func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
+
+	//Update last activity time object in session
+	s.lastActivity = time.Now()
 
 	//Read the body
 	resBodyBytes, err := ioutil.ReadAll(res.Body)
@@ -163,7 +171,7 @@ func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error)
 	return records, nil
 }
 
-//NewRecord returns a new empty record for the specified layout
+// NewRecord returns a new empty record for the specified layout
 func (s *Session) NewRecord(layout string) Record {
 	return Record{
 		Layout:        layout,
@@ -173,7 +181,13 @@ func (s *Session) NewRecord(layout string) Record {
 	}
 }
 
-//New starts a database session
+// LastActivity returns a time object representing the time of the last activity for
+// the session. Defaults as the time it was started if no other requests have been made.
+func (s *Session) LastActivity() time.Time {
+	return s.lastActivity
+}
+
+// New starts a database session
 func New(host, database, username, password string) (*Session, error) {
 	if host == "" {
 		return nil, errors.New("No host specified")
@@ -233,10 +247,11 @@ func New(host, database, username, password string) (*Session, error) {
 	}
 
 	return &Session{
-		Token:    jsonRes.Response.Token,
-		Host:     host,
-		Database: database,
-		Username: username,
-		Password: password,
+		Token:        jsonRes.Response.Token,
+		Host:         host,
+		Database:     database,
+		Username:     username,
+		Password:     password,
+		lastActivity: time.Now(),
 	}, nil
 }

@@ -328,3 +328,12 @@ record.Map(&hero, time.Local)
 //Output: {TimestampCreated:2006-01-02 15:04:05 +0100 CET Firstname:Volodymyr Lastname:Zelenskyj Age:44 BadassRating:99.99 DateFirstPurchase:2006-01-02 00:00:00 +0100 CET IsBadass:true}
 fmt.Printf("%+v\n", hero)
 ```
+
+## Session
+#### Last activity time object
+
+This method can be used to get a time object representing the time the last request was made using the session. Defaults to when the session was created until another request has been made.
+
+``` go
+fm.LastActivity()
+```
