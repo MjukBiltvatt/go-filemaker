@@ -165,7 +165,7 @@ func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error)
 	var records []Record
 
 	for _, r := range jsonRes.Response.Data {
-		records = append(records, newRecord(layout, r, *s))
+		records = append(records, newRecord(layout, r.(map[string]interface{}), *s))
 	}
 
 	return records, nil

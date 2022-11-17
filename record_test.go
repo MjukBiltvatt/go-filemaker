@@ -10,7 +10,7 @@ func newTestRecord() Record {
 		"layout",
 		map[string]interface{}{
 			"recordId": "recordId",
-			"fieldData": map[string]interface{}{
+			"fieldData": Fields{
 				"string":              "string",
 				"int":                 float64(100),
 				"int8":                float64(8),
@@ -78,7 +78,7 @@ type testRecordStruct struct {
 	NestedNilStructPointer *nestedStructPointer
 }
 
-//TestRecordMap tests the `Record.Map` method
+// TestRecordMap tests the `Record.Map` method
 func TestRecordMap(t *testing.T) {
 	//Create a dummy record
 	record := newTestRecord()

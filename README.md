@@ -37,15 +37,15 @@ defer fm.Destroy()
 records, err := fm.Find(
   "layoutname",
   filemaker.NewFindCommand(
-    filemaker.NewFindRequest(
-      filemaker.NewFindCriterion("Firstname", "Mark"),
-      filemaker.NewFindCriterion("HasCat", ".."),
-      filemaker.NewFindCriterion("Age", "*"),
-    ),
-    filemaker.NewFindRequest(
-      filemaker.NewFindCriterion("Lastname", "==Johnson"),
-    ).Omit()
-  ).Limit(10)
+    filemaker.NewFindRequest(filemaker.Fields{
+      "Firstname": "Mark",
+      "HasCat": "..",
+      "Age": "*",
+    }),
+    filemaker.NewFindRequest(filemaker.Fields{
+      "Lastname": "==Johnsson",
+    }).WithOmit(true)
+  ).WithLimit(10)
 )
 if err != nil {
   fmt.Printf("Failed to perform find: %s", err.Error())
@@ -67,67 +67,48 @@ if len(records) > 0 {
 ```
 
 ### FindCommand
-While being able to pass findrequests into the `NewFindCommand` method, they can also be added to the findcommand after instantiation.
-
 ***By default the limit is 100.***
 
 ``` go
-command := filemaker.NewFindCommand()
-command.AddRequest(request)
+//This...
+command := filemaker.NewFindCommand(
+  request1,
+  request2,
+).WithLimit(1000).WithOffset(1000)
+
+//... is the same as this
+command = filemaker.FindCommand{
+  Requests: []filemaker.FindRequest{
+    request1,
+    request2,
+  },
+  Limit: 1000,
+  Offset: 1000,
+}
+
+//Add a find request to the command after creating it
+command.AddRequest(request3)
 ```
 
 ### FindRequest
-While being able to pass findcriterions into the `NewFindRequest` method, they can also be added to the findrequest after instantiation.
-
 ``` go
-request := filemaker.NewFindRequest()
-request.AddCriterion(criterion)
-```
+//This...
+request := filemaker.NewFindRequest(filemaker.Fields{
+  "Field1": "==value",
+  "Field2": "*",
+}).WithOmit(true)
 
-### Omit
-Omit any records that match the find request.
+//... is the same as this
+request = filemaker.FindRequest{
+  Criterions: filemaker.Fields{
+    "Field1": "==value",
+    "Field2": "*",
+  },
+  Omit: true,
+}
 
-``` go
-command := filemaker.NewFindCommand(
-  filemaker.NewFindRequest(
-    filemaker.NewFindCriterion("field name", "somethinglikethis"),
-  ),
-  filemaker.NewFindRequest(
-    filemaker.NewFindCriterion("other field name", "notsomethinglikethis"),
-  ).Omit(), //Omit request
-)
-```
-
-### Limit
-Will limit the number of records returned from a find command.
-
-***By default the limit is 100.***
-
-``` go
-command := filemaker.NewFindCommand(
-  //...
-).Limit(10)
-```
-
-### Offset
-Will offset the records returned from a find command.
-
-``` go
-command := filemaker.NewFindCommand(
-  //...
-).Offset(10)
-```
-
-### Limit and offset (chaining)
-Both of these can be chained, allowing them to be used directly in the `Find` method.
-
-``` go
-records, err := fm.Find(
-  "layout name",
-  filemaker.NewFindCommand(
-    //...
-  ).Limit(10).Offset(10)
-)
+//Set a field criterion after creating request
+request.Set("Field3", "value")
 ```
 
 ## Records
