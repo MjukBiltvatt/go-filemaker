@@ -31,7 +31,7 @@ func newRecord(layout string, data map[string]interface{}, session Session) Reco
 		ID:            data["recordId"].(string),
 		Layout:        layout,
 		StagedChanges: NewFields(),
-		FieldData:     data["fieldData"].(Fields),
+		FieldData:     data["fieldData"].(map[string]interface{}),
 		Session:       &session,
 	}
 }
@@ -314,7 +314,7 @@ func (r *Record) Create() error {
 	}
 
 	//Parse the field data for the record
-	for fieldname, val := range jsonRes.Response.Data[0].(map[string]interface{})["fieldData"].(Fields) {
+	for fieldname, val := range jsonRes.Response.Data[0].(map[string]interface{})["fieldData"].(map[string]interface{}) {
 		r.FieldData[fieldname] = val
 	}
 
