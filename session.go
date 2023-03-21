@@ -109,13 +109,13 @@ func (s *Session) Destroy() error {
 }
 
 // Find performs the specified findcommand on the specified layout
-func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error) {
+func (s *Session) Find(layout string, findCommand FindCommand) ([]Record, error) {
 	if layout == "" {
 		return nil, errors.New("No layout specified")
 	}
 
 	//Create the request json body
-	var requestBody, err = json.Marshal(findCommand)
+	var requestBody, err = findCommand.MarshalJSON()
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request body: %v", err.Error())
 	}

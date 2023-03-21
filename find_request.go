@@ -28,7 +28,7 @@ func (r *FindRequest) Set(fieldName string, value interface{}) {
 	r.Criterions[fieldName] = value
 }
 
-// MarshalJSON marshals the find request into correct JSON
+// MarshalJSON marshals the find request into JSON
 func (r *FindRequest) MarshalJSON() ([]byte, error) {
 	m := make(map[string]interface{})
 
