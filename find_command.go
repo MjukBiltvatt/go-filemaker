@@ -12,9 +12,7 @@ type FindCommand struct {
 
 // NewFindCommand returns a new FindCommand with the specified find requests
 func NewFindCommand(requests ...FindRequest) (c FindCommand) {
-	for _, request := range requests {
-		c.AddRequest(request)
-	}
+	c.Requests = append(c.Requests, requests...)
 	return c
 }
 
