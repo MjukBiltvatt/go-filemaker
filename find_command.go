@@ -1,5 +1,7 @@
 package filemaker
 
+import "encoding/json"
+
 // FindCommand specifies how a find should be performed and consists of find requests.
 type FindCommand struct {
 	//Requests specifies the find requests for the command.
@@ -31,4 +33,19 @@ func (c FindCommand) WithOffset(offset int) FindCommand {
 // AddRequest appends a specified FindRequest to the FindCommand
 func (c *FindCommand) AddRequest(request FindRequest) {
 	c.Requests = append(c.Requests, request)
+}
+
+// MarshalJSON marshals the find command into JSON
+func (c *FindCommand) MarshalJSON() ([]byte, error) {
+	m := make(map[string]interface{})
+	m["query"] = c.Requests
+
+	if c.Limit > 0 {
+		m["limit"] = c.Limit
+	}
+	if c.Offset > 0 {
+		m["offset"] = c.Offset
+	}
+
+	return json.Marshal(m)
 }
