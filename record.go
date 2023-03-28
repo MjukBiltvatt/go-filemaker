@@ -27,11 +27,15 @@ type Record struct {
 
 // newRecord returns a new instance of an existing record
 func newRecord(layout string, data map[string]interface{}, session Session) Record {
+	fields := NewFields()
+	for key, value := range data["fieldData"].(map[string]interface{}) {
+		fields[key] = value
+	}
 	return Record{
 		ID:            data["recordId"].(string),
 		Layout:        layout,
 		StagedChanges: NewFields(),
-		FieldData:     data["fieldData"].(map[string]interface{}),
+		FieldData:     fields,
 		Session:       &session,
 	}
 }
