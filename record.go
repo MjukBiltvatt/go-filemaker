@@ -18,11 +18,16 @@ import (
 
 // Record interface for some magic with methods
 type Record struct {
-	ID            string
-	Layout        string
+	//The ID of the record as determined by the FileMaker Data API
+	ID string
+	//The layout to be used when committing changes
+	Layout string
+	//Staged changes to field data
 	StagedChanges Fields
-	FieldData     Fields
-	Session       *Session
+	//Committed field data
+	FieldData Fields
+	//The session to be used when committing changes
+	Session *Session
 }
 
 // newRecord returns a new instance of an existing record
