@@ -46,7 +46,7 @@ type nestedStructPointer struct {
 	String string `fm:"string"`
 }
 
-type testRecordStruct struct {
+type testRecord struct {
 	String             string     `fm:"string"`
 	Int                int        `fm:"int"`
 	Int8               int8       `fm:"int8"`
@@ -84,7 +84,7 @@ func TestRecordMap(t *testing.T) {
 	record := newTestRecord()
 
 	//Create a struct to map the dummy record to
-	var value testRecordStruct
+	var value testRecord
 	value.NestedStructPointer = &nestedStructPointer{}
 
 	//Map the dummy record to the struct

@@ -36,7 +36,7 @@ func newRecord(layout string, data map[string]interface{}, session Session) Reco
 	}
 }
 
-// Set sets the value of a specified field in the given record
+// Set the value of the specified field
 func (r *Record) Set(fieldName string, value interface{}) {
 	switch value.(type) {
 	case int:
@@ -57,6 +57,8 @@ func (r *Record) Set(fieldName string, value interface{}) {
 		} else {
 			value = float64(0)
 		}
+	case []string:
+		value = strings.Join(value.([]string), "\r")
 	}
 
 	r.StagedChanges[fieldName] = value
@@ -585,6 +587,12 @@ func (r Record) TimeE(fieldName string, loc *time.Location) (time.Time, error) {
 func (r *Record) Time(fieldName string, loc *time.Location) time.Time {
 	t, _ := r.TimeE(fieldName, loc)
 	return t
+}
+
+// StringSlice gets the data in the specified field and treats it as a value list, returning
+// the list as a slice of strings
+func (r *Record) StringSlice(fieldName string) []string {
+	return strings.Split(r.String(fieldName), "\r")
 }
 
 /*
