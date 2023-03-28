@@ -4,11 +4,11 @@ import "encoding/json"
 
 // FindCommand specifies how a find should be performed and consists of find requests.
 type FindCommand struct {
-	//Requests specifies the find requests for the command.
+	//A list of find requests
 	Requests []FindRequest `json:"query"`
-	//Limit the number of records returned in the result.
+	//Limit the number of records returned in the result
 	Limit int `json:"limit"`
-	//Offset the records returned in the result.
+	//Offset the records returned in the result
 	Offset int `json:"offset"`
 }
 

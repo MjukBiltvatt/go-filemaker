@@ -2,18 +2,18 @@ package filemaker
 
 import "encoding/json"
 
-// FindRequest is a part required in a FindCommand and helps specify how a find is to be performed.
+// FindRequest is a component of a find request used to specify search criteria
 type FindRequest struct {
-	//Criterions specifies the find criterion for each field.
-	Criterions Fields
-	//Omit specifies whether or not the fields matching this request should be omitted from the result.
+	//The find criteria for fields
+	Criteria Fields
+	//Whether or not to omit matching records
 	Omit bool
 }
 
 // NewFindRequest returns a new findrequest
-func NewFindRequest(criterions Fields) FindRequest {
+func NewFindRequest(criteria Fields) FindRequest {
 	return FindRequest{
-		Criterions: criterions,
+		Criteria: criteria,
 	}
 }
 
@@ -25,14 +25,14 @@ func (r FindRequest) WithOmit(omit bool) FindRequest {
 
 // Set find criterion for the specified field
 func (r *FindRequest) Set(fieldName string, value interface{}) {
-	r.Criterions[fieldName] = value
+	r.Criteria[fieldName] = value
 }
 
 // MarshalJSON marshals the find request into JSON
 func (r *FindRequest) MarshalJSON() ([]byte, error) {
 	m := make(map[string]interface{})
 
-	for fieldName, value := range r.Criterions {
+	for fieldName, value := range r.Criteria {
 		m[fieldName] = value
 	}
 
