@@ -172,13 +172,17 @@ func (s *Session) Find(layout string, findCommand FindCommand) ([]Record, error)
 }
 
 // NewRecord returns a new empty record for the specified layout
-func (s *Session) NewRecord(layout string) Record {
-	return Record{
+func (s *Session) NewRecord(layout string, fields Fields) Record {
+	record := Record{
 		Layout:        layout,
-		FieldData:     make(map[string]interface{}),
-		StagedChanges: make(map[string]interface{}),
+		FieldData:     NewFields(),
+		StagedChanges: NewFields(),
 		Session:       s,
 	}
+	for key, value := range fields {
+		record.StagedChanges[key] = value
+	}
+	return record
 }
 
 // LastActivity returns a time object representing the time of the last activity for
