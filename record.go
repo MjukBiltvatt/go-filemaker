@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-//Record interface for some magic with methods
+// Record interface for some magic with methods
 type Record struct {
 	ID            string
 	Layout        string
@@ -25,7 +25,7 @@ type Record struct {
 	Session       *Session
 }
 
-//newRecord returns a new instance of an existing record
+// newRecord returns a new instance of an existing record
 func newRecord(layout string, data interface{}, session Session) Record {
 	return Record{
 		ID:            data.(map[string]interface{})["recordId"].(string),
@@ -36,7 +36,7 @@ func newRecord(layout string, data interface{}, session Session) Record {
 	}
 }
 
-//Set sets the value of a specified field in the given record
+// Set sets the value of a specified field in the given record
 func (r *Record) Set(fieldName string, value interface{}) {
 	switch value.(type) {
 	case int:
@@ -62,7 +62,7 @@ func (r *Record) Set(fieldName string, value interface{}) {
 	r.StagedChanges[fieldName] = value
 }
 
-//Get gets the value of a field in the given record and returns it as an `interface{}`
+// Get gets the value of a field in the given record and returns it as an `interface{}`
 func (r *Record) Get(fieldName string) interface{} {
 	if val, ok := r.StagedChanges[fieldName]; ok {
 		return val
@@ -71,12 +71,12 @@ func (r *Record) Get(fieldName string) interface{} {
 	return r.FieldData[fieldName]
 }
 
-//Reset discards all uncommited changes made to the record
+// Reset discards all uncommited changes made to the record
 func (r *Record) Reset() {
 	r.StagedChanges = make(map[string]interface{})
 }
 
-//Commit commits the changes made to the record using the same session the record was retrieved/created with
+// Commit commits the changes made to the record using the same session the record was retrieved/created with
 func (r *Record) Commit() error {
 	if len(r.StagedChanges) == 0 {
 		return nil
@@ -139,7 +139,7 @@ func (r *Record) Commit() error {
 	return nil
 }
 
-//CommitToContainer commits the specified bytes buffer to the specified container field in the record.
+// CommitToContainer commits the specified bytes buffer to the specified container field in the record.
 func (r *Record) CommitToContainer(fieldName, filename string, dataBuf bytes.Buffer) error {
 	if r.ID == "" {
 		return errors.New("Record needs to be created first")
@@ -203,7 +203,7 @@ func (r *Record) CommitToContainer(fieldName, filename string, dataBuf bytes.Buf
 	return nil
 }
 
-//CommitFileToContainer commits the specified file to specified container field in the record
+// CommitFileToContainer commits the specified file to specified container field in the record
 func (r *Record) CommitFileToContainer(fieldName, filepath string) error {
 	//Record is empty and not created yet
 	if r.ID == "" {
@@ -222,7 +222,7 @@ func (r *Record) CommitFileToContainer(fieldName, filepath string) error {
 	return r.CommitToContainer(fieldName, filename, *buf)
 }
 
-//Create inserts the record into the database if it doesn't exist
+// Create inserts the record into the database if it doesn't exist
 func (r *Record) Create() error {
 	var jsonData = struct {
 		FieldData map[string]interface{} `json:"fieldData"`
@@ -321,7 +321,7 @@ func (r *Record) Create() error {
 	return nil
 }
 
-//Delete deletes the record using the same session the record was retrieved with
+// Delete deletes the record using the same session the record was retrieved with
 func (r *Record) Delete() error {
 	//Build and send request to the host
 	req, err := http.NewRequest(
@@ -365,7 +365,7 @@ func (r *Record) Delete() error {
 	return nil
 }
 
-//StringE behaves like String but returns ErrNotString if the value is not a string.
+// StringE behaves like String but returns ErrNotString if the value is not a string.
 func (r Record) StringE(fieldName string) (string, error) {
 	data := r.Get(fieldName)
 
@@ -385,7 +385,7 @@ func (r Record) String(fieldName string) string {
 	return s
 }
 
-//IntE behaves like Int but returns ErrNotNumber if the value is not a number.
+// IntE behaves like Int but returns ErrNotNumber if the value is not a number.
 func (r Record) IntE(fieldName string) (int, error) {
 	data := r.Get(fieldName)
 
@@ -405,7 +405,7 @@ func (r *Record) Int(fieldName string) int {
 	return i
 }
 
-//Int8E behaves like Int8 but returns ErrNotNumber if the value is not a number.
+// Int8E behaves like Int8 but returns ErrNotNumber if the value is not a number.
 func (r Record) Int8E(fieldName string) (int8, error) {
 	data := r.Get(fieldName)
 
@@ -425,7 +425,7 @@ func (r *Record) Int8(fieldName string) int8 {
 	return i
 }
 
-//Int16E behaves like Int16 but returns ErrNotNumber if the value is not a number.
+// Int16E behaves like Int16 but returns ErrNotNumber if the value is not a number.
 func (r Record) Int16E(fieldName string) (int16, error) {
 	data := r.Get(fieldName)
 
@@ -445,7 +445,7 @@ func (r *Record) Int16(fieldName string) int16 {
 	return i
 }
 
-//Int32E behaves like Int32 but returns ErrNotNumber if the value is not a number.
+// Int32E behaves like Int32 but returns ErrNotNumber if the value is not a number.
 func (r Record) Int32E(fieldName string) (int32, error) {
 	data := r.Get(fieldName)
 
@@ -465,7 +465,7 @@ func (r *Record) Int32(fieldName string) int32 {
 	return i
 }
 
-//Int64E behaves like Int64 but returns ErrNotNumber if the value is not a number.
+// Int64E behaves like Int64 but returns ErrNotNumber if the value is not a number.
 func (r Record) Int64E(fieldName string) (int64, error) {
 	data := r.Get(fieldName)
 
@@ -485,7 +485,7 @@ func (r *Record) Int64(fieldName string) int64 {
 	return i
 }
 
-//Float32E behaves like Float32 but returns ErrNotNumber if the value is not a number.
+// Float32E behaves like Float32 but returns ErrNotNumber if the value is not a number.
 func (r Record) Float32E(fieldName string) (float32, error) {
 	data := r.Get(fieldName)
 
@@ -505,7 +505,7 @@ func (r *Record) Float32(fieldName string) float32 {
 	return i
 }
 
-//Float64E behaves like Float64 but returns ErrNotNumber if the value is not a number.
+// Float64E behaves like Float64 but returns ErrNotNumber if the value is not a number.
 func (r Record) Float64E(fieldName string) (float64, error) {
 	data := r.Get(fieldName)
 
@@ -581,7 +581,7 @@ func (r Record) TimeE(fieldName string, loc *time.Location) (time.Time, error) {
 	return time.Time{}, ErrUnknownFormat
 }
 
-//Time gets the data in the specified field and attempts to parse it as a `time.Time` object.
+// Time gets the data in the specified field and attempts to parse it as a `time.Time` object.
 func (r *Record) Time(fieldName string, loc *time.Location) time.Time {
 	t, _ := r.TimeE(fieldName, loc)
 	return t
@@ -593,10 +593,12 @@ in the struct fields with an `fm`-tag matching the record field name.
 
 Example struct:
 `
-type example struct {
-	Name string `fm:"Name"`
-	Age int `fm:"Age"`
-}
+
+	type example struct {
+		Name string `fm:"Name"`
+		Age int `fm:"Age"`
+	}
+
 `
 
 - A pointer to the object must be passed (i.e `Record.Map(&obj)`).
