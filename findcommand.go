@@ -1,9 +1,9 @@
 package filemaker
 
-//FindCommand represents the findcommand
+// FindCommand represents the findcommand
 type FindCommand map[string]interface{}
 
-//NewFindCommand returns a findrequest
+// NewFindCommand returns a findrequest
 func NewFindCommand(requests ...interface{}) FindCommand {
 	var query []interface{}
 
@@ -18,19 +18,28 @@ func NewFindCommand(requests ...interface{}) FindCommand {
 	return command
 }
 
-//Limit sets the limit for the number of records returned by the findcommand
+// Limit sets the limit for the number of records returned by the findcommand
 func (c FindCommand) Limit(limit int) FindCommand {
 	c["limit"] = limit
 	return c
 }
 
-//Offset sets the offset for the records returned by the findcommand
+// Offset sets the offset for the records returned by the findcommand
 func (c FindCommand) Offset(offset int) FindCommand {
 	c["offset"] = offset
 	return c
 }
 
-//AddRequest appends a specified FindRequest to the FindCommand
+// Sort adds the specified sort rule to the findcommand
+func (c FindCommand) Sort(fieldName, sortOrder string) FindCommand {
+	if c["sort"] == nil {
+		c["sort"] = []interface{}{}
+	}
+	c["sort"] = append(c["sort"].([]interface{}), map[string]string{"fieldName": fieldName, "sortOrder": sortOrder})
+	return c
+}
+
+// AddRequest appends a specified FindRequest to the FindCommand
 func (c *FindCommand) AddRequest(request FindRequest) {
 	if query, ok := (*c)["query"]; ok {
 		(*c)["query"] = append(query.([]interface{}), request)
