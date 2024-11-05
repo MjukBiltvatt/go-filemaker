@@ -1,5 +1,11 @@
 package filemaker
 
+// SortAscending sets the sort order to ascending
+const SortAscending = "ascend"
+
+// SortDescending sets the sort order to ascending
+const SortDescending = "descend"
+
 // FindCommand represents the findcommand
 type FindCommand map[string]interface{}
 
