@@ -118,15 +118,26 @@ command := filemaker.NewFindCommand(
 ).Offset(10)
 ```
 
-### Limit and offset (chaining)
-Both of these can be chained, allowing them to be used directly in the `Find` method.
+### Sorting
+Sort the result by the specified field and order.
+
+``` go
+//Ascending sort order
+findCommand.Sort("FieldName", filemaker.SortAscending)
+
+//Descending sort order
+findCommand.Sort("FieldName", filemaker.SortDescending)
+```
+
+### Chaining (limit, offset, sort)
+These can be chained, allowing them to be used directly in the `Find` method.
 
 ``` go
 records, err := fm.Find(
   "layout name",
   filemaker.NewFindCommand(
     //...
-  ).Limit(10).Offset(10)
+  ).Limit(10).Offset(10).Sort("Firstname", filemaker.SortAscending)
 )
 ```
 

@@ -1,9 +1,9 @@
 package filemaker
 
-//FindRequest represents the findrequest that builds up a findcommand
+// FindRequest represents the findrequest that builds up a findcommand
 type FindRequest map[string]interface{}
 
-//NewFindRequest returns a new findrequest
+// NewFindRequest returns a new findrequest
 func NewFindRequest(criterions ...FindCriterion) FindRequest {
 	var request = make(FindRequest)
 
@@ -14,13 +14,13 @@ func NewFindRequest(criterions ...FindCriterion) FindRequest {
 	return request
 }
 
-//Omit sets the findrequest to omit matching records
+// Omit sets the findrequest to omit matching records
 func (r FindRequest) Omit() FindRequest {
 	r["omit"] = "true"
 	return r
 }
 
-//AddCriterion appends a specified FindCriterion to the FindRequest
+// AddCriterion appends a specified FindCriterion to the FindRequest
 func (r *FindRequest) AddCriterion(criterion FindCriterion) {
 	(*r)[criterion.FieldName] = criterion.Value
 }

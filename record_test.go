@@ -78,7 +78,7 @@ type testRecordStruct struct {
 	NestedNilStructPointer *nestedStructPointer
 }
 
-//TestRecordMap tests the `Record.Map` method
+// TestRecordMap tests the `Record.Map` method
 func TestRecordMap(t *testing.T) {
 	//Create a dummy record
 	record := newTestRecord()
