@@ -36,6 +36,25 @@ defer fm.Destroy()
 //Perform find command
 records, err := fm.Find(
   "layoutname",
+  filemaker.FindCommand{
+    Requests: []filemaker.FindRequest{
+      {
+        Criteria: filemaker.Fields{
+          "Firstname": "Mark",
+          "HasCat": "..",
+          "Age": "*",
+        },
+      },
+      {
+        Criteria: filemaker.Fields{
+          "Lastname": "==Johnsson",
+        },
+        Omit: true,
+      },
+    },
+    Limit: 10,
+    Offset: 10
+  },
   filemaker.NewFindCommand(
     filemaker.NewFindRequest(filemaker.Fields{
       "Firstname": "Mark",
@@ -45,7 +64,7 @@ records, err := fm.Find(
     filemaker.NewFindRequest(filemaker.Fields{
       "Lastname": "==Johnsson",
     }).WithOmit(true)
-  ).WithLimit(10)
+  ).WithLimit(10).WithOffset(10)
 )
 if err != nil {
   fmt.Printf("Failed to perform find: %s", err.Error())
