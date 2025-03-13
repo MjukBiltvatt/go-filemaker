@@ -106,7 +106,7 @@ func (r *Record) Commit() error {
 	)
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err := http.DefaultClient.Do(req)
+	res, err := r.Session.HttpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send PATCH request: %v", err.Error())
 	}
@@ -175,7 +175,7 @@ func (r *Record) CommitToContainer(fieldName, filename string, dataBuf bytes.Buf
 	req.Header.Set("Content-Disposition", cd)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err := http.DefaultClient.Do(req)
+	res, err := r.Session.HttpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
@@ -244,7 +244,7 @@ func (r *Record) Create() error {
 	)
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err := http.DefaultClient.Do(req)
+	res, err := r.Session.HttpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
@@ -287,7 +287,7 @@ func (r *Record) Create() error {
 	)
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err = http.DefaultClient.Do(req)
+	res, err = r.Session.HttpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send GET request: %v", err.Error())
 	}
@@ -330,7 +330,7 @@ func (r *Record) Delete() error {
 		bytes.NewBuffer([]byte{}),
 	)
 	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err := http.DefaultClient.Do(req)
+	res, err := r.Session.HttpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send DELETE request: %v", err.Error())
 	}
@@ -585,6 +585,39 @@ func (r Record) TimeE(fieldName string, loc *time.Location) (time.Time, error) {
 func (r *Record) Time(fieldName string, loc *time.Location) time.Time {
 	t, _ := r.TimeE(fieldName, loc)
 	return t
+}
+
+// GetContainerData gets the data in the specified container field as a byte slice.
+func (r *Record) GetContainerData(fieldName string) ([]byte, error) {
+	// Get the container data streaming URI
+	uri, err := r.StringE(fieldName)
+	if err != nil {
+		return nil, err
+	} else if !strings.HasPrefix(uri, r.Session.Host) {
+		return nil, fmt.Errorf("invalid or unsecure streaming URI: %v", uri)
+	}
+
+	// Create request to the location in the Location header
+	req, err := http.NewRequest(
+		"GET",
+		uri,
+		bytes.NewBuffer([]byte{}),
+	)
+	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
+	res, err := r.Session.HttpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send GET request: %v", err.Error())
+	} else if res.StatusCode != http.StatusOK {
+		//TODO: Parse body?
+		return nil, fmt.Errorf("failed to get container data: %v", res.Status)
+	}
+
+	// Read the body
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err.Error())
+	}
+	return data, nil
 }
 
 /*
