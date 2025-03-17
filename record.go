@@ -112,7 +112,7 @@ func (r *Record) Commit() error {
 	}
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -181,7 +181,7 @@ func (r *Record) CommitToContainer(fieldName, filename string, dataBuf bytes.Buf
 	}
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -250,7 +250,7 @@ func (r *Record) Create() error {
 	}
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -293,7 +293,7 @@ func (r *Record) Create() error {
 	}
 
 	//Read the body
-	resBodyBytes, err = ioutil.ReadAll(res.Body)
+	resBodyBytes, err = io.ReadAll(res.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -336,7 +336,7 @@ func (r *Record) Delete() error {
 	}
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -613,7 +613,7 @@ func (r *Record) GetContainerData(fieldName string) ([]byte, error) {
 	}
 
 	// Read the body
-	data, err := ioutil.ReadAll(res.Body)
+	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %v", err.Error())
 	}

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"time"
@@ -87,7 +87,7 @@ func (s *Session) Destroy() error {
 	s.lastActivity = time.Now()
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -139,7 +139,7 @@ func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error)
 	s.lastActivity = time.Now()
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -227,7 +227,7 @@ func New(host, database, username, password string) (*Session, error) {
 	}
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %v", err.Error())
 	}
