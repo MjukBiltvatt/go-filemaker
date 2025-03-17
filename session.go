@@ -6,13 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"time"
 )
 
 // Session is used for subsequent requests to the host
 type Session struct {
+	HttpClient   *http.Client
 	Token        string
 	Host         string
 	Database     string
@@ -76,7 +78,7 @@ func (s *Session) Destroy() error {
 		bytes.NewBuffer([]byte{}),
 	)
 	req.Header.Add("Content-Type", "application/json")
-	res, err := http.DefaultClient.Do(req)
+	res, err := s.HttpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send DELETE request: %v", err.Error())
 	}
@@ -85,7 +87,7 @@ func (s *Session) Destroy() error {
 	s.lastActivity = time.Now()
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -128,7 +130,7 @@ func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error)
 	)
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+s.Token)
-	res, err := http.DefaultClient.Do(req)
+	res, err := s.HttpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
@@ -137,7 +139,7 @@ func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error)
 	s.lastActivity = time.Now()
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -225,7 +227,7 @@ func New(host, database, username, password string) (*Session, error) {
 	}
 
 	//Read the body
-	resBodyBytes, err := ioutil.ReadAll(res.Body)
+	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %v", err.Error())
 	}
@@ -246,7 +248,12 @@ func New(host, database, username, password string) (*Session, error) {
 		)
 	}
 
+	// Create a new http client that automatically stores cookies
+	jar, _ := cookiejar.New(nil)
+	httpClient := http.Client{Jar: jar}
+
 	return &Session{
+		HttpClient:   &httpClient,
 		Token:        jsonRes.Response.Token,
 		Host:         host,
 		Database:     database,
