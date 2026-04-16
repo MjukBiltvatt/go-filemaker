@@ -135,9 +135,6 @@ func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error)
 		return nil, fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
 
-	//Update last activity time object in session
-	s.lastActivity = time.Now()
-
 	//Read the body
 	resBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
@@ -149,6 +146,11 @@ func (s *Session) Find(layout string, findCommand interface{}) ([]Record, error)
 	err = json.Unmarshal(resBodyBytes, &jsonRes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode response body as json: %v", err.Error())
+	}
+
+	//Update last activity time object in session if status code indicates success
+	if res.StatusCode >= 200 && res.StatusCode <= 299 {
+		s.lastActivity = time.Now()
 	}
 
 	//Check for errors
