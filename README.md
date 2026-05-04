@@ -375,3 +375,33 @@ The current `modId` is also exposed on the record:
 ``` go
 record.ModID
 ```
+
+# Running tests
+
+## Unit tests
+
+Pure unit tests cover field-data conversion, the `Record.Map` helper, and find-command construction. They have no external dependencies.
+
+```
+make test
+```
+
+(or just `go test ./...`). Integration tests are also included in this run but skip themselves when credentials aren't set, so this is safe in CI.
+
+## Integration tests
+
+A few tests (`TestModID_*`) exercise the live Data API and need credentials.
+
+To run them locally, copy `.env.example` to `.env` (gitignored) and fill in your credentials:
+
+```
+cp .env.example .env
+```
+
+Then run:
+
+```
+make test-integration
+```
+
+This sources `.env` and invokes `go test -v ./...`. Credentials never enter shell history.
