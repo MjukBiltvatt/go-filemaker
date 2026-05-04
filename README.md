@@ -169,6 +169,8 @@ record.Set("field name", "new data")
 err := record.Commit()
 ```
 
+By default, `Commit()` uses last-write-wins — concurrent edits by another client will be silently overwritten. To enable optimistic concurrency, see [UseModID](#usemodid).
+
 ### Revert uncommitted changes
 
 ``` go
@@ -347,4 +349,29 @@ This method can be used to get a time object representing the time the last requ
 
 ``` go
 fm.LastActivity()
+```
+
+#### UseModID
+
+FileMaker assigns each record a `modId` that increments on every edit. When `UseModID` is enabled, `Commit()` sends the record's `modId` along with the field data, and FileMaker rejects the update if the record was modified by anyone else since it was read — giving you optimistic concurrency instead of last-write-wins.
+
+***Defaults to `false` for backwards compatibility. This default may change in a future major version.***
+
+``` go
+fm, _ := filemaker.New(/* ... */)
+fm.UseModID = true
+
+records, _ := fm.Find("layout name", /* ... */)
+record := records[0]
+record.Set("field name", "new data")
+
+//Returns an error if another client edited this record
+//between the Find and the Commit
+err := record.Commit()
+```
+
+The current `modId` is also exposed on the record:
+
+``` go
+record.ModID
 ```
