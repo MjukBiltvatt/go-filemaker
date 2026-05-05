@@ -93,6 +93,8 @@ func (r *Record) Commit() error {
 	body := map[string]interface{}{
 		"fieldData": r.StagedChanges,
 	}
+	// ModID is always populated by Find/Create on supported FMS versions;
+	// the empty check is defensive in case a caller hand-constructs a Record.
 	if r.Session.UseModID && r.ModID != "" {
 		body["modId"] = r.ModID
 	}
