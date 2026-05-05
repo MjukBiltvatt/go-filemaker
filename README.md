@@ -382,7 +382,7 @@ record.ModID
 
 Pure unit tests cover field-data conversion, the `Record.Map` helper, and find-command construction. They have no external dependencies.
 
-```
+```sh
 make test
 ```
 
@@ -394,13 +394,13 @@ A few tests (`TestModID_*`) exercise the live Data API and need credentials.
 
 To run them locally, copy `.env.example` to `.env` (gitignored) and fill in your credentials:
 
-```
+```sh
 cp .env.example .env
 ```
 
 Then run:
 
-```
+```sh
 make test-integration
 ```
 
