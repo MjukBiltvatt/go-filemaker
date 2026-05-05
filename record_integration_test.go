@@ -16,10 +16,10 @@ func integrationSession(t *testing.T) (*Session, string, string) {
 	host := os.Getenv("FM_TEST_HOST")
 	db := os.Getenv("FM_TEST_DB")
 	user := os.Getenv("FM_TEST_USER")
-	pass := os.Getenv("FM_TEST_PASS")
+	pass, passSet := os.LookupEnv("FM_TEST_PASS")
 	layout := os.Getenv("FM_TEST_LAYOUT")
 	field := os.Getenv("FM_TEST_FIELD")
-	if host == "" || db == "" || user == "" || layout == "" || field == "" {
+	if host == "" || db == "" || user == "" || !passSet || layout == "" || field == "" {
 		t.Skip("integration test skipped: set FM_TEST_HOST, FM_TEST_DB, FM_TEST_USER, FM_TEST_PASS, FM_TEST_LAYOUT, FM_TEST_FIELD")
 	}
 	fm, err := New(host, db, user, pass)
