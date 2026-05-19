@@ -231,6 +231,9 @@ func New(host, database, username, password string, opts ...Option) (*Session, e
 	cfg := &config{timeout: 30 * time.Second}
 	// Apply any optional parameters
 	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
 		opt(cfg)
 	}
 
