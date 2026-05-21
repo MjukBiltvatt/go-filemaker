@@ -191,8 +191,23 @@ func (s *Session) LastActivity() time.Time {
 	return s.lastActivity
 }
 
+// Option is used to configure optional parameters for New
+type Option func(*config)
+
+// config is used to store optional parameters for New
+type config struct {
+	timeout time.Duration
+}
+
+// WithTimeout sets the timeout for the http client
+func WithTimeout(timeout time.Duration) Option {
+	return func(c *config) {
+		c.timeout = timeout
+	}
+}
+
 // New starts a database session
-func New(host, database, username, password string) (*Session, error) {
+func New(host, database, username, password string, opts ...Option) (*Session, error) {
 	if host == "" {
 		return nil, errors.New("No host specified")
 	} else if database == "" {
@@ -212,6 +227,21 @@ func New(host, database, username, password string) (*Session, error) {
 		host = fmt.Sprintf("https://%s", host)
 	}
 
+	// Default parameters for the http client
+	cfg := &config{timeout: 30 * time.Second}
+	// Apply any optional parameters
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(cfg)
+	}
+
+	// Setup a new http client with a timeout
+	var httpClient = &http.Client{
+		Timeout: cfg.timeout,
+	}
+
 	//Build and send request to the host
 	req, err := http.NewRequest(
 		"POST",
@@ -223,7 +253,7 @@ func New(host, database, username, password string) (*Session, error) {
 		"Authorization",
 		"Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)),
 	)
-	res, err := http.DefaultClient.Do(req)
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send POST request: %v", err.Error())
 	}
@@ -250,12 +280,12 @@ func New(host, database, username, password string) (*Session, error) {
 		)
 	}
 
-	// Create a new http client that automatically stores cookies
+	// Add a jar to the existing http client that automatically stores cookies
 	jar, _ := cookiejar.New(nil)
-	httpClient := http.Client{Jar: jar}
+	httpClient.Jar = jar
 
 	return &Session{
-		HttpClient:   &httpClient,
+		HttpClient:   httpClient,
 		Token:        jsonRes.Response.Token,
 		Host:         host,
 		Database:     database,

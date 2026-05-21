@@ -25,6 +25,7 @@ fm, err := filemaker.New(
   "database",
   "username",
   "password",
+  filemaker.WithTimeout(10 * time.Second), // OPTIONAL: specify the HTTP request timeout, default is 30 seconds
 )
 if err != nil {
   fmt.Printf("Failed to start session: %s", err.Error())
@@ -341,7 +342,40 @@ fmt.Printf("%+v\n", hero)
 ```
 
 ## Session
-#### Last activity time object
+
+### HTTP client timeout
+
+Default timeout is 30 seconds.
+
+The HTTP client timeout can be overridden with the `WithTimeout` option when creating a new session.
+The timeout is applied to every HTTP request to the FileMaker server.
+
+Setting the timeout to 0 will disable the timeout completely.
+
+Overriding the default timeout:
+
+``` go
+filemaker.New(
+  "https://my.host.com",
+  "database",
+  "username",
+  "password",
+  filemaker.WithTimeout(60 * time.Second),
+)
+```
+
+Using default timeout:
+
+``` go
+filemaker.New(
+  "https://my.host.com",
+  "database",
+  "username",
+  "password",
+)
+```
+
+### Last activity time object
 
 This method can be used to get a time object representing the time the last request was made using the session. Defaults to when the session was created until another request has been made.
 
