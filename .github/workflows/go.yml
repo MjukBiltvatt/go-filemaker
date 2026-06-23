@@ -4,10 +4,8 @@
 name: Go
 
 on:
-  push:
-    branches: [ "v3" ]
   pull_request:
-    branches: [ "v3" ]
+    branches: [ "v4" ]
 
 jobs:
 
