@@ -4,6 +4,8 @@
 name: Go
 
 on:
+  push:
+    branches: [ "feature/v4-dev" ]
   pull_request:
     branches: [ "v4" ]
 

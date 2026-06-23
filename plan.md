@@ -374,8 +374,8 @@ _ = found.Records
 
 ## Versioning & migration
 
-- Bump module path to `github.com/MjukBiltvatt/go-filemaker/v4` in `go.mod`;
-  raise the Go directive (e.g. `go 1.21` for `any`/generics-era stdlib).
+- Module path bumped to `github.com/MjukBiltvatt/go-filemaker/v4` and the Go
+  directive raised to `go 1.21` (done early, in phase 2's tooling pass).
 - This is intentionally breaking — ship as a clean `v4.0.0`.
 - Provide a **migration guide** in the README mapping each v3 call to its v4
   equivalent (the table above, expanded). Keep the v3 line available on its own
@@ -397,8 +397,8 @@ _ = found.Records
 5. **Concurrency hardening.** Add `sync.RWMutex` (or atomics), document the
    invariant, add `-race` fan-out tests.
 6. **Errors.** Introduce `APIError`; thread it through `do()`.
-7. **Docs.** Rewrite README for the v4 API, add migration guide, bump module to
-   `/v4`.
+7. **Docs.** Rewrite README for the v4 API, add migration guide, update the
+   README install/import paths to `/v4` (module path itself already bumped).
 8. **Verify.** `go vet ./...`, `go test -race ./...`, and a manual smoke test
    against a real FileMaker server (creds available locally).
 
