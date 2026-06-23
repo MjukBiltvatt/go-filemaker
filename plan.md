@@ -115,8 +115,14 @@ func (c *Client) Delete(ctx context.Context, layout, id string) error
 func (c *Client) UploadToContainer(ctx context.Context, layout, id, field, filename string, data io.Reader) error
 ```
 
-`FieldData` is an exported `map[string]any` (or a small wrapper) holding the
-fields to write.
+`FieldData` is an exported `map[string]any` holding the fields to write.
+`Create`/`Update` marshal it **faithfully** — no value coercion. Values should
+be strings or numbers; for Go ergonomics there are opt-in marshalable wrappers
+(`Bool` → 1/0, `Date` → MM/DD/YYYY, `Timestamp` → MM/DD/YYYY HH:MM:SS; zero time
+→ "" clears the field) that slot directly into the map and need no `Client`
+change. This mirrors the read side's raw-vs-typed split (`Get` vs
+`Bool`/`Time`). A bare Go `bool`/`time.Time` is sent as-is (and likely rejected
+by the host) — use the wrappers.
 
 Response types, each matching the documented Data API envelope:
 
@@ -334,7 +340,8 @@ Handling rules (fixing v3's `Messages[0]` bug):
 ```
 client.go     // Client + New/Destroy/options/LastActivity + do()/locking
               //   + Find/Create/Update/Delete/ContainerData/UploadToContainer
-record.go     // Record data type + typed getters + Map
+record.go     // Record data type + FieldData + typed getters + Map
+values.go     // Bool/Date/Timestamp write-value wrappers
 find.go       // Query/Request/SortRule/SortOrder + MarshalJSON
 errors.go     // APIError + sentinels
 doc.go        // package doc / overview example
