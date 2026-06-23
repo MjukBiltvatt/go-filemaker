@@ -394,23 +394,34 @@ _ = found.Records
 
 ## Implementation phases
 
-1. **Scaffold types.** Add `Client` (unexported fields), `Record` data type, and
-   the declarative `find.go` types with `MarshalJSON` + unit tests for the JSON
-   output. No network code yet.
-2. **Internal `do()` helper.** Centralize request/response handling with the
-   safety fixes (status checks, `Messages` length guard, context, locking).
-3. **Port operations to the client.** Implement `Find`, `Create`, `Update`,
-   `Delete`, container upload/download on top of `do()`. (A single-record `Get`
-   is deferred.)
-4. **Port read-side helpers.** Move typed getters + `Map` onto the data-only
-   `Record`; drop `io/ioutil`.
-5. **Concurrency hardening.** Add `sync.RWMutex` (or atomics), document the
-   invariant, add `-race` fan-out tests.
-6. **Errors.** Introduce `APIError`; thread it through `do()`.
-7. **Docs.** Rewrite README for the v4 API, add migration guide, update the
+- [x] **1. Scaffold types.** Add `Client` (unexported fields), `Record` data
+   type, and the declarative `find.go` types with `MarshalJSON` + unit tests for
+   the JSON output. No network code yet.
+- [x] **2. Internal `do()` helper.** Centralize request/response handling with
+   the safety fixes (status checks, `Messages` length guard, context). Landed
+   here ahead of schedule: the `sync.RWMutex`-guarded `token`/`lastActivity`
+   plus the documented concurrency invariant and the `-race` fan-out test
+   `TestConcurrentDo` (from 5), and the `APIError`/`Message` types threaded
+   through `do()`/`send()` with the empty-`messages` panic guard (from 6).
+- [x] **3. Port operations to the client.** Implement `Find`, `Create`,
+   `Update`, `Delete`, container upload/download on top of `do()`. (A
+   single-record `Get` is deferred.)
+- [ ] **4. Port read-side helpers.** Move typed getters + `Map` onto the
+   data-only `Record`; drop `io/ioutil`.
+- [ ] **5. Concurrency hardening — remaining.** De-duplicate concurrent
+   re-authentication: today multiple goroutines that hit an expired token can
+   each re-auth (race-free but wasteful — see `reauthenticate`). The
+   `sync.RWMutex`, concurrency invariant, and `-race` fan-out test already landed
+   in phase 2.
+- [ ] **6. Errors — remaining.** Expose `errors.Is`-friendly sentinel(s) for the
+   codes callers may branch on (e.g. invalid token) and finish error
+   documentation. The `APIError`/`Message` types, the messages length-guard, and
+   threading through `do()` already landed in phase 2; the value-accessor
+   sentinels (`ErrNotNumber`/`ErrNotString`/`ErrUnknownFormat`) already exist.
+- [ ] **7. Docs.** Rewrite README for the v4 API, add migration guide, update the
    README install/import paths to `/v4` (module path itself already bumped).
-8. **Verify.** `go vet ./...`, `go test -race ./...`, and a manual smoke test
-   against a real FileMaker server (creds available locally).
+- [ ] **8. Verify.** `go vet ./...`, `go test -race ./...`, and a manual smoke
+   test against a real FileMaker server (creds available locally).
 
 ---
 
