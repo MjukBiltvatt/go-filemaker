@@ -199,13 +199,8 @@ type Query struct {
 }
 
 type Request struct {
-    Criteria []Criterion
+    Criteria map[string]string // field name -> find value; AND-ed together
     Omit     bool
-}
-
-type Criterion struct {
-    Field string
-    Value string
 }
 
 type SortRule struct {
@@ -225,13 +220,11 @@ const (
   ```go
   q := filemaker.Query{
       Requests: []filemaker.Request{
-          {Criteria: []filemaker.Criterion{
-              {Field: "Firstname", Value: "Mark"},
-              {Field: "Age", Value: "*"},
+          {Criteria: map[string]string{
+              "Firstname": "Mark",
+              "Age":       "*",
           }},
-          {Criteria: []filemaker.Criterion{
-              {Field: "Lastname", Value: "==Johnson"},
-          }, Omit: true},
+          {Criteria: map[string]string{"Lastname": "==Johnson"}, Omit: true},
       },
       Limit: 10,
       Sort:  []filemaker.SortRule{{Field: "Firstname", Order: filemaker.SortAscending}},
@@ -340,7 +333,7 @@ Handling rules (fixing v3's `Messages[0]` bug):
 client.go     // Client + New/Destroy/options/LastActivity + do()/locking
               //   + Find/Get/Create/Update/Delete/ContainerData/UploadToContainer
 record.go     // Record data type + typed getters + Map
-find.go       // Query/Request/Criterion/SortRule + MarshalJSON
+find.go       // Query/Request/SortRule/SortOrder + MarshalJSON
 errors.go     // APIError + sentinels
 doc.go        // package doc / overview example
 *_test.go     // httptest-backed tests incl. -race
