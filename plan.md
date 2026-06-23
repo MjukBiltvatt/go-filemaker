@@ -105,11 +105,10 @@ Each method returns a **dedicated response type** that mirrors exactly what the
 Data API populates for that verb — so any field the caller can reach is
 guaranteed to have a value. The library does **not** issue a follow-up `GET` to
 backfill data the API didn't return; if the caller wants the full record after a
-write, they issue their own `Find`/`Get`.
+write, they issue their own `Find`.
 
 ```go
 func (c *Client) Find(ctx context.Context, layout string, q Query) (FindResponse, error)
-func (c *Client) Get(ctx context.Context, layout, id string) (Record, error)   // optional
 func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (CreateResponse, error)
 func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData) (UpdateResponse, error)
 func (c *Client) Delete(ctx context.Context, layout, id string) error
@@ -151,8 +150,10 @@ type DataInfo struct {
 }
 ```
 
-- `Get` returns a single `Record` (or a not-found error); it shares the `Find`
-  decode path.
+- A single-record `Get(ctx, layout, id) (Record, error)` is **deferred** for now
+  (removed in phase 3). When reintroduced it shares the `Find` decode path and
+  would map the host's record-missing code `101` to an `errors.Is`-friendly
+  `ErrRecordNotFound` sentinel. `Find` covers lookups in the meantime.
 - `DataInfo` is always present on a successful find (FMS 18+) and is the only
   source of `FoundCount` for pagination, so every field stays meaningful.
 
@@ -298,8 +299,9 @@ Handling rules (fixing v3's `Messages[0]` bug):
 - Keep/relocate the value-accessor sentinels: `ErrNotNumber`, `ErrNotString`,
   `ErrUnknownFormat`.
 - "No records found" (`401`): `Find` returns a `FindResponse` with empty
-  `Records` and nil error (preserve current behavior); `Get` returns a
-  not-found error.
+  `Records` and nil error (preserve current behavior). (A `Get` with an
+  `ErrRecordNotFound` sentinel for code `101` is deferred along with the `Get`
+  method.)
 
 > Note: `messages` is distinct from script output. If Data API script execution
 > is added later, `scriptResult`/`scriptError` arrive inside the `response`
@@ -331,7 +333,7 @@ Handling rules (fixing v3's `Messages[0]` bug):
 
 ```
 client.go     // Client + New/Destroy/options/LastActivity + do()/locking
-              //   + Find/Get/Create/Update/Delete/ContainerData/UploadToContainer
+              //   + Find/Create/Update/Delete/ContainerData/UploadToContainer
 record.go     // Record data type + typed getters + Map
 find.go       // Query/Request/SortRule/SortOrder + MarshalJSON
 errors.go     // APIError + sentinels
@@ -391,7 +393,8 @@ _ = found.Records
 2. **Internal `do()` helper.** Centralize request/response handling with the
    safety fixes (status checks, `Messages` length guard, context, locking).
 3. **Port operations to the client.** Implement `Find`, `Create`, `Update`,
-   `Delete`, `Get`, container upload/download on top of `do()`.
+   `Delete`, container upload/download on top of `do()`. (A single-record `Get`
+   is deferred.)
 4. **Port read-side helpers.** Move typed getters + `Map` onto the data-only
    `Record`; drop `io/ioutil`.
 5. **Concurrency hardening.** Add `sync.RWMutex` (or atomics), document the
@@ -414,7 +417,7 @@ _ = found.Records
    only `error`), so every reachable field is guaranteed populated. Writes do
    **not** auto-issue a follow-up read. `Record` gains `ModID` and `PortalData`.
 2. **`context.Context`: yes.** Every network method takes `ctx` as its first
-   argument (`Find`, `Get`, `Create`, `Update`, `Delete`, `Destroy`, container
+   argument (`Find`, `Create`, `Update`, `Delete`, `Destroy`, container
    upload/download), built via `http.NewRequestWithContext`.
 3. **Token auto-refresh: opt-in.** Off by default; enabled with the
    `WithAutoReauth` option. When on, `do()` transparently re-authenticates and
