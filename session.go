@@ -20,6 +20,7 @@ type Session struct {
 	Database     string
 	Username     string
 	Password     string
+	UseModID     bool
 	lastActivity time.Time
 }
 

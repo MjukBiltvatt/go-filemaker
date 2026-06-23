@@ -19,6 +19,7 @@ import (
 // Record interface for some magic with methods
 type Record struct {
 	ID            string
+	ModID         string
 	Layout        string
 	StagedChanges map[string]interface{}
 	FieldData     map[string]interface{}
@@ -27,11 +28,14 @@ type Record struct {
 
 // newRecord returns a new instance of an existing record
 func newRecord(layout string, data interface{}, session Session) Record {
+	m := data.(map[string]interface{})
+	modID, _ := m["modId"].(string)
 	return Record{
-		ID:            data.(map[string]interface{})["recordId"].(string),
+		ID:            m["recordId"].(string),
+		ModID:         modID,
 		Layout:        layout,
 		StagedChanges: make(map[string]interface{}),
-		FieldData:     data.(map[string]interface{})["fieldData"].(map[string]interface{}),
+		FieldData:     m["fieldData"].(map[string]interface{}),
 		Session:       &session,
 	}
 }
@@ -86,14 +90,17 @@ func (r *Record) Commit() error {
 		return r.Create()
 	}
 
-	var jsonData = struct {
-		FieldData map[string]interface{} `json:"fieldData"`
-	}{
-		r.StagedChanges,
+	body := map[string]interface{}{
+		"fieldData": r.StagedChanges,
+	}
+	// ModID is always populated by Find/Create on supported FMS versions;
+	// the empty check is defensive in case a caller hand-constructs a Record.
+	if r.Session.UseModID && r.ModID != "" {
+		body["modId"] = r.ModID
 	}
 
 	//Create the request json body
-	var requestBody, err = json.Marshal(jsonData)
+	var requestBody, err = json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request body: %v", err.Error())
 	}
@@ -130,6 +137,10 @@ func (r *Record) Commit() error {
 			jsonRes.Messages[0].Message,
 			jsonRes.Messages[0].Code,
 		)
+	}
+
+	if jsonRes.Response.ModID != "" {
+		r.ModID = jsonRes.Response.ModID
 	}
 
 	for fieldName, value := range r.StagedChanges {
@@ -314,8 +325,12 @@ func (r *Record) Create() error {
 	}
 
 	//Parse the field data for the record
-	for fieldname, val := range jsonRes.Response.Data[0].(map[string]interface{})["fieldData"].(map[string]interface{}) {
+	rec := jsonRes.Response.Data[0].(map[string]interface{})
+	for fieldname, val := range rec["fieldData"].(map[string]interface{}) {
 		r.FieldData[fieldname] = val
+	}
+	if mid, ok := rec["modId"].(string); ok {
+		r.ModID = mid
 	}
 
 	return nil

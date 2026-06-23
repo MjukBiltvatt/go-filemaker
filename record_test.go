@@ -10,6 +10,7 @@ func newTestRecord() Record {
 		"layout",
 		map[string]interface{}{
 			"recordId": "recordId",
+			"modId":    "1",
 			"fieldData": map[string]interface{}{
 				"string":              "string",
 				"int":                 float64(100),
@@ -285,6 +286,30 @@ func TestRecordMap(t *testing.T) {
 		got := value.NestedNilStructPointer
 		if got != nil {
 			t.Errorf("got: %v, expected: %v", got, nil)
+		}
+	})
+}
+
+// TestNewRecordModID verifies that newRecord populates ModID from the API response.
+func TestNewRecordModID(t *testing.T) {
+	t.Run("present", func(t *testing.T) {
+		r := newTestRecord()
+		if r.ModID != "1" {
+			t.Errorf("got: %q, expected: %q", r.ModID, "1")
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		r := newRecord(
+			"layout",
+			map[string]interface{}{
+				"recordId":  "recordId",
+				"fieldData": map[string]interface{}{},
+			},
+			Session{},
+		)
+		if r.ModID != "" {
+			t.Errorf("got: %q, expected empty string", r.ModID)
 		}
 	})
 }

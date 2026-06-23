@@ -170,6 +170,8 @@ record.Set("field name", "new data")
 err := record.Commit()
 ```
 
+By default, `Commit()` uses last-write-wins — concurrent edits by another client will be silently overwritten. To enable optimistic concurrency, see [UseModID](#usemodid).
+
 ### Revert uncommitted changes
 
 ``` go
@@ -382,3 +384,58 @@ This method can be used to get a time object representing the time the last requ
 ``` go
 fm.LastActivity()
 ```
+
+#### UseModID
+
+FileMaker assigns each record a `modId` that increments on every edit. When `UseModID` is enabled, `Commit()` sends the record's `modId` along with the field data, and FileMaker rejects the update if the record was modified by anyone else since it was read — giving you optimistic concurrency instead of last-write-wins.
+
+***Defaults to `false` for backwards compatibility. This default may change in a future major version.***
+
+``` go
+fm, _ := filemaker.New(/* ... */)
+fm.UseModID = true
+
+records, _ := fm.Find("layout name", /* ... */)
+record := records[0]
+record.Set("field name", "new data")
+
+//Returns an error if another client edited this record
+//between the Find and the Commit
+err := record.Commit()
+```
+
+The current `modId` is also exposed on the record:
+
+``` go
+record.ModID
+```
+
+# Running tests
+
+## Unit tests
+
+Pure unit tests cover field-data conversion, the `Record.Map` helper, and find-command construction. They have no external dependencies.
+
+```sh
+make test
+```
+
+(or just `go test ./...`). Integration tests are also included in this run but skip themselves when credentials aren't set, so this is safe in CI.
+
+## Integration tests
+
+A few tests (`TestModID_*`) exercise the live Data API and need credentials.
+
+To run them locally, copy `.env.example` to `.env` (gitignored) and fill in your credentials:
+
+```sh
+cp .env.example .env
+```
+
+Then run:
+
+```sh
+make test-integration
+```
+
+This sources `.env` and invokes `go test -v ./...`. Credentials never enter shell history.
