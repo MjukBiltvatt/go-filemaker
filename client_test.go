@@ -35,14 +35,34 @@ func testClient(srv *httptest.Server) *Client {
 }
 
 func TestNormalizeHost(t *testing.T) {
-	cases := map[string]string{
-		"my.host.com":           "https://my.host.com",
-		"https://my.host.com":   "https://my.host.com",
-		"http://localhost:8080": "http://localhost:8080",
+	cases := []struct {
+		in            string
+		allowInsecure bool
+		want          string
+		wantErr       bool
+	}{
+		{in: "my.host.com", want: "https://my.host.com"},
+		{in: "https://my.host.com", want: "https://my.host.com"},
+		{in: "http://localhost:8080", wantErr: true},
+		{in: "http://localhost:8080", allowInsecure: true, want: "http://localhost:8080"},
+		{in: "HTTP://localhost:8080", wantErr: true},
+		{in: "ftp://my.host.com", wantErr: true},
+		{in: "ftp://my.host.com", allowInsecure: true, wantErr: true},
 	}
-	for in, want := range cases {
-		if got := normalizeHost(in); got != want {
-			t.Errorf("normalizeHost(%q) = %q, want %q", in, got, want)
+	for _, c := range cases {
+		got, err := normalizeHost(c.in, c.allowInsecure)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("normalizeHost(%q, %v) = %q, want error", c.in, c.allowInsecure, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("normalizeHost(%q, %v) unexpected error: %v", c.in, c.allowInsecure, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("normalizeHost(%q, %v) = %q, want %q", c.in, c.allowInsecure, got, c.want)
 		}
 	}
 }
@@ -58,7 +78,7 @@ func TestNew(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "db", "user", "pass")
+	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -103,7 +123,7 @@ func TestNewHostError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := New(srv.URL, "db", "user", "bad")
+	_, err := New(srv.URL, "db", "user", "bad", WithInsecureHTTP())
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.Code() != 212 {
 		t.Fatalf("got %v, want *APIError with code 212", err)

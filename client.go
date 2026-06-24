@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,6 +54,7 @@ type config struct {
 	reauthOnInvalidToken bool
 	idleTimeout          time.Duration
 	location             *time.Location
+	allowInsecureHTTP    bool
 }
 
 // WithTimeout sets the timeout applied to every HTTP request made by the
@@ -93,6 +95,16 @@ func WithReauthOnIdle(timeout ...time.Duration) Option {
 	}
 }
 
+// WithInsecureHTTP permits the client to connect to a host over plaintext
+// http://. This sends the credentials and session token unencrypted and must
+// only be used for local development or testing against a trusted host. Without
+// it, New rejects any host whose scheme is not https.
+func WithInsecureHTTP() Option {
+	return func(c *config) {
+		c.allowInsecureHTTP = true
+	}
+}
+
 // WithLocation sets the time zone used to interpret FileMaker date and timestamp
 // fields (which carry no zone) when reading them back through a record's
 // Time/TimeE methods or Decode. Records returned by the client carry this
@@ -104,7 +116,9 @@ func WithLocation(loc *time.Location) Option {
 }
 
 // New starts a database session by authenticating against the host. The host
-// may include a scheme; if it does not, https is assumed.
+// may include a scheme; if it does not, https is assumed. Plaintext http is
+// rejected unless WithInsecureHTTP is passed, and any scheme other than http or
+// https is rejected outright.
 func New(host, database, username, password string, opts ...Option) (*Client, error) {
 	switch {
 	case host == "":
@@ -122,10 +136,15 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 		}
 	}
 
+	normalizedHost, err := normalizeHost(host, cfg.allowInsecureHTTP)
+	if err != nil {
+		return nil, err
+	}
+
 	jar, _ := cookiejar.New(nil)
 	c := &Client{
 		httpClient:           &http.Client{Timeout: cfg.timeout, Jar: jar},
-		host:                 normalizeHost(host),
+		host:                 normalizedHost,
 		database:             database,
 		username:             username,
 		password:             password,
@@ -636,13 +655,30 @@ func (c *Client) containerURL(layout, id, field string) string {
 	return fmt.Sprintf("%s/layouts/%s/records/%s/containers/%s", c.baseURL(), layout, id, field)
 }
 
-// normalizeHost defaults the scheme to https only when none is present, leaving
-// an explicit scheme (including http, used in tests/dev) untouched.
-func normalizeHost(host string) string {
-	if strings.Contains(host, "://") {
-		return host
+// normalizeHost defaults the scheme to https when none is present, then
+// validates it: plaintext http is allowed only when allowInsecureHTTP is set,
+// and any scheme other than http or https is rejected outright.
+func normalizeHost(host string, allowInsecureHTTP bool) (string, error) {
+	if !strings.Contains(host, "://") {
+		host = "https://" + host
 	}
-	return "https://" + host
+
+	u, err := url.Parse(host)
+	if err != nil {
+		return "", fmt.Errorf("filemaker: invalid host %q: %w", host, err)
+	}
+
+	switch u.Scheme {
+	case "https":
+	case "http":
+		if !allowInsecureHTTP {
+			return "", errors.New("filemaker: refusing to connect over plaintext http; use https or pass WithInsecureHTTP for development")
+		}
+	default:
+		return "", fmt.Errorf("filemaker: unsupported host scheme %q; use https (or http with WithInsecureHTTP)", u.Scheme)
+	}
+
+	return host, nil
 }
 
 // basicAuth builds the value for an HTTP Basic Authorization header.
