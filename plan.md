@@ -464,7 +464,7 @@ _ = found.Records
 
 ## Deferred (revisit later)
 
-- **Configurable time formats (`WithTimeFormats`).** `TimeInE` currently tries a
+- [ ] **Configurable time formats (`WithTimeFormats`).** `TimeInE` currently tries a
   fixed list of layouts until one parses, which silently assumes US `MM/DD`
   ordering and cannot disambiguate `MM/DD` vs `DD/MM` (both parse). The
   principled fix is to treat the accepted layout(s) as client config (like
@@ -472,7 +472,7 @@ _ = found.Records
   until the phase-8 smoke test shows whether the Data API actually emits
   non-US/variable date formats — if it normalizes to a fixed format, the simple
   list stays and we just document the assumption.
-- **Runtime-toggleable `autoReauth` (`SetAutoReauth`).** Options are init-only by
+- [ ] **Runtime-toggleable `autoReauth` (`SetAutoReauth`).** Options are init-only by
   design (immutable config → lock-free reads). `autoReauth` is the one with a
   plausible runtime case (flip off to *detect* an expired token). If needed,
   make the field an `atomic.Bool` with a `SetAutoReauth(bool)` setter —
