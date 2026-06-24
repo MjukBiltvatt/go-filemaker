@@ -423,7 +423,7 @@ _ = found.Records
 - [x] **3. Port operations to the client.** Implement `Find`, `Create`,
    `Update`, `Delete`, container upload/download on top of `do()`. (A
    single-record `Get` is deferred.)
-- [ ] **4. Port read-side helpers.** Move typed getters + `Decode` (was `Map`)
+- [x] **4. Port read-side helpers.** Move typed getters + `Decode` (was `Map`)
    onto the data-only `Record`; drop `io/ioutil`. Includes the trimmed getter
    set, `Has`, and `WithLocation` (time zone carried onto records).
 - [ ] **5. Concurrency hardening — remaining.** De-duplicate concurrent
