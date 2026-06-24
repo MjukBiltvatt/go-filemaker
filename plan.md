@@ -95,9 +95,10 @@ func (c *Client) LastActivity() time.Time
   check-then-reauth sequence can hold the lock across the whole critical
   section.
 - `*http.Client` is already safe for concurrent use; share it directly.
-- Options (`func(*Client)` / `func(*config)`): `WithTimeout` (carried over from
-  v3) and `WithAutoReauth` (opt-in transparent re-auth + retry on token expiry;
-  off by default — see the internal HTTP layer).
+- Options (`func(*config)`): `WithTimeout` (carried over from v3),
+  `WithAutoReauth` (opt-in transparent re-auth + retry on token expiry; off by
+  default — see the internal HTTP layer), and `WithLocation` (time zone for
+  date/timestamp fields, stamped onto returned records; default UTC).
 
 ### 2. Record operations move onto the client
 
@@ -181,12 +182,24 @@ type Record struct {
   the API returns. `ModID` also enables optional optimistic-locking on `Update`
   later (passing `modId` so the host rejects a write if the record changed). No
   portal accessors are planned for the initial cut beyond exposing the raw map.
-- Keep the **read-only typed accessors** (`String`/`StringE`, `Int…`, `Float…`,
-  `Bool`, `Time`/`TimeE`, `Get`, `Map`) — they are pure functions of the data
-  and remain valuable. Normalize them to consistent value receivers.
-- `Map` and the container-download helper need field data plus, for containers,
-  the client (since downloading streams an authenticated URL). Container
-  download therefore becomes a client method:
+- Keep the **read-only typed accessors** — pure functions of the data, all value
+  receivers. The set is trimmed to what FileMaker actually needs (numbers come
+  back as `float64`, so the small int/float sizes were dropped):
+  `Get`, `Has`, `String`/`StringE`, `Int`/`IntE`, `Int64`/`Int64E`,
+  `Float64`/`Float64E`, `Bool`, and the time accessors. `Has` distinguishes an
+  absent field from a present zero value.
+- **Time + location.** Date/timestamp fields carry no zone, so the location is a
+  client-level concern: `WithLocation(loc)` (default UTC) is stamped onto every
+  record `Find` returns. `Time(field)`/`TimeE(field)` use that location;
+  `TimeIn(field, loc)`/`TimeInE(field, loc)` override it explicitly.
+- **`Decode` (was `Map`).** Renamed — "decode generic map → typed struct" is the
+  conventional name (cf. `mapstructure.Decode`), and `Map` reads as a transform
+  in Go. `Decode(obj any) error` follows the `json.Unmarshal` model: it errors
+  only on structural misuse (not a non-nil pointer to a struct) and is lenient
+  per field (missing/empty → zero value). It uses the record's location for time
+  fields.
+- The container-download helper needs the client (downloading streams an
+  authenticated URL), so it is a client method:
   `client.ContainerData(ctx, record, field) ([]byte, error)`.
 
 **Editing model (decided): data-in/data-out.** No in-record staged changes.
@@ -340,7 +353,7 @@ Handling rules (fixing v3's `Messages[0]` bug):
 ```
 client.go     // Client + New/Destroy/options/LastActivity + do()/locking
               //   + Find/Create/Update/Delete/ContainerData/UploadToContainer
-record.go     // Record data type + FieldData + typed getters + Map
+record.go     // Record data type + FieldData + typed getters + Decode
 values.go     // Bool/Date/Timestamp write-value wrappers
 find.go       // Query/Request/SortRule/SortOrder + MarshalJSON
 errors.go     // APIError + sentinels
@@ -406,8 +419,9 @@ _ = found.Records
 - [x] **3. Port operations to the client.** Implement `Find`, `Create`,
    `Update`, `Delete`, container upload/download on top of `do()`. (A
    single-record `Get` is deferred.)
-- [ ] **4. Port read-side helpers.** Move typed getters + `Map` onto the
-   data-only `Record`; drop `io/ioutil`.
+- [ ] **4. Port read-side helpers.** Move typed getters + `Decode` (was `Map`)
+   onto the data-only `Record`; drop `io/ioutil`. Includes the trimmed getter
+   set, `Has`, and `WithLocation` (time zone carried onto records).
 - [ ] **5. Concurrency hardening — remaining.** De-duplicate concurrent
    re-authentication: today multiple goroutines that hit an expired token can
    each re-auth (race-free but wasteful — see `reauthenticate`). The
@@ -421,7 +435,32 @@ _ = found.Records
 - [ ] **7. Docs.** Rewrite README for the v4 API, add migration guide, update the
    README install/import paths to `/v4` (module path itself already bumped).
 - [ ] **8. Verify.** `go vet ./...`, `go test -race ./...`, and a manual smoke
-   test against a real FileMaker server (creds available locally).
+   test against a real FileMaker server (creds available locally). Confirm the
+   actual date/timestamp format(s) the Data API returns (see Deferred → time
+   formats) and the container-upload request shape (the dropped
+   `Content-Disposition` header) and the write-value wrappers (`Bool` → number,
+   `Date`/`Timestamp` formats).
+
+---
+
+## Deferred (revisit later)
+
+- **Configurable time formats (`WithTimeFormats`).** `TimeInE` currently tries a
+  fixed list of layouts until one parses, which silently assumes US `MM/DD`
+  ordering and cannot disambiguate `MM/DD` vs `DD/MM` (both parse). The
+  principled fix is to treat the accepted layout(s) as client config (like
+  `WithLocation`), defaulting to the current list, carried onto records. Held
+  until the phase-8 smoke test shows whether the Data API actually emits
+  non-US/variable date formats — if it normalizes to a fixed format, the simple
+  list stays and we just document the assumption.
+- **Runtime-toggleable `autoReauth` (`SetAutoReauth`).** Options are init-only by
+  design (immutable config → lock-free reads). `autoReauth` is the one with a
+  plausible runtime case (flip off to *detect* an expired token). If needed,
+  make the field an `atomic.Bool` with a `SetAutoReauth(bool)` setter —
+  lock-free, no involvement of the main `RWMutex`. Held pending a concrete use
+  case; trivial to add later without breaking changes. (`WithLocation` and
+  `WithTimeout` stay init-only: the file's zone is stable with a `TimeIn`
+  override, and per-call timeouts already work via `context` deadlines.)
 
 ---
 
