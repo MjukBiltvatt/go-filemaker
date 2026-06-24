@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// codeError is a sentinel error that carries the FileMaker host code it stands
+// for, so *APIError.Is can match it generically without a code→sentinel lookup.
+type codeError struct {
+	code int
+	text string
+}
+
+func (e *codeError) Error() string { return e.text }
+
 var (
 	ErrNotNumber     = errors.New("value is not a number")
 	ErrNotString     = errors.New("value is not a string")
@@ -23,27 +32,28 @@ var (
 	//	var apiErr *filemaker.APIError
 	//	if errors.As(err, &apiErr) { switch apiErr.Code() { … } }
 	//
-	// Adding a sentinel later is a non-breaking change to APIError.Is, so the bar
-	// for a new one is a concrete, recurring runtime branch — not completeness.
+	// Adding a sentinel later is a one-line, non-breaking change — a new codeError
+	// here, no APIError.Is change — so the bar for a new one is a concrete,
+	// recurring runtime branch, not completeness.
 
 	// ErrRecordModified is returned (wrapped) by Update when a WithModID check
 	// fails because the record changed since the mod ID was read (optimistic-lock
 	// conflict). It corresponds to host code 306 and is also matched by errors.Is
 	// against any *APIError carrying that code.
-	ErrRecordModified = errors.New("filemaker: record modified since mod ID was read")
+	ErrRecordModified error = &codeError{306, "filemaker: record modified since mod ID was read"}
 
 	// ErrNoRecords matches an *APIError whose host code is 401 ("no records match
 	// the request"). Find translates 401 into an empty FindResponse with a nil
 	// error, so this sentinel surfaces only from operations that treat "no
 	// records" as a genuine failure. Test for it with errors.Is.
-	ErrNoRecords = errors.New("filemaker: no records match the request")
+	ErrNoRecords error = &codeError{401, "filemaker: no records match the request"}
 
 	// ErrInvalidToken matches an *APIError whose host code is 952 (invalid or
 	// expired session token). When the client is built with
 	// WithReauthOnInvalidToken it re-authenticates and retries automatically, so
 	// this surfaces only when that option is unset or the retry itself fails.
 	// Test for it with errors.Is.
-	ErrInvalidToken = errors.New("filemaker: invalid or expired session token")
+	ErrInvalidToken error = &codeError{952, "filemaker: invalid or expired session token"}
 )
 
 // Message is a single status message returned by the FileMaker host.
@@ -85,19 +95,12 @@ func (e *APIError) Code() int {
 // unpacking *APIError or hard-coding numeric codes. It matches when any message
 // in the response carries the corresponding code.
 func (e *APIError) Is(target error) bool {
-	var code int
-	switch target {
-	case ErrNoRecords:
-		code = codeNoRecords
-	case ErrInvalidToken:
-		code = codeInvalidToken
-	case ErrRecordModified:
-		code = codeModIDMismatch
-	default:
+	ce, ok := target.(*codeError)
+	if !ok {
 		return false
 	}
 	for _, m := range e.Messages {
-		if m.Code == code {
+		if m.Code == ce.code {
 			return true
 		}
 	}

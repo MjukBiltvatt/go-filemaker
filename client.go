@@ -17,13 +17,6 @@ import (
 	"time"
 )
 
-// FileMaker error codes the client interprets specially.
-const (
-	codeModIDMismatch = 306 // record mod ID does not match (optimistic-lock conflict)
-	codeNoRecords     = 401 // no records match a find request
-	codeInvalidToken  = 952 // invalid/expired session token; drives reauth-on-invalid-token
-)
-
 // DefaultIdleTimeout is the idle duration after which WithReauthOnIdle refreshes
 // the token, set just under FileMaker's default 15-minute session timeout.
 const DefaultIdleTimeout = 14 * time.Minute
@@ -233,8 +226,7 @@ func (c *Client) Find(ctx context.Context, layout string, query Query) (FindResp
 
 	var rb responseBody
 	if err := c.do(ctx, http.MethodPost, c.findURL(layout), body, &rb); err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code() == codeNoRecords {
+		if errors.Is(err, ErrNoRecords) {
 			return FindResponse{Records: []Record{}}, nil
 		}
 		return FindResponse{}, err
@@ -309,8 +301,7 @@ func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData
 
 	var rb responseBody
 	if err := c.do(ctx, http.MethodPatch, c.recordURL(layout, id), body, &rb); err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code() == codeModIDMismatch {
+		if errors.Is(err, ErrRecordModified) {
 			return UpdateResponse{}, fmt.Errorf("filemaker: record %q in layout %q: %w", id, layout, ErrRecordModified)
 		}
 		return UpdateResponse{}, err
@@ -494,8 +485,7 @@ func (c *Client) withReauth(ctx context.Context, attempt func() (string, error))
 
 	used, err := attempt()
 
-	var apiErr *APIError
-	if c.reauthOnInvalidToken && errors.As(err, &apiErr) && apiErr.Code() == codeInvalidToken {
+	if c.reauthOnInvalidToken && errors.Is(err, ErrInvalidToken) {
 		if rerr := c.reauthenticate(ctx, used); rerr != nil {
 			return rerr
 		}
