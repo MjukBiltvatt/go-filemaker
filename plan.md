@@ -440,11 +440,17 @@ _ = found.Records
    952s collapse to one auth, plus proactive on-idle/while-active tests. The
    `sync.RWMutex`, concurrency invariant, and `-race` fan-out test landed in
    phase 2.
-- [ ] **6. Errors — remaining.** Expose `errors.Is`-friendly sentinel(s) for the
-   codes callers may branch on (e.g. invalid token) and finish error
-   documentation. The `APIError`/`Message` types, the messages length-guard, and
-   threading through `do()` already landed in phase 2; the value-accessor
-   sentinels (`ErrNotNumber`/`ErrNotString`/`ErrUnknownFormat`) already exist.
+- [x] **6. Errors — remaining.** Added `errors.Is`-friendly sentinels for the
+   codes callers may branch on: `ErrNoRecords` (401) and `ErrInvalidToken` (952),
+   alongside the existing `ErrRecordModified` (306). `*APIError` gained an `Is`
+   method mapping those host codes to the sentinels (matching any message in the
+   response), so `errors.Is(err, ErrInvalidToken)` works on a raw `*APIError`
+   without breaking the `errors.As(err, &apiErr)` path. Godoc on each sentinel
+   documents its code and caveats (Find swallows 401; 952 is auto-handled under
+   `WithReauthOnInvalidToken`). Covered by `errors_test.go`. The
+   `APIError`/`Message` types, the messages length-guard, and threading through
+   `do()` already landed in phase 2; the value-accessor sentinels
+   (`ErrNotNumber`/`ErrNotString`/`ErrUnknownFormat`) already exist.
 - [ ] **7. Docs.** Rewrite README for the v4 API, add migration guide, update the
    README install/import paths to `/v4` (module path itself already bumped).
 - [ ] **8. Verify.** `go vet ./...`, `go test -race ./...`, and a manual smoke
