@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestFind(t *testing.T) {
@@ -60,6 +61,28 @@ func TestFind(t *testing.T) {
 	}
 	if !strings.Contains(body, `"query":[{"Name":"Mark"}]`) {
 		t.Errorf("body = %q", body)
+	}
+}
+
+func TestFindStampsLocation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{"data":[{"recordId":"1","modId":"0","fieldData":{"Created":"01/02/2006 15:04:05"},"portalData":{}}]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	loc := time.FixedZone("TEST", 2*60*60)
+	c := testClient(srv)
+	c.location = loc
+
+	resp, err := c.Find(context.Background(), "People", Query{})
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if len(resp.Records) != 1 {
+		t.Fatalf("records = %d, want 1", len(resp.Records))
+	}
+	if got := resp.Records[0].Time("Created").Location(); got != loc {
+		t.Errorf("record time location = %v, want %v", got, loc)
 	}
 }
 

@@ -197,7 +197,11 @@ type Record struct {
   in Go. `Decode(obj any) error` follows the `json.Unmarshal` model: it errors
   only on structural misuse (not a non-nil pointer to a struct) and is lenient
   per field (missing/empty → zero value). It uses the record's location for time
-  fields.
+  fields. **Not recursive** (behavior change from v3): records are flat, so it
+  maps only `fm`-tagged fields of the struct passed in; untagged and `fm:"-"`
+  fields are left untouched, and nested structs are decoded by calling `Decode`
+  on them directly (`rec.Decode(&customer.Address)`). Needs a migration-guide
+  callout.
 - The container-download helper needs the client (downloading streams an
   authenticated URL), so it is a client method:
   `client.ContainerData(ctx, record, field) ([]byte, error)`.

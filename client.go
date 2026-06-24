@@ -37,6 +37,7 @@ type Client struct {
 	username   string
 	password   string
 	autoReauth bool
+	location   *time.Location
 
 	mu           sync.RWMutex
 	token        string
@@ -50,6 +51,7 @@ type Option func(*config)
 type config struct {
 	timeout    time.Duration
 	autoReauth bool
+	location   *time.Location
 }
 
 // WithTimeout sets the timeout applied to every HTTP request made by the
@@ -70,6 +72,16 @@ func WithAutoReauth() Option {
 	}
 }
 
+// WithLocation sets the time zone used to interpret FileMaker date and timestamp
+// fields (which carry no zone) when reading them back through a record's
+// Time/TimeE methods or Decode. Records returned by the client carry this
+// location. Defaults to UTC.
+func WithLocation(loc *time.Location) Option {
+	return func(c *config) {
+		c.location = loc
+	}
+}
+
 // New starts a database session by authenticating against the host. The host
 // may include a scheme; if it does not, https is assumed.
 func New(host, database, username, password string, opts ...Option) (*Client, error) {
@@ -82,7 +94,7 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 		return nil, errors.New("filemaker: no username specified")
 	}
 
-	cfg := config{timeout: 30 * time.Second}
+	cfg := config{timeout: 30 * time.Second, location: time.UTC}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&cfg)
@@ -97,6 +109,7 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 		username:   username,
 		password:   password,
 		autoReauth: cfg.autoReauth,
+		location:   cfg.location,
 	}
 
 	token, err := c.authenticate(context.Background())
@@ -200,6 +213,7 @@ func (c *Client) Find(ctx context.Context, layout string, query Query) (FindResp
 	records := rb.Response.Data
 	for i := range records {
 		records[i].Layout = layout
+		records[i].loc = c.location
 	}
 	return FindResponse{Records: records, DataInfo: rb.Response.DataInfo}, nil
 }
