@@ -10,6 +10,11 @@ var (
 	ErrNotNumber     = errors.New("value is not a number")
 	ErrNotString     = errors.New("value is not a string")
 	ErrUnknownFormat = errors.New("unknown format")
+
+	// ErrRecordModified is returned (wrapped) by Update when a WithModID check
+	// fails because the record changed since the mod ID was read (optimistic-lock
+	// conflict). Test for it with errors.Is.
+	ErrRecordModified = errors.New("filemaker: record modified since mod ID was read")
 )
 
 // Message is a single status message returned by the FileMaker host.

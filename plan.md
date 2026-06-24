@@ -113,7 +113,7 @@ write, they issue their own `Find`.
 ```go
 func (c *Client) Find(ctx context.Context, layout string, q Query) (FindResponse, error)
 func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (CreateResponse, error)
-func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData) (UpdateResponse, error)
+func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error)
 func (c *Client) Delete(ctx context.Context, layout, id string) error
 func (c *Client) UploadToContainer(ctx context.Context, layout, id, field, filename string, data io.Reader) error
 ```
@@ -181,9 +181,11 @@ type Record struct {
 - **No `*Session` back-pointer, no mutating methods.** This is the core of the
   client-based redesign and removes the copy bug entirely.
 - **`ModID` and `PortalData` are new in v4**, populated from the `data[]` items
-  the API returns. `ModID` also enables optional optimistic-locking on `Update`
-  later (passing `modId` so the host rejects a write if the record changed). No
-  portal accessors are planned for the initial cut beyond exposing the raw map.
+  the API returns. `ModID` powers optional optimistic-locking on `Update` via the
+  `WithModID(modID)` update option: the host rejects the write (code `306`) if
+  the record changed since `modID` was read, surfaced as the `errors.Is`-friendly
+  `ErrRecordModified` sentinel. No portal accessors are planned for the initial
+  cut beyond exposing the raw map.
 - Keep the **read-only typed accessors** — pure functions of the data, all value
   receivers. The set is trimmed to what FileMaker actually needs (numbers come
   back as `float64`, so the small int/float sizes were dropped):

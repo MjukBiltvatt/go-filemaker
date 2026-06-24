@@ -19,8 +19,9 @@ import (
 
 // FileMaker error codes the client interprets specially.
 const (
-	codeNoRecords    = 401 // no records match a find request
-	codeInvalidToken = 952 // invalid/expired session token; drives reauth-on-invalid-token
+	codeModIDMismatch = 306 // record mod ID does not match (optimistic-lock conflict)
+	codeNoRecords     = 401 // no records match a find request
+	codeInvalidToken  = 952 // invalid/expired session token; drives reauth-on-invalid-token
 )
 
 // DefaultIdleTimeout is the idle duration after which WithReauthOnIdle refreshes
@@ -254,7 +255,7 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (C
 		return CreateResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	body, err := marshalFieldData(fields)
+	body, err := marshalRecordBody(fields, "")
 	if err != nil {
 		return CreateResponse{}, err
 	}
@@ -266,9 +267,27 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (C
 	return CreateResponse{RecordID: rb.Response.RecordID, ModID: rb.Response.ModID}, nil
 }
 
+// UpdateOption configures an Update.
+type UpdateOption func(*updateConfig)
+
+// updateConfig holds the optional parameters applied by UpdateOption values.
+type updateConfig struct {
+	modID string
+}
+
+// WithModID makes the update conditional (optimistic locking): the host rejects
+// it with ErrRecordModified if the record's current mod ID differs from modID —
+// i.e. the record changed since modID was read. Pass a Record's ModID from a
+// prior Find.
+func WithModID(modID string) UpdateOption {
+	return func(c *updateConfig) {
+		c.modID = modID
+	}
+}
+
 // Update writes the given field data to an existing record and returns the new
 // mod ID.
-func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData) (UpdateResponse, error) {
+func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
 	switch {
 	case layout == "":
 		return UpdateResponse{}, errors.New("filemaker: no layout specified")
@@ -276,13 +295,24 @@ func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData
 		return UpdateResponse{}, errors.New("filemaker: no record id specified")
 	}
 
-	body, err := marshalFieldData(fields)
+	var cfg updateConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+
+	body, err := marshalRecordBody(fields, cfg.modID)
 	if err != nil {
 		return UpdateResponse{}, err
 	}
 
 	var rb responseBody
 	if err := c.do(ctx, http.MethodPatch, c.recordURL(layout, id), body, &rb); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Code() == codeModIDMismatch {
+			return UpdateResponse{}, fmt.Errorf("filemaker: record %q in layout %q: %w", id, layout, ErrRecordModified)
+		}
 		return UpdateResponse{}, err
 	}
 	return UpdateResponse{ModID: rb.Response.ModID}, nil
@@ -379,15 +409,17 @@ func (c *Client) ContainerData(ctx context.Context, record Record, field string)
 	return data, nil
 }
 
-// marshalFieldData wraps fields in the {"fieldData": ...} envelope the host
-// expects. A nil map becomes an empty object so the host creates defaults.
-func marshalFieldData(fields FieldData) ([]byte, error) {
+// marshalRecordBody wraps fields in the {"fieldData": ...} envelope the host
+// expects, optionally including a modId for optimistic locking (omitted when
+// empty). A nil map becomes an empty object so the host applies defaults.
+func marshalRecordBody(fields FieldData, modID string) ([]byte, error) {
 	if fields == nil {
 		fields = FieldData{}
 	}
 	body, err := json.Marshal(struct {
 		FieldData FieldData `json:"fieldData"`
-	}{fields})
+		ModID     string    `json:"modId,omitempty"`
+	}{fields, modID})
 	if err != nil {
 		return nil, fmt.Errorf("filemaker: failed to marshal field data: %w", err)
 	}

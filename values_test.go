@@ -59,14 +59,14 @@ func TestTimestampMarshalJSON(t *testing.T) {
 }
 
 func TestFieldDataWithTypedValues(t *testing.T) {
-	body, err := marshalFieldData(FieldData{
+	body, err := marshalRecordBody(FieldData{
 		"Active":  Bool(true),
 		"DOB":     Date(time.Date(1990, 6, 23, 0, 0, 0, 0, time.UTC)),
 		"Created": Timestamp(time.Date(2026, 6, 23, 14, 5, 0, 0, time.UTC)),
 		"Name":    "Mark",
-	})
+	}, "")
 	if err != nil {
-		t.Fatalf("marshalFieldData: %v", err)
+		t.Fatalf("marshalRecordBody: %v", err)
 	}
 	want := `{"fieldData":{"Active":1,"Created":"06/23/2026 14:05:00","DOB":"06/23/1990","Name":"Mark"}}`
 	if string(body) != want {

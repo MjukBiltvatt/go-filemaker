@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -204,6 +205,51 @@ func TestUpdate(t *testing.T) {
 	}
 	if !strings.Contains(body, `"fieldData":{"Name":"Jane"}`) {
 		t.Errorf("body = %q", body)
+	}
+}
+
+func TestUpdateWithModID(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"modId":"4"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	resp, err := c.Update(context.Background(), "People", "9", FieldData{"Name": "Jane"}, WithModID("3"))
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if resp.ModID != "4" {
+		t.Errorf("modID = %q, want 4", resp.ModID)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+	if !strings.Contains(body, `"modId":"3"`) {
+		t.Errorf("body = %q, want it to contain the modId", body)
+	}
+	if !strings.Contains(body, `"fieldData":{"Name":"Jane"}`) {
+		t.Errorf("body = %q, want fieldData", body)
+	}
+}
+
+func TestUpdateModIDMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{},"messages":[{"code":"306","message":"Record modification ID does not match"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	_, err := c.Update(context.Background(), "People", "9", FieldData{"Name": "Jane"}, WithModID("3"))
+	if !errors.Is(err, ErrRecordModified) {
+		t.Fatalf("got %v, want ErrRecordModified", err)
 	}
 }
 
