@@ -20,8 +20,12 @@ import (
 // FileMaker error codes the client interprets specially.
 const (
 	codeNoRecords    = 401 // no records match a find request
-	codeInvalidToken = 952 // expired/invalid session token; drives auto-reauth
+	codeInvalidToken = 952 // invalid/expired session token; drives reauth-on-invalid-token
 )
+
+// DefaultIdleTimeout is the idle duration after which WithReauthOnIdle refreshes
+// the token, set just under FileMaker's default 15-minute session timeout.
+const DefaultIdleTimeout = 14 * time.Minute
 
 // Client is a handle to a FileMaker Data API session. It is safe for concurrent
 // use by multiple goroutines: the session token and last-activity timestamp are
@@ -31,14 +35,16 @@ const (
 // Records returned by the client are plain data carriers; all operations that
 // touch the host are methods on the Client.
 type Client struct {
-	httpClient *http.Client
-	host       string
-	database   string
-	username   string
-	password   string
-	autoReauth bool
-	location   *time.Location
+	httpClient           *http.Client
+	host                 string
+	database             string
+	username             string
+	password             string
+	reauthOnInvalidToken bool
+	idleTimeout          time.Duration // > 0 enables proactive (idle) reauth
+	location             *time.Location
 
+	reauthSem    chan struct{} // cap-1 channel used as a context-aware mutex serializing re-auth
 	mu           sync.RWMutex
 	token        string
 	lastActivity time.Time
@@ -49,9 +55,10 @@ type Option func(*config)
 
 // config holds the optional parameters applied by Option values in New.
 type config struct {
-	timeout    time.Duration
-	autoReauth bool
-	location   *time.Location
+	timeout              time.Duration
+	reauthOnInvalidToken bool
+	idleTimeout          time.Duration
+	location             *time.Location
 }
 
 // WithTimeout sets the timeout applied to every HTTP request made by the
@@ -62,13 +69,33 @@ func WithTimeout(timeout time.Duration) Option {
 	}
 }
 
-// WithAutoReauth enables transparent re-authentication: when a request fails
-// because the session token has expired, the client re-authenticates once and
-// retries the request. Disabled by default, in which case an expired token
-// surfaces as an error to the caller.
-func WithAutoReauth() Option {
+// WithReauthOnInvalidToken enables reactive re-authentication: when a request
+// fails because the session token is invalid or has expired (FileMaker error
+// 952), the client re-authenticates once and retries the request. Disabled by
+// default, in which case the error surfaces to the caller.
+//
+// Combine with WithReauthOnIdle for full coverage: proactive refresh avoids most
+// invalid-token errors, and this reactive retry backstops any that still occur.
+func WithReauthOnInvalidToken() Option {
 	return func(c *config) {
-		c.autoReauth = true
+		c.reauthOnInvalidToken = true
+	}
+}
+
+// WithReauthOnIdle enables proactive re-authentication: before a request, if the
+// session has been idle at least timeout, the client refreshes the token first,
+// so a burst of requests after an idle period does not each fail with an
+// invalid-token error. With no argument it uses DefaultIdleTimeout.
+//
+// Combine with WithReauthOnInvalidToken so that any expiry the idle heuristic
+// misses (e.g. a server timeout shorter than timeout) is still recovered.
+func WithReauthOnIdle(timeout ...time.Duration) Option {
+	return func(c *config) {
+		d := DefaultIdleTimeout
+		if len(timeout) > 0 && timeout[0] > 0 {
+			d = timeout[0]
+		}
+		c.idleTimeout = d
 	}
 }
 
@@ -103,13 +130,15 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 
 	jar, _ := cookiejar.New(nil)
 	c := &Client{
-		httpClient: &http.Client{Timeout: cfg.timeout, Jar: jar},
-		host:       normalizeHost(host),
-		database:   database,
-		username:   username,
-		password:   password,
-		autoReauth: cfg.autoReauth,
-		location:   cfg.location,
+		httpClient:           &http.Client{Timeout: cfg.timeout, Jar: jar},
+		host:                 normalizeHost(host),
+		database:             database,
+		username:             username,
+		password:             password,
+		reauthOnInvalidToken: cfg.reauthOnInvalidToken,
+		idleTimeout:          cfg.idleTimeout,
+		location:             cfg.location,
+		reauthSem:            make(chan struct{}, 1),
 	}
 
 	token, err := c.authenticate(context.Background())
@@ -300,7 +329,7 @@ func (c *Client) UploadToContainer(ctx context.Context, layout, id, field, filen
 	contentType := w.FormDataContentType()
 	body := buf.Bytes()
 	var rb responseBody
-	return c.withReauth(ctx, func() error {
+	return c.withReauth(ctx, func() (string, error) {
 		return c.attempt(ctx, http.MethodPost, c.containerURL(layout, id, field), contentType, body, &rb)
 	})
 }
@@ -404,32 +433,58 @@ func (rb *responseBody) check() error {
 // do is the generic authenticated transport for JSON record operations.
 //
 // body is the marshaled request payload (nil for GET/DELETE); it is passed as a
-// byte slice rather than an io.Reader so it can be replayed on an auto-reauth
-// retry.
+// byte slice rather than an io.Reader so it can be replayed on a reauth retry.
 func (c *Client) do(ctx context.Context, method, url string, body []byte, out *responseBody) error {
-	return c.withReauth(ctx, func() error {
+	return c.withReauth(ctx, func() (string, error) {
 		return c.attempt(ctx, method, url, "application/json", body, out)
 	})
 }
 
-// withReauth runs attempt and, when WithAutoReauth is enabled, re-authenticates
-// once and retries on an expired-token error.
-func (c *Client) withReauth(ctx context.Context, attempt func() error) error {
-	err := attempt()
+// withReauth wraps a request attempt with optional automatic re-authentication.
+//
+// Proactive (WithReauthOnIdle): if the session has been idle past the configured
+// timeout, refresh the token before the attempt. Best-effort — a failed refresh
+// falls through to the attempt, which surfaces any real error.
+//
+// Reactive (WithReauthOnInvalidToken): if the attempt fails with an
+// invalid-token error, re-authenticate and retry once.
+//
+// Both triggers funnel into the same de-duplicated reauthenticate, so concurrent
+// callers that all detect expiry collapse to a single re-auth. The attempt
+// returns the token it used, which is the de-dup key.
+func (c *Client) withReauth(ctx context.Context, attempt func() (string, error)) error {
+	if c.idleTimeout > 0 && c.idle() {
+		c.mu.RLock()
+		used := c.token
+		c.mu.RUnlock()
+		_ = c.reauthenticate(ctx, used)
+	}
+
+	used, err := attempt()
 
 	var apiErr *APIError
-	if c.autoReauth && errors.As(err, &apiErr) && apiErr.Code() == codeInvalidToken {
-		if rerr := c.reauthenticate(ctx); rerr != nil {
+	if c.reauthOnInvalidToken && errors.As(err, &apiErr) && apiErr.Code() == codeInvalidToken {
+		if rerr := c.reauthenticate(ctx, used); rerr != nil {
 			return rerr
 		}
-		return attempt()
+		_, err = attempt()
 	}
 	return err
 }
 
+// idle reports whether the session has been idle at least the configured idle
+// timeout.
+func (c *Client) idle() bool {
+	c.mu.RLock()
+	last := c.lastActivity
+	c.mu.RUnlock()
+	return time.Since(last) >= c.idleTimeout
+}
+
 // attempt performs a single authenticated round-trip and stamps lastActivity
-// whenever the host responded (success or an API-level error).
-func (c *Client) attempt(ctx context.Context, method, url, contentType string, body []byte, out *responseBody) error {
+// whenever the host responded (success or an API-level error). It returns the
+// token it used so the caller can de-duplicate re-authentication.
+func (c *Client) attempt(ctx context.Context, method, url, contentType string, body []byte, out *responseBody) (string, error) {
 	var r io.Reader
 	if body != nil {
 		r = bytes.NewReader(body)
@@ -437,7 +492,7 @@ func (c *Client) attempt(ctx context.Context, method, url, contentType string, b
 
 	req, err := http.NewRequestWithContext(ctx, method, url, r)
 	if err != nil {
-		return fmt.Errorf("filemaker: failed to build request: %w", err)
+		return "", fmt.Errorf("filemaker: failed to build request: %w", err)
 	}
 	req.Header.Set("Content-Type", contentType)
 
@@ -454,7 +509,7 @@ func (c *Client) attempt(ctx context.Context, method, url, contentType string, b
 		c.lastActivity = time.Now()
 		c.mu.Unlock()
 	}
-	return err
+	return token, err
 }
 
 // send performs one round-trip: it sends req, reads and decodes the response
@@ -498,13 +553,31 @@ func (c *Client) authenticate(ctx context.Context) (string, error) {
 	return rb.Response.Token, nil
 }
 
-// reauthenticate replaces the stored token with a freshly authenticated one.
+// reauthenticate replaces the stored token with a freshly authenticated one,
+// de-duplicating concurrent callers. used is the token the caller last saw; if
+// another goroutine already refreshed the token since then, this returns without
+// a network round-trip.
 //
-// Concurrent callers that all hit an expired token may each re-authenticate
-// here; de-duplicating that is left to phase 5 (concurrency hardening). It is
-// race-free regardless: the network call happens without holding the lock, and
-// only the token swap is guarded.
-func (c *Client) reauthenticate(ctx context.Context) error {
+// reauthSem (a cap-1 channel used as a context-aware mutex) serializes re-auth so
+// concurrent callers collapse to one network call; a caller waiting on it honors
+// its ctx and bails on cancellation rather than blocking on an in-flight auth.
+// The auth itself runs without holding the read/write lock, so token reads (and
+// LastActivity) stay live during a refresh.
+func (c *Client) reauthenticate(ctx context.Context, used string) error {
+	select {
+	case c.reauthSem <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-c.reauthSem }()
+
+	c.mu.RLock()
+	current := c.token
+	c.mu.RUnlock()
+	if current != used {
+		return nil
+	}
+
 	token, err := c.authenticate(ctx)
 	if err != nil {
 		return err

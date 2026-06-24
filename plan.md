@@ -95,10 +95,12 @@ func (c *Client) LastActivity() time.Time
   check-then-reauth sequence can hold the lock across the whole critical
   section.
 - `*http.Client` is already safe for concurrent use; share it directly.
-- Options (`func(*config)`): `WithTimeout` (carried over from v3),
-  `WithAutoReauth` (opt-in transparent re-auth + retry on token expiry; off by
-  default — see the internal HTTP layer), and `WithLocation` (time zone for
-  date/timestamp fields, stamped onto returned records; default UTC).
+- Options (`func(*config)`): `WithTimeout` (carried over from v3); the two opt-in
+  reauth triggers `WithReauthOnInvalidToken` (reactive: re-auth + retry on a 952)
+  and `WithReauthOnIdle(timeout ...)` (proactive: refresh before a request when
+  idle past the timeout, default `DefaultIdleTimeout`) — both funnel into one
+  de-duplicated reauth, see the internal HTTP layer; and `WithLocation` (time
+  zone for date/timestamp fields, stamped onto returned records; default UTC).
 
 ### 2. Record operations move onto the client
 
@@ -275,11 +277,13 @@ Responsibilities, in one place:
 - Send, read, and unmarshal the body.
 - Check transport status code **and** FileMaker message code safely (guard
   against empty `Messages`).
-- Stamp `lastActivity` on success (under `Lock`).
-- If the `WithAutoReauth` option is enabled, handle token-expiry (code `952`)
-  with a single re-auth + one retry; otherwise surface the error to the caller.
-  The check-then-reauth runs under the client `Lock` so concurrent callers that
-  hit an expired token don't each re-authenticate.
+- Stamp `lastActivity` on success/any host response (under `Lock`).
+- Reauth triggers funnel through one de-duplicated `reauthenticate(ctx, used)`:
+  `WithReauthOnInvalidToken` handles a 952 with a single re-auth + retry;
+  `WithReauthOnIdle` refreshes before the attempt when idle. De-dup uses a
+  dedicated `reauthMu` plus a double-check on the *used* token (the token the
+  failed/last request carried), so concurrent callers collapse to one auth and
+  the network call never holds the read/write lock (reads stay live).
 
 This collapses the seven duplicated blocks and is where correctness fixes land.
 
@@ -318,7 +322,7 @@ Handling rules (fixing v3's `Messages[0]` bug):
 - `messages` is modeled as a slice and `APIError` can hold all of them — no
   dropping entries past the first, since the API types it as an array.
 - Common codes get `errors.Is`-friendly sentinels: `401` → no records, `952` →
-  invalid token (feeds the `WithAutoReauth` retry path).
+  invalid token (feeds the reactive `WithReauthOnInvalidToken` retry path).
 - Keep/relocate the value-accessor sentinels: `ErrNotNumber`, `ErrNotString`,
   `ErrUnknownFormat`.
 - "No records found" (`401`): `Find` returns a `FindResponse` with empty
@@ -426,11 +430,14 @@ _ = found.Records
 - [x] **4. Port read-side helpers.** Move typed getters + `Decode` (was `Map`)
    onto the data-only `Record`; drop `io/ioutil`. Includes the trimmed getter
    set, `Has`, and `WithLocation` (time zone carried onto records).
-- [ ] **5. Concurrency hardening — remaining.** De-duplicate concurrent
-   re-authentication: today multiple goroutines that hit an expired token can
-   each re-auth (race-free but wasteful — see `reauthenticate`). The
-   `sync.RWMutex`, concurrency invariant, and `-race` fan-out test already landed
-   in phase 2.
+- [x] **5. Concurrency hardening.** De-duplicated concurrent re-authentication
+   via a dedicated `reauthMu` + used-token double-check (separate from `c.mu`, so
+   the auth round-trip never blocks token reads). Both reauth triggers
+   (`WithReauthOnInvalidToken` reactive, `WithReauthOnIdle` proactive) funnel
+   through it. Covered by a barrier-gated `-race` test asserting N concurrent
+   952s collapse to one auth, plus proactive on-idle/while-active tests. The
+   `sync.RWMutex`, concurrency invariant, and `-race` fan-out test landed in
+   phase 2.
 - [ ] **6. Errors — remaining.** Expose `errors.Is`-friendly sentinel(s) for the
    codes callers may branch on (e.g. invalid token) and finish error
    documentation. The `APIError`/`Message` types, the messages length-guard, and
@@ -480,10 +487,12 @@ _ = found.Records
 2. **`context.Context`: yes.** Every network method takes `ctx` as its first
    argument (`Find`, `Create`, `Update`, `Delete`, `Destroy`, container
    upload/download), built via `http.NewRequestWithContext`.
-3. **Token auto-refresh: opt-in.** Off by default; enabled with the
-   `WithAutoReauth` option. When on, `do()` transparently re-authenticates and
-   retries once on token expiry (code `952`). When off, the error surfaces to
-   the caller.
+3. **Token auto-refresh: opt-in, two orthogonal triggers.** Off by default.
+   `WithReauthOnInvalidToken` (reactive) re-auths + retries once on a 952;
+   `WithReauthOnIdle(timeout ...)` (proactive) refreshes before a request when
+   idle past the timeout (default `DefaultIdleTimeout`, ~14 min). Composable —
+   reactive-only, proactive-only, or both (recommended); both share one
+   de-duplicated reauth. Named by trigger for clarity (not `WithAutoReauth`).
 4. **Synchronization primitive: `sync.RWMutex`.** Chosen over atomics because
    `lastActivity` is multi-word, the auto-reauth path needs a check-then-act
    critical section, and contention is negligible. (See Concurrency model.)

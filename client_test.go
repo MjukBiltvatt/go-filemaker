@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const okSession = `{"response":{"token":"tok"},"messages":[{"code":"0","message":"OK"}]}`
@@ -29,6 +30,7 @@ func testClient(srv *httptest.Server) *Client {
 		username:   "user",
 		password:   "pass",
 		token:      "tok",
+		reauthSem:  make(chan struct{}, 1),
 	}
 }
 
@@ -199,7 +201,7 @@ func TestDoReauthEnabled(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	c.autoReauth = true
+	c.reauthOnInvalidToken = true
 	var rb responseBody
 	if err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb); err != nil {
 		t.Fatalf("do: %v", err)
@@ -228,7 +230,7 @@ func TestDoReauthDisabled(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := testClient(srv) // autoReauth defaults to false
+	c := testClient(srv) // reauthOnInvalidToken defaults to false
 	var rb responseBody
 	err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb)
 
@@ -241,6 +243,154 @@ func TestDoReauthDisabled(t *testing.T) {
 	}
 	if n := sessionCalls.Load(); n != 0 {
 		t.Errorf("session calls = %d, want 0 (no reauth)", n)
+	}
+}
+
+func TestReauthDedup(t *testing.T) {
+	const n = 10
+	var oldTokenHits, opCalls, sessionCalls atomic.Int32
+	gate := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sessions") {
+			sessionCalls.Add(1)
+			writeJSON(w, `{"response":{"token":"newtok"},"messages":[{"code":"0","message":"OK"}]}`)
+			return
+		}
+		opCalls.Add(1)
+		if r.Header.Get("Authorization") == "Bearer tok" {
+			// Hold every initial (stale-token) request until all n have arrived,
+			// so they all hit 952 together — maximal de-dup pressure.
+			if oldTokenHits.Add(1) == n {
+				close(gate)
+			}
+			<-gate
+			writeJSON(w, `{"response":{},"messages":[{"code":"952","message":"Invalid FileMaker Data API token"}]}`)
+			return
+		}
+		writeJSON(w, `{"response":{"recordId":"1"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.reauthOnInvalidToken = true
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var rb responseBody
+			if err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb); err != nil {
+				t.Errorf("do: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := sessionCalls.Load(); got != 1 {
+		t.Errorf("session (reauth) calls = %d, want exactly 1", got)
+	}
+	if got := opCalls.Load(); got != 2*n {
+		t.Errorf("op calls = %d, want %d (n failed + n retried)", got, 2*n)
+	}
+	if c.token != "newtok" {
+		t.Errorf("token = %q, want newtok", c.token)
+	}
+}
+
+func TestProactiveReauthOnIdle(t *testing.T) {
+	var opCalls, sessionCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sessions") {
+			sessionCalls.Add(1)
+			writeJSON(w, `{"response":{"token":"newtok"},"messages":[{"code":"0","message":"OK"}]}`)
+			return
+		}
+		opCalls.Add(1)
+		if got := r.Header.Get("Authorization"); got != "Bearer newtok" {
+			t.Errorf("op auth = %q, want Bearer newtok (token should be refreshed before send)", got)
+		}
+		writeJSON(w, `{"response":{"recordId":"1"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.idleTimeout = time.Minute
+	c.lastActivity = time.Now().Add(-2 * time.Minute) // idle past the threshold
+
+	var rb responseBody
+	if err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb); err != nil {
+		t.Fatalf("do: %v", err)
+	}
+
+	if got := sessionCalls.Load(); got != 1 {
+		t.Errorf("session (reauth) calls = %d, want 1 (proactive refresh)", got)
+	}
+	if got := opCalls.Load(); got != 1 {
+		t.Errorf("op calls = %d, want 1 (no doomed request)", got)
+	}
+	if c.token != "newtok" {
+		t.Errorf("token = %q, want newtok", c.token)
+	}
+}
+
+func TestReauthWaitHonorsContext(t *testing.T) {
+	authStarted := make(chan struct{})
+	releaseAuth := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(authStarted) // the (only) auth request has begun
+		<-releaseAuth      // simulate a slow auth round-trip
+		writeJSON(w, `{"response":{"token":"newtok"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+
+	// Leader: holds the reauth lock and blocks inside the slow auth.
+	leaderDone := make(chan error, 1)
+	go func() {
+		leaderDone <- c.reauthenticate(context.Background(), "tok")
+	}()
+	<-authStarted
+
+	// Follower with an already-cancelled ctx must bail at its deadline rather
+	// than wait for the blocked leader.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.reauthenticate(ctx, "tok"); !errors.Is(err, context.Canceled) {
+		t.Errorf("follower reauth = %v, want context.Canceled", err)
+	}
+
+	close(releaseAuth)
+	if err := <-leaderDone; err != nil {
+		t.Errorf("leader reauth: %v", err)
+	}
+	if c.token != "newtok" {
+		t.Errorf("token = %q, want newtok", c.token)
+	}
+}
+
+func TestProactiveReauthSkippedWhenActive(t *testing.T) {
+	var sessionCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sessions") {
+			sessionCalls.Add(1)
+		}
+		writeJSON(w, `{"response":{"recordId":"1"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.idleTimeout = time.Minute
+	c.lastActivity = time.Now() // recently active
+
+	var rb responseBody
+	if err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb); err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if got := sessionCalls.Load(); got != 0 {
+		t.Errorf("session calls = %d, want 0 (not idle, no proactive reauth)", got)
 	}
 }
 
