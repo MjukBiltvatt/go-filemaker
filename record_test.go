@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -29,6 +30,12 @@ func testRecord() Record {
 			"timestamp_1":         "01/02/2006 15:04:05",
 			"timestamp_2":         "2006-01-02 15:04:05",
 			"time_invalid":        "january 1 2006 15 pm",
+			"list_lf":             "a\nb\nc",
+			"list_crlf":           "a\r\nb\r\nc\r\n",
+			"list_cr":             "a\rb\rc",
+			"list_single":         "only",
+			"list_blank_internal": "a\n\nb",
+			"list_empty":          "",
 		},
 	}
 }
@@ -64,6 +71,36 @@ func TestRecordGetters(t *testing.T) {
 		}
 		if _, err := r.StringE("int"); !errors.Is(err, ErrNotString) {
 			t.Errorf("StringE(int) err = %v, want ErrNotString", err)
+		}
+	})
+
+	t.Run("StringSlice", func(t *testing.T) {
+		// CR, LF and CRLF are all accepted as line breaks, and a single
+		// trailing line break (list_crlf) is trimmed rather than yielding "".
+		want := []string{"a", "b", "c"}
+		for _, field := range []string{"list_lf", "list_crlf", "list_cr"} {
+			got := r.StringSlice(field)
+			if !slices.Equal(got, want) {
+				t.Errorf("StringSlice(%q) = %#v, want %#v", field, got, want)
+			}
+		}
+		if got := r.StringSlice("list_single"); !slices.Equal(got, []string{"only"}) {
+			t.Errorf("StringSlice(single) = %#v", got)
+		}
+		// Blank lines between values are preserved.
+		if got := r.StringSlice("list_blank_internal"); !slices.Equal(got, []string{"a", "", "b"}) {
+			t.Errorf("StringSlice(blank_internal) = %#v, want [a  b]", got)
+		}
+		// An empty field yields nil, not []string{""}.
+		if got := r.StringSlice("list_empty"); got != nil {
+			t.Errorf("StringSlice(empty) = %#v, want nil", got)
+		}
+		// A missing field is not a string, so it also yields nil.
+		if got := r.StringSlice("missing"); got != nil {
+			t.Errorf("StringSlice(missing) = %#v, want nil", got)
+		}
+		if _, err := r.StringSliceE("int"); !errors.Is(err, ErrNotString) {
+			t.Errorf("StringSliceE(int) err = %v, want ErrNotString", err)
 		}
 	})
 

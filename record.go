@@ -3,6 +3,7 @@ package filemaker
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -65,6 +66,36 @@ func (r Record) StringE(fieldName string) (string, error) {
 // field. Errors are ignored; use StringE to detect them.
 func (r Record) String(fieldName string) string {
 	s, _ := r.StringE(fieldName)
+	return s
+}
+
+// StringSliceE behaves like StringSlice but returns ErrNotString if the value
+// is not a string.
+func (r Record) StringSliceE(fieldName string) ([]string, error) {
+	val, err := r.StringE(fieldName)
+	if err != nil {
+		return nil, err
+	}
+	if val == "" {
+		return nil, nil
+	}
+	// Normalize CRLF and lone CR to LF, then trim a single trailing line
+	// break so a terminating newline does not yield an empty final element.
+	val = strings.ReplaceAll(val, "\r\n", "\n")
+	val = strings.ReplaceAll(val, "\r", "\n")
+	val = strings.TrimSuffix(val, "\n")
+	return strings.Split(val, "\n"), nil
+}
+
+// StringSlice returns the field value split on line breaks, treating the text
+// field as a newline-separated list of values. Carriage returns, line feeds and
+// CRLF pairs are all accepted as line breaks. Blank lines between values are
+// preserved as empty strings, but a single trailing line break is treated as a
+// terminator and does not produce a trailing empty element. An empty field
+// yields a nil slice. The field needs to be a text field. Errors are ignored;
+// use StringSliceE to detect them.
+func (r Record) StringSlice(fieldName string) []string {
+	s, _ := r.StringSliceE(fieldName)
 	return s
 }
 
