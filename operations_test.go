@@ -328,7 +328,7 @@ func TestContainerData(t *testing.T) {
 
 	c := testClient(srv)
 	rec := Record{Layout: "People", FieldData: FieldData{"Photo": srv.URL + "/Streaming/abc"}}
-	data, err := c.ContainerData(context.Background(), rec, "Photo")
+	data, err := c.ContainerData(context.Background(), rec.String("Photo"))
 	if err != nil {
 		t.Fatalf("ContainerData: %v", err)
 	}
@@ -351,8 +351,19 @@ func TestContainerDataForeignHost(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{FieldData: FieldData{"Photo": "https://evil.example.com/steal"}}
-	if _, err := c.ContainerData(context.Background(), rec, "Photo"); err == nil {
+	if _, err := c.ContainerData(context.Background(), "https://evil.example.com/steal"); err == nil {
 		t.Fatal("expected error for foreign-host container URL")
+	}
+}
+
+func TestContainerDataEmptyURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("must not make a request for an empty container URL")
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if _, err := c.ContainerData(context.Background(), ""); err == nil {
+		t.Fatal("expected error for empty container URL")
 	}
 }

@@ -374,23 +374,19 @@ func (c *Client) UploadToContainer(ctx context.Context, layout, id, field, filen
 	})
 }
 
-// ContainerData downloads the binary contents of a record's container field. The
-// field value must be a container streaming URL on the session host; the bearer
-// token is never sent to a foreign host.
-func (c *Client) ContainerData(ctx context.Context, record Record, field string) ([]byte, error) {
-	raw, ok := record.FieldData[field]
-	if !ok {
-		return nil, fmt.Errorf("filemaker: field %q not present in record", field)
+// ContainerData downloads the binary contents of a container field. The URL must
+// be a container streaming URL on the session host (typically obtained from a
+// record via record.String(field)); the bearer token is never sent to a foreign
+// host.
+func (c *Client) ContainerData(ctx context.Context, containerURL string) ([]byte, error) {
+	if containerURL == "" {
+		return nil, errors.New("filemaker: empty container url")
 	}
-	uri, ok := raw.(string)
-	if !ok || uri == "" {
-		return nil, fmt.Errorf("filemaker: field %q is not a container reference", field)
-	}
-	if !strings.HasPrefix(uri, c.host) {
-		return nil, fmt.Errorf("filemaker: refusing to fetch container from foreign host: %s", uri)
+	if !strings.HasPrefix(containerURL, c.host) {
+		return nil, fmt.Errorf("filemaker: refusing to fetch container from foreign host: %s", containerURL)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, containerURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("filemaker: failed to build request: %w", err)
 	}
