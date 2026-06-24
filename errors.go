@@ -16,9 +16,9 @@ type codeError struct {
 func (e *codeError) Error() string { return e.text }
 
 var (
-	ErrNotNumber     = errors.New("value is not a number")
-	ErrNotString     = errors.New("value is not a string")
-	ErrUnknownFormat = errors.New("unknown format")
+	ErrNotNumber     = errors.New("filemaker: value is not a number")
+	ErrNotString     = errors.New("filemaker: value is not a string")
+	ErrUnknownFormat = errors.New("filemaker: unknown format")
 
 	// Host-code sentinels. The library exposes a sentinel only for a host code it
 	// attaches control-flow meaning to — currently the three below, each of which
