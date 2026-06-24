@@ -191,11 +191,11 @@ func (r Record) Time(fieldName string) time.Time {
 func (r Record) Decode(obj any) error {
 	v := reflect.ValueOf(obj)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
-		return errors.New("filemaker: Decode requires a non-nil pointer to a struct")
+		return errors.New("filemaker: decode requires a non-nil pointer to a struct")
 	}
 	v = v.Elem()
 	if v.Kind() != reflect.Struct {
-		return errors.New("filemaker: Decode requires a pointer to a struct")
+		return errors.New("filemaker: decode requires a pointer to a struct")
 	}
 
 	vType := v.Type()
