@@ -39,7 +39,7 @@ type Client struct {
 	idleTimeout          time.Duration // > 0 enables proactive (idle) reauth
 	location             *time.Location
 
-	reauthSem    chan struct{} // cap-1 channel used as a context-aware mutex serializing re-auth
+	authSem      chan struct{} // cap-1 channel used as a context-aware mutex serializing logins
 	mu           sync.RWMutex
 	token        string
 	lastActivity time.Time
@@ -155,7 +155,7 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 		reauthOnInvalidToken: cfg.reauthOnInvalidToken,
 		idleTimeout:          cfg.idleTimeout,
 		location:             cfg.location,
-		reauthSem:            make(chan struct{}, 1),
+		authSem:              make(chan struct{}, 1),
 	}, nil
 }
 
@@ -766,18 +766,18 @@ func (c *Client) login(ctx context.Context) (string, error) {
 // without a network round-trip. It serves both first-time and repeat
 // authentication — the empty string as observedToken is the first-use key.
 //
-// reauthSem (a cap-1 channel used as a context-aware mutex) serializes logins so
+// authSem (a cap-1 channel used as a context-aware mutex) serializes logins so
 // concurrent callers collapse to one network call; a caller waiting on it honors
 // its ctx and bails on cancellation rather than blocking on an in-flight login.
 // The login itself runs without holding the read/write lock, so token reads (and
 // LastActivity) stay live during a refresh.
 func (c *Client) authenticate(ctx context.Context, observedToken string) error {
 	select {
-	case c.reauthSem <- struct{}{}:
+	case c.authSem <- struct{}{}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	defer func() { <-c.reauthSem }()
+	defer func() { <-c.authSem }()
 
 	c.mu.RLock()
 	current := c.token

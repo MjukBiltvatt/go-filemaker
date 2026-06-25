@@ -30,7 +30,7 @@ func testClient(srv *httptest.Server) *Client {
 		username:   "user",
 		password:   "pass",
 		token:      "tok",
-		reauthSem:  make(chan struct{}, 1),
+		authSem:    make(chan struct{}, 1),
 	}
 }
 
