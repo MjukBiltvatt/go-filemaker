@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,6 +54,8 @@ type config struct {
 	idleTimeout          time.Duration
 	location             *time.Location
 	allowInsecureHTTP    bool
+	debug                bool
+	debugWriter          io.Writer
 }
 
 // WithTimeout sets the timeout applied to every HTTP request made by the
@@ -103,6 +106,23 @@ func WithInsecureHTTP() Option {
 	}
 }
 
+// WithDebug enables verbose logging of every HTTP request and response the
+// client makes — request line, headers, and body, then the response status,
+// headers, and body — written to w. Authorization headers are redacted so the
+// Basic-auth credentials and the session token never reach the log. Pass nil to
+// write to os.Stderr.
+//
+// Logging is installed at the transport layer, so it captures all of the
+// client's traffic, including container downloads. It is intended for
+// development and prints request and response bodies in full; do not enable it
+// where those bodies (record data) must not be logged.
+func WithDebug(w io.Writer) Option {
+	return func(c *config) {
+		c.debug = true
+		c.debugWriter = w
+	}
+}
+
 // WithLocation sets the time zone used to interpret FileMaker date and timestamp
 // fields (which carry no zone) when reading them back through a record's
 // Time/TimeE methods or Decode. Records returned by the client carry this
@@ -144,8 +164,21 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 	}
 
 	jar, _ := cookiejar.New(nil)
+	httpClient := &http.Client{Timeout: cfg.timeout, Jar: jar}
+	if cfg.debug {
+		w := cfg.debugWriter
+		if w == nil {
+			w = os.Stderr
+		}
+		base := httpClient.Transport
+		if base == nil {
+			base = http.DefaultTransport
+		}
+		httpClient.Transport = &debugTransport{rt: base, w: w}
+	}
+
 	return &Client{
-		httpClient:           &http.Client{Timeout: cfg.timeout, Jar: jar},
+		httpClient:           httpClient,
 		host:                 normalizedHost,
 		database:             database,
 		username:             username,
