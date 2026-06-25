@@ -68,6 +68,29 @@ func TestNormalizeHost(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		writeJSON(w, okSession)
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if c.token != "" {
+		t.Errorf("token = %q, want empty (no eager auth)", c.token)
+	}
+	if !c.LastActivity().IsZero() {
+		t.Errorf("lastActivity = %v, want zero (no activity yet)", c.LastActivity())
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("New made %d HTTP calls, want 0 (construction is pure)", n)
+	}
+}
+
+func TestAuthenticate(t *testing.T) {
 	var mu sync.Mutex
 	var gotAuth, gotPath, gotMethod string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,11 +105,11 @@ func TestNew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	if err := c.Authenticate(context.Background()); err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
 	if c.token != "tok" {
 		t.Errorf("token = %q, want tok", c.token)
-	}
-	if c.LastActivity().IsZero() {
-		t.Error("lastActivity not set")
 	}
 
 	mu.Lock()
@@ -105,6 +128,41 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestLazyAuthOnFirstUse(t *testing.T) {
+	var sessionCalls, opCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sessions") {
+			sessionCalls.Add(1)
+			writeJSON(w, okSession)
+			return
+		}
+		opCalls.Add(1)
+		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
+			t.Errorf("op auth = %q, want Bearer tok (lazy auth should run first)", got)
+		}
+		writeJSON(w, `{"response":{"recordId":"1"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var rb responseBody
+	if err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb); err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if n := sessionCalls.Load(); n != 1 {
+		t.Errorf("session calls = %d, want 1 (lazy auth)", n)
+	}
+	if n := opCalls.Load(); n != 1 {
+		t.Errorf("op calls = %d, want 1", n)
+	}
+	if c.token != "tok" {
+		t.Errorf("token = %q, want tok", c.token)
+	}
+}
+
 func TestNewValidation(t *testing.T) {
 	if _, err := New("", "db", "u", "p"); err == nil {
 		t.Error("expected error for empty host")
@@ -117,13 +175,17 @@ func TestNewValidation(t *testing.T) {
 	}
 }
 
-func TestNewHostError(t *testing.T) {
+func TestAuthenticateError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, `{"response":{},"messages":[{"code":"212","message":"Invalid credentials"}]}`)
 	}))
 	defer srv.Close()
 
-	_, err := New(srv.URL, "db", "user", "bad", WithInsecureHTTP())
+	c, err := New(srv.URL, "db", "user", "bad", WithInsecureHTTP())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	err = c.Authenticate(context.Background())
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.Code() != 212 {
 		t.Fatalf("got %v, want *APIError with code 212", err)
@@ -370,7 +432,7 @@ func TestReauthWaitHonorsContext(t *testing.T) {
 	// Leader: holds the reauth lock and blocks inside the slow auth.
 	leaderDone := make(chan error, 1)
 	go func() {
-		leaderDone <- c.reauthenticate(context.Background(), "tok")
+		leaderDone <- c.authenticate(context.Background(), "tok")
 	}()
 	<-authStarted
 
@@ -378,7 +440,7 @@ func TestReauthWaitHonorsContext(t *testing.T) {
 	// than wait for the blocked leader.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := c.reauthenticate(ctx, "tok"); !errors.Is(err, context.Canceled) {
+	if err := c.authenticate(ctx, "tok"); !errors.Is(err, context.Canceled) {
 		t.Errorf("follower reauth = %v, want context.Canceled", err)
 	}
 
@@ -453,7 +515,7 @@ func TestConcurrentDo(t *testing.T) {
 	wg.Wait()
 }
 
-func TestDestroy(t *testing.T) {
+func TestLogout(t *testing.T) {
 	var mu sync.Mutex
 	var gotPath, gotMethod string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -465,8 +527,8 @@ func TestDestroy(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	if err := c.Destroy(context.Background()); err != nil {
-		t.Fatalf("Destroy: %v", err)
+	if err := c.Logout(context.Background()); err != nil {
+		t.Fatalf("Logout: %v", err)
 	}
 
 	mu.Lock()
@@ -480,5 +542,25 @@ func TestDestroy(t *testing.T) {
 	}
 	if c.token != "" {
 		t.Errorf("token = %q, want cleared", c.token)
+	}
+}
+
+func TestLogoutNoSession(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		writeJSON(w, okSession)
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := c.Logout(context.Background()); err != nil {
+		t.Fatalf("Logout: %v", err)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("Logout made %d HTTP calls, want 0 (no session)", n)
 	}
 }

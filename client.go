@@ -115,10 +115,14 @@ func WithLocation(loc *time.Location) Option {
 	}
 }
 
-// New starts a database session by authenticating against the host. The host
-// may include a scheme; if it does not, https is assumed. Plaintext http is
-// rejected unless WithInsecureHTTP is passed, and any scheme other than http or
-// https is rejected outright.
+// New builds a client for the given host and credentials. It performs no
+// network I/O: the session is established lazily, on the first operation that
+// needs it (or eagerly via Authenticate). The errors it returns are therefore
+// cheap argument/host validation, never a failed login.
+//
+// The host may include a scheme; if it does not, https is assumed. Plaintext
+// http is rejected unless WithInsecureHTTP is passed, and any scheme other than
+// http or https is rejected outright.
 func New(host, database, username, password string, opts ...Option) (*Client, error) {
 	switch {
 	case host == "":
@@ -142,7 +146,7 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 	}
 
 	jar, _ := cookiejar.New(nil)
-	c := &Client{
+	return &Client{
 		httpClient:           &http.Client{Timeout: cfg.timeout, Jar: jar},
 		host:                 normalizedHost,
 		database:             database,
@@ -152,26 +156,52 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 		idleTimeout:          cfg.idleTimeout,
 		location:             cfg.location,
 		reauthSem:            make(chan struct{}, 1),
-	}
-
-	token, err := c.authenticate(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	c.mu.Lock()
-	c.token = token
-	c.lastActivity = time.Now()
-	c.mu.Unlock()
-
-	return c, nil
+	}, nil
 }
 
-// Destroy logs out of the database session, invalidating the token.
-func (c *Client) Destroy(ctx context.Context) error {
+// Authenticate eagerly establishes a session by logging in to the host, so a
+// caller can surface credential or connectivity errors at a chosen point rather
+// than on the first operation. It is optional: every operation authenticates
+// lazily on first use when no session exists yet.
+//
+// Calling it always performs a fresh login and replaces the stored token. It
+// does not log out an existing session first: the previous token is abandoned,
+// not invalidated, and lingers on the host until it times out. Call Logout
+// before Authenticate if you need the old session torn down promptly.
+// Concurrent calls collapse to a single login, so a burst of callers does not
+// produce a burst of sessions.
+func (c *Client) Authenticate(ctx context.Context) error {
+	c.mu.RLock()
+	used := c.token
+	c.mu.RUnlock()
+	return c.authenticate(ctx, used)
+}
+
+// ensureAuthenticated acquires the initial session token on first use (lazy
+// authentication). It is a cheap read-and-return once a session exists;
+// concurrent first-use callers collapse to a single login via authenticate's
+// observed-token de-duplication (an empty token is the de-dup key).
+func (c *Client) ensureAuthenticated(ctx context.Context) error {
 	c.mu.RLock()
 	token := c.token
 	c.mu.RUnlock()
+	if token != "" {
+		return nil
+	}
+	return c.authenticate(ctx, "")
+}
+
+// Logout ends the current database session, invalidating the token on the
+// host. The client remains usable afterward: a subsequent operation (or
+// Authenticate) establishes a fresh session. Logout is a no-op when no session
+// has been established yet.
+func (c *Client) Logout(ctx context.Context) error {
+	c.mu.RLock()
+	token := c.token
+	c.mu.RUnlock()
+	if token == "" {
+		return nil
+	}
 
 	// Logout identifies the session by the token in the URL and takes no
 	// Authorization header, so it bypasses the authed do() path.
@@ -194,8 +224,9 @@ func (c *Client) Destroy(ctx context.Context) error {
 }
 
 // LastActivity returns the time of the last successful request made with the
-// client. It defaults to the time the session was created until another request
-// is made.
+// client. It is the zero time until the first request succeeds: a freshly built
+// client has performed no activity yet (authentication is lazy). Check
+// IsZero to distinguish "never used" from a real timestamp.
 func (c *Client) LastActivity() time.Time {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -369,7 +400,7 @@ func (c *Client) UploadToContainer(ctx context.Context, layout, id, field, filen
 	contentType := w.FormDataContentType()
 	body := buf.Bytes()
 	var rb responseBody
-	return c.withReauth(ctx, func() (string, error) {
+	return c.withAuth(ctx, func() (string, error) {
 		return c.attempt(ctx, http.MethodPost, c.containerURL(layout, id, field), contentType, body, &rb)
 	})
 }
@@ -384,6 +415,10 @@ func (c *Client) ContainerData(ctx context.Context, containerURL string) ([]byte
 	}
 	if !strings.HasPrefix(containerURL, c.host) {
 		return nil, fmt.Errorf("filemaker: refusing to fetch container from foreign host: %s", containerURL)
+	}
+
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, containerURL, nil)
@@ -473,12 +508,16 @@ func (rb *responseBody) check() error {
 // body is the marshaled request payload (nil for GET/DELETE); it is passed as a
 // byte slice rather than an io.Reader so it can be replayed on a reauth retry.
 func (c *Client) do(ctx context.Context, method, url string, body []byte, out *responseBody) error {
-	return c.withReauth(ctx, func() (string, error) {
+	return c.withAuth(ctx, func() (string, error) {
 		return c.attempt(ctx, method, url, "application/json", body, out)
 	})
 }
 
-// withReauth wraps a request attempt with optional automatic re-authentication.
+// withAuth wraps a request attempt with lazy first-use authentication and
+// optional automatic re-authentication.
+//
+// Lazy: if no session exists yet, authenticate before the attempt. Always runs,
+// independent of the reauth options.
 //
 // Proactive (WithReauthOnIdle): if the session has been idle past the configured
 // timeout, refresh the token before the attempt. Best-effort — a failed refresh
@@ -487,21 +526,28 @@ func (c *Client) do(ctx context.Context, method, url string, body []byte, out *r
 // Reactive (WithReauthOnInvalidToken): if the attempt fails with an
 // invalid-token error, re-authenticate and retry once.
 //
-// Both triggers funnel into the same de-duplicated reauthenticate, so concurrent
+// Both triggers funnel into the same de-duplicated authenticate, so concurrent
 // callers that all detect expiry collapse to a single re-auth. The attempt
 // returns the token it used, which is the de-dup key.
-func (c *Client) withReauth(ctx context.Context, attempt func() (string, error)) error {
+func (c *Client) withAuth(ctx context.Context, attempt func() (string, error)) error {
+	// Lazy authentication: acquire the initial token on first use. A failed
+	// login here is fatal to the attempt, so its error is returned (unlike the
+	// best-effort proactive refresh below).
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return err
+	}
+
 	if c.idleTimeout > 0 && c.idle() {
 		c.mu.RLock()
 		used := c.token
 		c.mu.RUnlock()
-		_ = c.reauthenticate(ctx, used)
+		_ = c.authenticate(ctx, used)
 	}
 
 	used, err := attempt()
 
 	if c.reauthOnInvalidToken && errors.Is(err, ErrInvalidToken) {
-		if rerr := c.reauthenticate(ctx, used); rerr != nil {
+		if rerr := c.authenticate(ctx, used); rerr != nil {
 			return rerr
 		}
 		_, err = attempt()
@@ -551,7 +597,7 @@ func (c *Client) attempt(ctx context.Context, method, url, contentType string, b
 
 // send performs one round-trip: it sends req, reads and decodes the response
 // into out, and reports any host error. It holds no locks and sets no auth
-// headers, so it is shared by both authenticate (Basic auth) and do (Bearer).
+// headers, so it is shared by both login (Basic auth) and do (Bearer).
 func (c *Client) send(req *http.Request, out *responseBody) error {
 	res, err := c.httpClient.Do(req)
 	if err != nil {
@@ -571,8 +617,8 @@ func (c *Client) send(req *http.Request, out *responseBody) error {
 	return out.check()
 }
 
-// authenticate performs a Basic-auth login and returns a fresh session token.
-func (c *Client) authenticate(ctx context.Context) (string, error) {
+// login performs a Basic-auth login and returns a fresh session token.
+func (c *Client) login(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL()+"/sessions", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return "", fmt.Errorf("filemaker: failed to build request: %w", err)
@@ -590,17 +636,18 @@ func (c *Client) authenticate(ctx context.Context) (string, error) {
 	return rb.Response.Token, nil
 }
 
-// reauthenticate replaces the stored token with a freshly authenticated one,
-// de-duplicating concurrent callers. used is the token the caller last saw; if
-// another goroutine already refreshed the token since then, this returns without
-// a network round-trip.
+// authenticate replaces the stored token with one from a fresh login,
+// de-duplicating concurrent callers. observedToken is the token the caller last
+// saw; if another goroutine already refreshed the token since then, this returns
+// without a network round-trip. It serves both first-time and repeat
+// authentication — the empty string as observedToken is the first-use key.
 //
-// reauthSem (a cap-1 channel used as a context-aware mutex) serializes re-auth so
+// reauthSem (a cap-1 channel used as a context-aware mutex) serializes logins so
 // concurrent callers collapse to one network call; a caller waiting on it honors
-// its ctx and bails on cancellation rather than blocking on an in-flight auth.
-// The auth itself runs without holding the read/write lock, so token reads (and
+// its ctx and bails on cancellation rather than blocking on an in-flight login.
+// The login itself runs without holding the read/write lock, so token reads (and
 // LastActivity) stay live during a refresh.
-func (c *Client) reauthenticate(ctx context.Context, used string) error {
+func (c *Client) authenticate(ctx context.Context, observedToken string) error {
 	select {
 	case c.reauthSem <- struct{}{}:
 	case <-ctx.Done():
@@ -611,11 +658,11 @@ func (c *Client) reauthenticate(ctx context.Context, used string) error {
 	c.mu.RLock()
 	current := c.token
 	c.mu.RUnlock()
-	if current != used {
+	if current != observedToken {
 		return nil
 	}
 
-	token, err := c.authenticate(ctx)
+	token, err := c.login(ctx)
 	if err != nil {
 		return err
 	}
