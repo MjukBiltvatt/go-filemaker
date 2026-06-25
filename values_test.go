@@ -64,7 +64,7 @@ func TestFieldDataWithTypedValues(t *testing.T) {
 		"DOB":     Date(time.Date(1990, 6, 23, 0, 0, 0, 0, time.UTC)),
 		"Created": Timestamp(time.Date(2026, 6, 23, 14, 5, 0, 0, time.UTC)),
 		"Name":    "Mark",
-	}, "")
+	}, nil, "")
 	if err != nil {
 		t.Fatalf("marshalRecordBody: %v", err)
 	}

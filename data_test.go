@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -434,6 +435,134 @@ func TestUpdateDoesNotMutateCallerOpts(t *testing.T) {
 	backing[1](&cfg)
 	if !sentinelCalled {
 		t.Error("Update mutated the caller's opts backing array (sentinel at index 1 was overwritten)")
+	}
+}
+
+func TestUpdateWithPortalData(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"modId":"5"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	portals := PortalData{
+		"Orders": {
+			// An existing related record to edit (carries a recordId/modId).
+			{"Orders::recordId": "70", "Orders::modId": "4", "Orders::Qty": 3},
+			// A new related record to add (no recordId).
+			{"Orders::Item": "Widget"},
+		},
+	}
+	if _, err := c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "Jane"}, WithPortalData(portals)); err != nil {
+		t.Fatalf("UpdateByID: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+
+	var got struct {
+		FieldData  map[string]any              `json:"fieldData"`
+		PortalData map[string][]map[string]any `json:"portalData"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("unmarshal body %q: %v", body, err)
+	}
+	if got.FieldData["Name"] != "Jane" {
+		t.Errorf("fieldData = %v, want Name=Jane", got.FieldData)
+	}
+	rows := got.PortalData["Orders"]
+	if len(rows) != 2 {
+		t.Fatalf("portalData[Orders] = %d rows, want 2 (body %q)", len(rows), body)
+	}
+	if rows[0]["Orders::recordId"] != "70" || rows[0]["Orders::modId"] != "4" {
+		t.Errorf("edit row = %v, want recordId 70 / modId 4", rows[0])
+	}
+	if _, ok := rows[1]["Orders::recordId"]; ok {
+		t.Errorf("add row should carry no recordId, got %v", rows[1])
+	}
+	if rows[1]["Orders::Item"] != "Widget" {
+		t.Errorf("add row = %v, want Item=Widget", rows[1])
+	}
+}
+
+// A plain update with no WithPortalData must not emit a portalData key, and a
+// portal-only edit (nil FieldData) must still send an empty fieldData object so
+// the host applies the portal edits without touching the record's own fields.
+func TestUpdatePortalDataOmittedAndPortalOnly(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"modId":"5"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	lastBody := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return gotBody
+	}
+
+	if _, err := c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "Jane"}); err != nil {
+		t.Fatalf("UpdateByID: %v", err)
+	}
+	if strings.Contains(lastBody(), "portalData") {
+		t.Errorf("body = %q, want no portalData key when WithPortalData is not used", lastBody())
+	}
+
+	portals := PortalData{"Orders": {{"Orders::Item": "Widget"}}}
+	if _, err := c.UpdateByID(context.Background(), "People", "9", nil, WithPortalData(portals)); err != nil {
+		t.Fatalf("UpdateByID portal-only: %v", err)
+	}
+	if !strings.Contains(lastBody(), `"fieldData":{}`) {
+		t.Errorf("body = %q, want empty fieldData on a portal-only edit", lastBody())
+	}
+	if !strings.Contains(lastBody(), `"portalData":{"Orders":`) {
+		t.Errorf("body = %q, want portalData", lastBody())
+	}
+}
+
+// The record-based Update threads WithPortalData through to the request, and it
+// composes with IfUnchanged so the body carries both the portal edits and the
+// record's locking modId.
+func TestUpdateByRecordPortalDataWithIfUnchanged(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"modId":"5"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	rec := Record{layout: "People", id: "9", modID: "3"}
+	portals := PortalData{"Orders": {{"Orders::Item": "Widget"}}}
+	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}, WithPortalData(portals), IfUnchanged()); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+	if !strings.Contains(body, `"portalData":{"Orders":`) {
+		t.Errorf("body = %q, want portalData threaded through Update", body)
+	}
+	if !strings.Contains(body, `"modId":"3"`) {
+		t.Errorf("body = %q, want IfUnchanged's modId 3", body)
 	}
 }
 

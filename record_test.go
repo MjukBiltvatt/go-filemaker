@@ -59,10 +59,10 @@ func TestFieldsAndPortalsAreFaithfulCopies(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.rec.Fields(); !reflect.DeepEqual(got, tc.rec.fieldData) {
+			if got := tc.rec.Fields(); !reflect.DeepEqual(got, FieldData(tc.rec.fieldData)) {
 				t.Errorf("Fields() = %#v, want %#v", got, tc.rec.fieldData)
 			}
-			if got := tc.rec.Portals(); !reflect.DeepEqual(got, tc.rec.portalData) {
+			if got := tc.rec.Portals(); !reflect.DeepEqual(got, PortalData(tc.rec.portalData)) {
 				t.Errorf("Portals() = %#v, want %#v", got, tc.rec.portalData)
 			}
 		})

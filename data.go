@@ -83,7 +83,7 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (C
 		return CreateResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	body, err := marshalRecordBody(fields, "")
+	body, err := marshalRecordBody(fields, nil, "")
 	if err != nil {
 		return CreateResponse{}, err
 	}
@@ -107,6 +107,7 @@ type UpdateOption func(*updateConfig)
 type updateConfig struct {
 	conditional bool
 	modID       string
+	portalData  PortalData
 	err         error
 }
 
@@ -141,6 +142,25 @@ func IfUnchanged() UpdateOption {
 	}
 }
 
+// WithPortalData attaches related-record edits to an update, applied by the host
+// alongside the field-data patch. Pass the rows in the same shape Record.Portals
+// returns: a portal name mapped to its rows, each row's field values keyed by
+// fully qualified name ("TableOccurrence::FieldName"). A row carrying a record ID
+// ("TableOccurrence::recordId") edits that existing related record — add
+// "TableOccurrence::modId" for optimistic locking — and a row without one is
+// added as a new related record.
+//
+// Only the named portal rows are touched; rows you omit are left unchanged. To
+// remove related records, set "deleteRelated" in the FieldData patch (e.g.
+// "Orders.3", or a slice for several): it is a field-data directive, not a portal
+// edit. To edit only portals and leave the record's own fields untouched, pass a
+// nil or empty FieldData. See the Claris Data API guide's "Edit record" page.
+func WithPortalData(portals PortalData) UpdateOption {
+	return func(c *updateConfig) {
+		c.portalData = portals
+	}
+}
+
 // resolveUpdateConfig applies the options and resolves the mod ID. A conditional
 // update with no explicit version sources it from rec (nil for the id-addressed
 // path, which cannot honor IfUnchanged). Deferred option errors surface here.
@@ -171,7 +191,8 @@ func resolveUpdateConfig(opts []UpdateOption, rec *Record) (updateConfig, error)
 // and the rest of the record is left unchanged on the host. rec is used solely
 // to address the record (its Layout and ID); its own field values are not sent.
 // Writes are unconditional by default; pass IfUnchanged for optimistic
-// concurrency against the record's ModID.
+// concurrency against the record's ModID, or WithPortalData to edit related
+// records in the same request.
 func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
 	if rec.id == "" {
 		return UpdateResponse{}, errors.New("filemaker: record has no ID; create or find it first")
@@ -194,7 +215,8 @@ func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts 
 
 // UpdateByID writes the given field data to an existing record addressed by
 // layout and id, and returns the new mod ID. See Update for the patch semantics.
-// For optimistic concurrency pass WithModID (IfUnchanged needs a record).
+// For optimistic concurrency pass WithModID (IfUnchanged needs a record); pass
+// WithPortalData to edit related records in the same request.
 func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
 	switch {
 	case layout == "":
@@ -208,7 +230,7 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 		return UpdateResponse{}, err
 	}
 
-	body, err := marshalRecordBody(fields, cfg.modID)
+	body, err := marshalRecordBody(fields, cfg.portalData, cfg.modID)
 	if err != nil {
 		return UpdateResponse{}, err
 	}
@@ -344,16 +366,19 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 }
 
 // marshalRecordBody wraps fields in the {"fieldData": ...} envelope the host
-// expects, optionally including a modId for optimistic locking (omitted when
-// empty). A nil map becomes an empty object so the host applies defaults.
-func marshalRecordBody(fields FieldData, modID string) ([]byte, error) {
+// expects, optionally including portal edits and a modId for optimistic locking
+// (each omitted when empty). A nil fields map becomes an empty object so the host
+// applies defaults on create and leaves the record's own fields untouched on a
+// portal-only edit.
+func marshalRecordBody(fields FieldData, portals PortalData, modID string) ([]byte, error) {
 	if fields == nil {
 		fields = FieldData{}
 	}
 	body, err := json.Marshal(struct {
-		FieldData FieldData `json:"fieldData"`
-		ModID     string    `json:"modId,omitempty"`
-	}{fields, modID})
+		FieldData  FieldData  `json:"fieldData"`
+		PortalData PortalData `json:"portalData,omitempty"`
+		ModID      string     `json:"modId,omitempty"`
+	}{fields, portals, modID})
 	if err != nil {
 		return nil, fmt.Errorf("filemaker: failed to marshal field data: %w", err)
 	}

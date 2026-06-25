@@ -12,6 +12,19 @@ import (
 // fields as string.
 type FieldData map[string]any
 
+// PortalData holds portal (related) records keyed by portal name, each value a
+// slice of rows. It is both what Record.Portals returns and what the
+// WithPortalData update option accepts, so portal data read from a record can be
+// edited and written back unchanged.
+//
+// Within a row, field values are keyed by their fully qualified name
+// ("TableOccurrence::FieldName"). When writing, a row that carries a record ID
+// ("TableOccurrence::recordId", optionally with "TableOccurrence::modId" for
+// optimistic locking) edits that existing related record; a row without one is
+// added as a new related record. See the Claris Data API guide's "Edit record"
+// page for the wire format.
+type PortalData map[string][]map[string]any
+
 // Record is a single record returned by a read operation (Find). It is a plain,
 // immutable value: it holds no reference back to the Client and has no methods
 // that touch the host. All of its state is unexported and exposed through
@@ -49,7 +62,7 @@ func (r Record) Layout() string { return r.layout }
 // string. The result is a copy — mutating it does not affect the record — and
 // is nil when the record carries no field data. Use the typed accessors
 // (String, Int, …) for individual fields.
-func (r Record) Fields() map[string]any {
+func (r Record) Fields() FieldData {
 	return cloneFields(r.fieldData)
 }
 
@@ -57,7 +70,7 @@ func (r Record) Fields() map[string]any {
 // each value a slice of rows. The result is a deep copy — mutating it (including
 // its rows) does not affect the record — and is nil when the record carries no
 // portal data.
-func (r Record) Portals() map[string][]map[string]any {
+func (r Record) Portals() PortalData {
 	return clonePortalData(r.portalData)
 }
 
@@ -79,11 +92,11 @@ func cloneFields(src map[string]any) map[string]any {
 // slice and each row map are rebuilt so mutating the result cannot reach the
 // record. The leaf values are immutable scalars and are shared. Nil maps and
 // slices are preserved as nil so the copy equals the original.
-func clonePortalData(src map[string][]map[string]any) map[string][]map[string]any {
+func clonePortalData(src map[string][]map[string]any) PortalData {
 	if src == nil {
 		return nil
 	}
-	dst := make(map[string][]map[string]any, len(src))
+	dst := make(PortalData, len(src))
 	for name, rows := range src {
 		if rows == nil {
 			dst[name] = nil
