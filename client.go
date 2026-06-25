@@ -177,6 +177,7 @@ type responseBody struct {
 		DataInfo    DataInfo     `json:"dataInfo"`
 		Data        []recordWire `json:"data"`
 		ProductInfo ProductInfo  `json:"productInfo"`
+		Databases   []Database   `json:"databases"`
 	} `json:"response"`
 	Messages []struct {
 		Code    string `json:"code"`

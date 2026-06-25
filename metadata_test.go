@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -101,5 +102,92 @@ func TestProductInfoDoesNotStampActivity(t *testing.T) {
 	}
 	if !c.LastActivity().IsZero() {
 		t.Errorf("LastActivity = %v, want zero (metadata call is not session activity)", c.LastActivity())
+	}
+}
+
+func TestDatabases(t *testing.T) {
+	var mu sync.Mutex
+	var gotMethod, gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		mu.Unlock()
+		writeJSON(w, `{"response":{"databases":[{"name":"Customers"},{"name":"Sales"}]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	dbs, err := c.Databases(context.Background())
+	if err != nil {
+		t.Fatalf("Databases: %v", err)
+	}
+
+	if len(dbs) != 2 || dbs[0].Name != "Customers" || dbs[1].Name != "Sales" {
+		t.Errorf("databases = %+v", dbs)
+	}
+
+	mu.Lock()
+	method, path, auth := gotMethod, gotPath, gotAuth
+	mu.Unlock()
+	if method != http.MethodGet {
+		t.Errorf("method = %q, want GET", method)
+	}
+	if path != "/fmi/data/v1/databases" {
+		t.Errorf("path = %q, want /fmi/data/v1/databases", path)
+	}
+	// The endpoint uses Basic auth with the raw credentials, not the session
+	// bearer token (testClient holds a token "tok", which must not be sent).
+	wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("user:pass"))
+	if auth != wantAuth {
+		t.Errorf("auth = %q, want %q (Basic, not Bearer)", auth, wantAuth)
+	}
+	// Host-level metadata call: it is not session activity.
+	if !c.LastActivity().IsZero() {
+		t.Errorf("LastActivity = %v, want zero", c.LastActivity())
+	}
+}
+
+func TestDatabasesWithoutCredentials(t *testing.T) {
+	var mu sync.Mutex
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = r.Header.Get("Authorization")
+		mu.Unlock()
+		writeJSON(w, `{"response":{"databases":[{"name":"Customers"}]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	// A credential-free client sends no Authorization header, which works against
+	// a host that has "Filter Databases in Client Applications" disabled.
+	c, err := New(srv.URL, "", "", "", WithInsecureHTTP())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	dbs, err := c.Databases(context.Background())
+	if err != nil {
+		t.Fatalf("Databases: %v", err)
+	}
+	if len(dbs) != 1 || dbs[0].Name != "Customers" {
+		t.Errorf("databases = %+v", dbs)
+	}
+
+	mu.Lock()
+	auth := gotAuth
+	mu.Unlock()
+	if auth != "" {
+		t.Errorf("Authorization = %q, want none (no credentials configured)", auth)
+	}
+}
+
+func TestDatabasesAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{},"messages":[{"code":"802","message":"Unable to open file"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if _, err := c.Databases(context.Background()); err == nil {
+		t.Error("expected error from non-zero message code")
 	}
 }
