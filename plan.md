@@ -547,11 +547,6 @@ for _, rec := range found.Records {
 
 1. **Editing model: data-in/data-out.** `Create`/`Update` take a `FieldData`
    map. No mutable staged changes on the record.
-5. **Per-method response types.** Each verb returns a dedicated type mirroring
-   the Data API envelope (`CreateResponse{RecordID,ModID}`,
-   `UpdateResponse{ModID}`, `FindResponse{Records,DataInfo}`; `Delete` returns
-   only `error`), so every reachable field is guaranteed populated. Writes do
-   **not** auto-issue a follow-up read. `Record` gains `ModID` and portal data.
 2. **`context.Context`: yes.** Every network method takes `ctx` as its first
    argument (`Find`, `Create`, `Update`, `Delete`, `Authenticate`, `Logout`,
    container upload/download), built via `http.NewRequestWithContext`.
@@ -564,6 +559,11 @@ for _, rec := range found.Records {
 4. **Synchronization primitive: `sync.RWMutex`.** Chosen over atomics because
    `lastActivity` is multi-word, the auto-reauth path needs a check-then-act
    critical section, and contention is negligible. (See Concurrency model.)
+5. **Per-method response types.** Each verb returns a dedicated type mirroring
+   the Data API envelope (`CreateResponse{RecordID,ModID}`,
+   `UpdateResponse{ModID}`, `FindResponse{Records,DataInfo}`; `Delete` returns
+   only `error`), so every reachable field is guaranteed populated. Writes do
+   **not** auto-issue a follow-up read. `Record` gains `ModID` and portal data.
 6. **Lazy authentication; `New` is pure.** `New` does no network I/O and its
    error is cheap validation only. The session is established on first use (or
    eagerly via `Authenticate`). Rationale: Go expects constructors to be cheap,
