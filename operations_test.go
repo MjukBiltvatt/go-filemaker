@@ -41,7 +41,7 @@ func TestFind(t *testing.T) {
 	if len(resp.Records) != 2 {
 		t.Fatalf("records = %d, want 2", len(resp.Records))
 	}
-	if resp.Records[0].ID != "1" || resp.Records[0].ModID != "3" || resp.Records[0].Layout != "People" {
+	if resp.Records[0].ID() != "1" || resp.Records[0].ModID() != "3" || resp.Records[0].Layout() != "People" {
 		t.Errorf("record[0] = %+v", resp.Records[0])
 	}
 	if resp.Records[0].Get("Name") != "Mark" {
@@ -268,7 +268,7 @@ func TestUpdateByRecord(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{Layout: "People", ID: "9"}
+	rec := Record{layout: "People", id: "9"}
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestRecordWriteNoID(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{Layout: "People"} // no ID
+	rec := Record{layout: "People"} // no ID
 
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "x"}); err == nil {
 		t.Error("Update: expected error for record without ID")
@@ -314,7 +314,7 @@ func TestUpdateIfUnchanged(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{Layout: "People", ID: "9", ModID: "3"}
+	rec := Record{layout: "People", id: "9", modID: "3"}
 
 	lastBody := func() string {
 		mu.Lock()
@@ -359,7 +359,7 @@ func TestWithModIDEmpty(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{Layout: "People", ID: "9", ModID: "3"}
+	rec := Record{layout: "People", id: "9", modID: "3"}
 
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "x"}, WithModID("")); err == nil {
 		t.Error("Update: expected error for WithModID(\"\")")
@@ -391,7 +391,7 @@ func TestIfUnchangedErrors(t *testing.T) {
 
 	// IfUnchanged on a record without a ModID must error, not silently degrade to
 	// an unconditional write.
-	if _, err := c.Update(context.Background(), Record{Layout: "People", ID: "9"}, FieldData{"Name": "x"}, IfUnchanged()); err == nil {
+	if _, err := c.Update(context.Background(), Record{layout: "People", id: "9"}, FieldData{"Name": "x"}, IfUnchanged()); err == nil {
 		t.Error("Update: expected error for IfUnchanged on a record without a ModID")
 	}
 
@@ -415,7 +415,7 @@ func TestUpdateDoesNotMutateCallerOpts(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{Layout: "People", ID: "9", ModID: "3"}
+	rec := Record{layout: "People", id: "9", modID: "3"}
 
 	// A slice with spare capacity (len 1, cap 2) whose extra slot holds a sentinel.
 	// If Update appends its resolved WithModID into the caller's array instead of a
@@ -511,7 +511,7 @@ func TestDownloadFromContainer(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{Layout: "People", fieldData: map[string]any{"Photo": srv.URL + "/Streaming/abc"}}
+	rec := Record{layout: "People", fieldData: map[string]any{"Photo": srv.URL + "/Streaming/abc"}}
 	data, err := c.DownloadFromContainer(context.Background(), rec, "Photo")
 	if err != nil {
 		t.Fatalf("DownloadFromContainer: %v", err)
@@ -535,7 +535,7 @@ func TestDownloadFromContainerNotAURL(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{Layout: "People", fieldData: map[string]any{"Age": float64(42)}}
+	rec := Record{layout: "People", fieldData: map[string]any{"Age": float64(42)}}
 	if _, err := c.DownloadFromContainer(context.Background(), rec, "Age"); err == nil {
 		t.Error("expected error for a non-string field")
 	}

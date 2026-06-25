@@ -285,9 +285,9 @@ func (c *Client) Find(ctx context.Context, layout string, query Query) (FindResp
 	records := make([]Record, len(rb.Response.Data))
 	for i, w := range rb.Response.Data {
 		records[i] = Record{
-			ID:         w.ID,
-			ModID:      w.ModID,
-			Layout:     layout,
+			id:         w.ID,
+			modID:      w.ModID,
+			layout:     layout,
 			fieldData:  w.FieldData,
 			portalData: w.PortalData,
 			loc:        c.location,
@@ -349,7 +349,7 @@ func WithModID(modID string) UpdateOption {
 // IfUnchanged makes the update conditional on the record not having changed
 // since it was read: it locks against the record's own ModID, so the host
 // rejects the write with ErrRecordModified if another writer modified the record
-// in the meantime. It is the ergonomic form of WithModID(rec.ModID).
+// in the meantime. It is the ergonomic form of WithModID(rec.ModID()).
 //
 // Only the record-based Update can honor it (UpdateByID has no record to read a
 // ModID from, and reports an error); a record without a ModID is likewise an
@@ -378,10 +378,10 @@ func resolveUpdateConfig(opts []UpdateOption, rec *Record) (updateConfig, error)
 		switch {
 		case rec == nil:
 			return cfg, errors.New("filemaker: IfUnchanged requires a record; use WithModID with UpdateByID")
-		case rec.ModID == "":
+		case rec.modID == "":
 			return cfg, errors.New("filemaker: IfUnchanged requires a record with a ModID")
 		}
-		cfg.modID = rec.ModID
+		cfg.modID = rec.modID
 	}
 	return cfg, nil
 }
@@ -393,7 +393,7 @@ func resolveUpdateConfig(opts []UpdateOption, rec *Record) (updateConfig, error)
 // Writes are unconditional by default; pass IfUnchanged for optimistic
 // concurrency against the record's ModID.
 func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
-	if rec.ID == "" {
+	if rec.id == "" {
 		return UpdateResponse{}, errors.New("filemaker: record has no ID; create or find it first")
 	}
 	// IfUnchanged is record-relative, so resolve it here (UpdateByID has no record
@@ -409,7 +409,7 @@ func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts 
 		// Full-slice expression so the append never mutates the caller's array.
 		opts = append(opts[:len(opts):len(opts)], WithModID(cfg.modID))
 	}
-	return c.UpdateByID(ctx, rec.Layout, rec.ID, fields, opts...)
+	return c.UpdateByID(ctx, rec.layout, rec.id, fields, opts...)
 }
 
 // UpdateByID writes the given field data to an existing record addressed by
@@ -445,10 +445,10 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 
 // Delete removes the record identified by rec.
 func (c *Client) Delete(ctx context.Context, rec Record) error {
-	if rec.ID == "" {
+	if rec.id == "" {
 		return errors.New("filemaker: record has no ID; create or find it first")
 	}
-	return c.DeleteByID(ctx, rec.Layout, rec.ID)
+	return c.DeleteByID(ctx, rec.layout, rec.id)
 }
 
 // DeleteByID removes a record addressed by layout and id.
@@ -467,10 +467,10 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string) error {
 // UploadToContainer uploads data to a container field of the record identified
 // by rec. The record must already exist (created or returned by a find).
 func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader) error {
-	if rec.ID == "" {
+	if rec.id == "" {
 		return errors.New("filemaker: record has no ID; create or find it first")
 	}
-	return c.UploadToContainerByID(ctx, rec.Layout, rec.ID, field, filename, data)
+	return c.UploadToContainerByID(ctx, rec.layout, rec.id, field, filename, data)
 }
 
 // UploadToContainerByID uploads data to a container field of an existing record

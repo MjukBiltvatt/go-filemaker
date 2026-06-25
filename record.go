@@ -13,15 +13,16 @@ import (
 type FieldData map[string]any
 
 // Record is a single record returned by a read operation (Find). It is a plain,
-// immutable data carrier: it holds no reference back to the Client and has no
-// methods that touch the host. Its field and portal data are unexported, so a
-// returned record cannot be mutated; read it through the typed accessors
-// (String, Int, …, Decode) or the raw Fields/Portals accessors. Writes are
-// performed by passing field data to the Client's Create/Update methods.
+// immutable value: it holds no reference back to the Client and has no methods
+// that touch the host. All of its state is unexported and exposed through
+// read-only accessors — ID, ModID, Layout, and the field/portal accessors
+// (String, Int, …, Decode, Fields, Portals) — so a returned record cannot be
+// mutated. Writes are performed by passing field data to the Client's
+// Create/Update methods.
 type Record struct {
-	ID     string
-	ModID  string
-	Layout string
+	id     string
+	modID  string
+	layout string
 
 	fieldData  map[string]any
 	portalData map[string][]map[string]any
@@ -30,6 +31,18 @@ type Record struct {
 	// by the client from its WithLocation option; nil means UTC.
 	loc *time.Location
 }
+
+// ID returns the record's internal FileMaker record ID, assigned by the host.
+func (r Record) ID() string { return r.id }
+
+// ModID returns the record's modification ID, which the host changes on every
+// edit. It is the basis for optimistic concurrency (see the Update IfUnchanged
+// option).
+func (r Record) ModID() string { return r.modID }
+
+// Layout returns the layout the record was read through. It is the default
+// target for the record-based writes (Update, Delete, UploadToContainer).
+func (r Record) Layout() string { return r.layout }
 
 // Fields returns a copy of the record's raw field values, keyed by field name.
 // FileMaker number fields are float64; text, date and timestamp fields are

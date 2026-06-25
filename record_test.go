@@ -10,7 +10,7 @@ import (
 
 func testRecord() Record {
 	return Record{
-		Layout: "People",
+		layout: "People",
 		fieldData: map[string]any{
 			"string":              "string",
 			"int":                 float64(100),
