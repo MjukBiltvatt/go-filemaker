@@ -120,17 +120,17 @@ func WithLocation(loc *time.Location) Option {
 // needs it (or eagerly via Authenticate). The errors it returns are therefore
 // cheap argument/host validation, never a failed login.
 //
+// Only host is required here. database and username are validated when a session
+// is actually established (see login), so a client may be built with neither to
+// reach the unauthenticated, database-agnostic ProductInfo endpoint; any
+// authenticated or database-scoped operation then fails fast with a clear error.
+//
 // The host may include a scheme; if it does not, https is assumed. Plaintext
 // http is rejected unless WithInsecureHTTP is passed, and any scheme other than
 // http or https is rejected outright.
 func New(host, database, username, password string, opts ...Option) (*Client, error) {
-	switch {
-	case host == "":
+	if host == "" {
 		return nil, errors.New("filemaker: no host specified")
-	case database == "":
-		return nil, errors.New("filemaker: no database specified")
-	case username == "":
-		return nil, errors.New("filemaker: no username specified")
 	}
 
 	cfg := config{timeout: 30 * time.Second, location: time.UTC}
@@ -584,11 +584,12 @@ func marshalRecordBody(fields FieldData, modID string) ([]byte, error) {
 // encodes message codes as strings; check() converts them.
 type responseBody struct {
 	Response struct {
-		Token    string       `json:"token"`
-		RecordID string       `json:"recordId"`
-		ModID    string       `json:"modId"`
-		DataInfo DataInfo     `json:"dataInfo"`
-		Data     []recordWire `json:"data"`
+		Token       string       `json:"token"`
+		RecordID    string       `json:"recordId"`
+		ModID       string       `json:"modId"`
+		DataInfo    DataInfo     `json:"dataInfo"`
+		Data        []recordWire `json:"data"`
+		ProductInfo ProductInfo  `json:"productInfo"`
 	} `json:"response"`
 	Messages []struct {
 		Code    string `json:"code"`
@@ -741,8 +742,18 @@ func (c *Client) send(req *http.Request, out *responseBody) error {
 	return out.check()
 }
 
-// login performs a Basic-auth login and returns a fresh session token.
+// login performs a Basic-auth login and returns a fresh session token. The
+// session is database-scoped, so both database and username are required here;
+// New defers their validation to this point so a credential-free client can
+// still reach the unauthenticated ProductInfo endpoint.
 func (c *Client) login(ctx context.Context) (string, error) {
+	switch {
+	case c.database == "":
+		return "", errors.New("filemaker: no database specified")
+	case c.username == "":
+		return "", errors.New("filemaker: no username specified")
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL()+"/sessions", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return "", fmt.Errorf("filemaker: failed to build request: %w", err)
@@ -797,9 +808,16 @@ func (c *Client) authenticate(ctx context.Context, observedToken string) error {
 	return nil
 }
 
+// apiURL builds the version-scoped root of the Data API URL, above the database
+// scope. Host-level metadata endpoints such as productInfo hang off it directly
+// rather than under a database.
+func (c *Client) apiURL() string {
+	return c.host + "/fmi/data/v1"
+}
+
 // baseURL builds the database-scoped root of the Data API URL.
 func (c *Client) baseURL() string {
-	return fmt.Sprintf("%s/fmi/data/v1/databases/%s", c.host, c.database)
+	return fmt.Sprintf("%s/databases/%s", c.apiURL(), c.database)
 }
 
 // recordsURL is the collection endpoint for a layout (used to create records).

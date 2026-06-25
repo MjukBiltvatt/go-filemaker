@@ -167,11 +167,34 @@ func TestNewValidation(t *testing.T) {
 	if _, err := New("", "db", "u", "p"); err == nil {
 		t.Error("expected error for empty host")
 	}
-	if _, err := New("h", "", "u", "p"); err == nil {
-		t.Error("expected error for empty database")
+	// database and username are no longer validated at construction: a
+	// credential-free client is allowed so it can reach ProductInfo. They are
+	// instead enforced when a session is established (see TestLoginValidation).
+	if _, err := New("h", "", "", ""); err != nil {
+		t.Errorf("New with empty database/username: %v, want nil", err)
 	}
-	if _, err := New("h", "db", "", "p"); err == nil {
-		t.Error("expected error for empty username")
+}
+
+func TestLoginValidation(t *testing.T) {
+	// Authenticating a client with no database or username fails fast with a
+	// clear error, before any network round-trip.
+	if _, err := New("h", "", "u", "p"); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for _, tc := range []struct {
+		name           string
+		db, user, pass string
+	}{
+		{"empty database", "", "u", "p"},
+		{"empty username", "db", "", "p"},
+	} {
+		c, err := New("https://example.invalid", tc.db, tc.user, tc.pass)
+		if err != nil {
+			t.Fatalf("%s: New: %v", tc.name, err)
+		}
+		if err := c.Authenticate(context.Background()); err == nil {
+			t.Errorf("%s: Authenticate returned nil, want error", tc.name)
+		}
 	}
 }
 
