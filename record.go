@@ -12,24 +12,77 @@ import (
 // fields as string.
 type FieldData map[string]any
 
-// Record is a single record returned by a read operation (Find). It is a
-// plain data carrier: it holds no reference back to the Client and has no
-// methods that touch the host. Writes are performed by passing field data to
-// the Client's Create/Update methods.
-//
-// The JSON tags map each field to the Data API "data" item shape. Layout is not
-// part of that shape (it comes from the request), so it is tagged "-" and set
-// by the client after decoding.
+// Record is a single record returned by a read operation (Find). It is a plain,
+// immutable data carrier: it holds no reference back to the Client and has no
+// methods that touch the host. Its field and portal data are unexported, so a
+// returned record cannot be mutated; read it through the typed accessors
+// (String, Int, …, Decode) or the raw Fields/Portals accessors. Writes are
+// performed by passing field data to the Client's Create/Update methods.
 type Record struct {
-	ID         string                      `json:"recordId"`
-	ModID      string                      `json:"modId"`
-	Layout     string                      `json:"-"`
-	FieldData  FieldData                   `json:"fieldData"`
-	PortalData map[string][]map[string]any `json:"portalData"`
+	ID     string
+	ModID  string
+	Layout string
+
+	fieldData  map[string]any
+	portalData map[string][]map[string]any
 
 	// loc is the time zone used to interpret date/timestamp fields. It is set
 	// by the client from its WithLocation option; nil means UTC.
 	loc *time.Location
+}
+
+// Fields returns a copy of the record's raw field values, keyed by field name.
+// FileMaker number fields are float64; text, date and timestamp fields are
+// string. The result is a copy — mutating it does not affect the record — and
+// is nil when the record carries no field data. Use the typed accessors
+// (String, Int, …) for individual fields.
+func (r Record) Fields() map[string]any {
+	return cloneFields(r.fieldData)
+}
+
+// Portals returns a copy of the record's portal data, keyed by portal name,
+// each value a slice of rows. The result is a deep copy — mutating it (including
+// its rows) does not affect the record — and is nil when the record carries no
+// portal data.
+func (r Record) Portals() map[string][]map[string]any {
+	return clonePortalData(r.portalData)
+}
+
+// cloneFields returns a copy of a field map. Field values are immutable scalars
+// (float64/string), so a shallow copy is both faithful and fully independent. A
+// nil source yields nil (preserving the distinction from an empty map).
+func cloneFields(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// clonePortalData returns a deep copy of portal data: the outer map, each row
+// slice and each row map are rebuilt so mutating the result cannot reach the
+// record. The leaf values are immutable scalars and are shared. Nil maps and
+// slices are preserved as nil so the copy equals the original.
+func clonePortalData(src map[string][]map[string]any) map[string][]map[string]any {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string][]map[string]any, len(src))
+	for name, rows := range src {
+		if rows == nil {
+			dst[name] = nil
+			continue
+		}
+		rowsCopy := make([]map[string]any, len(rows))
+		for i, row := range rows {
+			rowsCopy[i] = cloneFields(row)
+		}
+		dst[name] = rowsCopy
+	}
+	return dst
 }
 
 // location resolves the record's configured time zone, defaulting to UTC.
@@ -44,14 +97,14 @@ func (r Record) location() *time.Location {
 // absent field from one present with a zero value (which the typed getters
 // cannot).
 func (r Record) Has(fieldName string) bool {
-	_, ok := r.FieldData[fieldName]
+	_, ok := r.fieldData[fieldName]
 	return ok
 }
 
 // Get returns the raw value of a field, or nil if it is absent. FileMaker number
 // fields are float64; text, date and timestamp fields are string.
 func (r Record) Get(fieldName string) any {
-	return r.FieldData[fieldName]
+	return r.fieldData[fieldName]
 }
 
 // StringE behaves like String but returns ErrNotString if the value is not a string.

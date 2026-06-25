@@ -17,17 +17,18 @@ work is happening on `feature/v4-dev`.
 
 ## Naming convention
 
-Go struct field names are **idiomatic and self-documenting; the JSON tag carries
-the wire name.** Applied consistently across all types:
+Go names are **idiomatic and self-documenting; the JSON tag carries the wire
+name** (on the internal wire structs, not the public types). Applied across all
+types:
 
 - Diverge from the wire where Go reads better: `recordId` → `ID`, `modId` →
-  `ModID`, the message text → `Message.Text`, the find result slice → `Records`
-  (tagged `json:"data"`).
-- Keep the wire name where it is already descriptive: `FieldData`, `PortalData`.
+  `ModID`, the message text → `Message.Text`, the find result slice → `Records`.
+- Read accessors are idiomatic getters, not wire echoes: a record's field and
+  portal maps are exposed through `Fields()` / `Portals()` (the underlying maps
+  are unexported — see Record).
 
-This rejects strict wire-mirroring (which would force `Data`, `RecordID`,
-`Message`, …) in favor of readable call sites; the JSON tags preserve the exact
-wire mapping for (un)marshaling and debugging.
+This rejects strict wire-mirroring in favor of readable call sites; the exact
+wire mapping is preserved on the unexported decode structs (e.g. `recordWire`).
 
 ---
 
@@ -83,10 +84,17 @@ type Client struct {
 }
 
 func New(host, database, username, password string, opts ...Option) (*Client, error)
-func (c *Client) Destroy(ctx context.Context) error
+func (c *Client) Authenticate(ctx context.Context) error // optional eager login
+func (c *Client) Logout(ctx context.Context) error
 func (c *Client) LastActivity() time.Time
 ```
 
+- **`New` performs no network I/O.** The session is established lazily on the
+  first operation that needs it, or eagerly via `Authenticate(ctx)`; `New`'s
+  returned error is cheap arg/host validation, never a failed login. `Logout(ctx)`
+  (renamed from `Destroy`) ends the session, but the client stays usable
+  afterward — a later operation re-authenticates. `lastActivity` is the zero
+  time until the first successful request.
 - All exported fields become unexported; the client is manipulated only through
   methods. This is what makes locking enforceable.
 - `token` and `lastActivity` are guarded by `mu` (decided: `sync.RWMutex`, not
@@ -113,9 +121,19 @@ write, they issue their own `Find`.
 ```go
 func (c *Client) Find(ctx context.Context, layout string, q Query) (FindResponse, error)
 func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (CreateResponse, error)
-func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error)
-func (c *Client) Delete(ctx context.Context, layout, id string) error
-func (c *Client) UploadToContainer(ctx context.Context, layout, id, field, filename string, data io.Reader) error
+
+// Write/container ops come in pairs: a bare verb taking a Record (which carries
+// Layout+ID) and a `ByID`/`ByURL` form taking raw addressing. Bare = operate on
+// a record you hold (e.g. from a find); the qualified form = address it directly
+// (e.g. an id from CreateResponse, or a container URL from elsewhere).
+func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts ...UpdateOption) (UpdateResponse, error)
+func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error)
+func (c *Client) Delete(ctx context.Context, rec Record) error
+func (c *Client) DeleteByID(ctx context.Context, layout, id string) error
+func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader) error
+func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, filename string, data io.Reader) error
+func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) ([]byte, error)
+func (c *Client) DownloadFromContainerByURL(ctx context.Context, url string) ([]byte, error)
 ```
 
 `FieldData` is an exported `map[string]any` holding the fields to write.
@@ -170,22 +188,36 @@ type DataInfo struct {
 
 ```go
 type Record struct {
-    ID         string
-    ModID      string
-    Layout     string
-    FieldData  map[string]any
-    PortalData map[string][]map[string]any // portal name → rows; new in v4
+    ID     string
+    ModID  string
+    Layout string
+
+    fieldData  map[string]any              // unexported: records are immutable
+    portalData map[string][]map[string]any // portal name → rows
+    // loc carries the client's WithLocation for the time accessors
 }
+
+func (r Record) Fields() map[string]any               // copy of the field values
+func (r Record) Portals() map[string][]map[string]any // deep copy of portal rows
 ```
 
 - **No `*Session` back-pointer, no mutating methods.** This is the core of the
   client-based redesign and removes the copy bug entirely.
-- **`ModID` and `PortalData` are new in v4**, populated from the `data[]` items
+- **Records are immutable.** `fieldData`/`portalData` are unexported and read
+  only through the typed accessors (`String`, `Int`, …, `Decode`, `Get`, `Has`)
+  or the raw `Fields()`/`Portals()` accessors, which return *copies* (shallow for
+  `Fields` — values are immutable scalars; deep for `Portals` — nested maps/slices
+  are rebuilt) so a returned record can never be mutated. Decoupling the public
+  type from the wire shape means the response decodes into an internal
+  `recordWire` (exported fields) and `Find` builds `Record`s from it, since
+  `encoding/json` cannot populate unexported fields. Pre-release the more
+  restrictive choice is correct: exposing the map later is additive, unexporting
+  it later would be breaking.
+- **`ModID` and portal data are new in v4**, populated from the `data[]` items
   the API returns. `ModID` powers optional optimistic-locking on `Update` via the
   `WithModID(modID)` update option: the host rejects the write (code `306`) if
   the record changed since `modID` was read, surfaced as the `errors.Is`-friendly
-  `ErrRecordModified` sentinel. No portal accessors are planned for the initial
-  cut beyond exposing the raw map.
+  `ErrRecordModified` sentinel.
 - Keep the **read-only typed accessors** — pure functions of the data, all value
   receivers. The set is trimmed to what FileMaker actually needs (numbers come
   back as `float64`, so the small int/float sizes were dropped):
@@ -206,9 +238,11 @@ type Record struct {
   fields are left untouched, and nested structs are decoded by calling `Decode`
   on them directly (`rec.Decode(&customer.Address)`). Needs a migration-guide
   callout.
-- The container-download helper needs the client (downloading streams an
-  authenticated URL), so it is a client method:
-  `client.ContainerData(ctx, record, field) ([]byte, error)`.
+- Container download needs the client (downloading streams an authenticated
+  URL), so it is a client method, and follows the same bare/qualified pairing as
+  the write ops: `DownloadFromContainer(ctx, rec, field)` (the common path — the
+  URL comes from a find) and `DownloadFromContainerByURL(ctx, url)` (the URL from
+  anywhere). The bearer token is never sent to a foreign host.
 
 **Editing model (decided): data-in/data-out.** No in-record staged changes.
 Callers build a `FieldData` map and pass it to `Create`/`Update`, which return
@@ -270,8 +304,10 @@ const (
 Add one unexported helper that every operation funnels through:
 
 ```go
-func (c *Client) do(ctx context.Context, method, url string, body io.Reader, out *responseBody) error
+func (c *Client) do(ctx context.Context, method, url string, body []byte, out *responseBody) error
 ```
+
+(`body` is a `[]byte`, not an `io.Reader`, so it can be replayed on a reauth retry.)
 
 Responsibilities, in one place:
 - Build the request with `http.NewRequestWithContext`.
@@ -280,12 +316,16 @@ Responsibilities, in one place:
 - Check transport status code **and** FileMaker message code safely (guard
   against empty `Messages`).
 - Stamp `lastActivity` on success/any host response (under `Lock`).
-- Reauth triggers funnel through one de-duplicated `reauthenticate(ctx, used)`:
-  `WithReauthOnInvalidToken` handles a 952 with a single re-auth + retry;
-  `WithReauthOnIdle` refreshes before the attempt when idle. De-dup uses a
-  dedicated `reauthMu` plus a double-check on the *used* token (the token the
-  failed/last request carried), so concurrent callers collapse to one auth and
-  the network call never holds the read/write lock (reads stay live).
+- Auth is funnelled through `withAuth`, which wraps each attempt with: **lazy**
+  first-use login (always — establishes the initial token when none exists);
+  **proactive** refresh when idle (`WithReauthOnIdle`); and **reactive** re-login
+  + retry on a 952 (`WithReauthOnInvalidToken`). All three call one de-duplicated
+  `authenticate(ctx, observedToken)` (the raw login is `login(ctx)`), which uses
+  `reauthSem` (a cap-1 channel) plus a double-check on the *observed* token (the
+  token the failed/last request carried, `""` for first use), so concurrent
+  callers collapse to a single login and the network call never holds the
+  read/write lock (reads stay live). Container download bypasses `do` but calls
+  `ensureAuthenticated` for the same lazy login.
 
 This collapses the seven duplicated blocks and is where correctness fixes land.
 
@@ -361,9 +401,9 @@ Handling rules (fixing v3's `Messages[0]` bug):
 ## Proposed package layout
 
 ```
-client.go     // Client + New/Destroy/options/LastActivity + do()/locking
-              //   + Find/Create/Update/Delete/ContainerData/UploadToContainer
-record.go     // Record data type + FieldData + typed getters + Decode
+client.go     // Client + New/Authenticate/Logout/options/LastActivity + do()/locking
+              //   + Find/Create/Update(ByID)/Delete(ByID) + container up/download
+record.go     // Record data type + Fields/Portals + typed getters + Decode
 values.go     // Bool/Date/Timestamp write-value wrappers
 find.go       // Query/Request/SortRule/SortOrder + MarshalJSON
 errors.go     // APIError + sentinels
@@ -393,13 +433,16 @@ rec.Commit()
 rec.Delete()
 
 // v4
-c, _ := filemaker.New(host, db, user, pass)
+c, _ := filemaker.New(host, db, user, pass)          // no network yet (lazy auth)
 created, _ := c.Create(ctx, "Layout", filemaker.FieldData{"Name": "Mark"})
-_, _ = c.Update(ctx, "Layout", created.RecordID, filemaker.FieldData{"Name": "Mark II"})
-_ = c.Delete(ctx, "Layout", created.RecordID)
-// Want the full record back after a write? Issue your own read:
+// Post-create you hold an id, not a record → use the ByID forms:
+_, _ = c.UpdateByID(ctx, "Layout", created.RecordID, filemaker.FieldData{"Name": "Mark II"})
+_ = c.DeleteByID(ctx, "Layout", created.RecordID)
+// Working from a find, you hold records → use the bare, record-based forms:
 found, _ := c.Find(ctx, "Layout", filemaker.Query{ /* … by id/criteria … */ })
-_ = found.Records
+for _, rec := range found.Records {
+    _, _ = c.Update(ctx, rec, filemaker.FieldData{"Name": "Mark III"})
+}
 ```
 
 ---
@@ -416,6 +459,12 @@ _ = found.Records
 ---
 
 ## Implementation phases
+
+> Note: phases 1–6 below record the original build. The public API was then
+> refined (see Settled decisions 6–8): lazy auth + pure `New`, `Destroy`→`Logout`,
+> immutable records with `Fields()`/`Portals()`, the `ByID`/`ByURL` write+container
+> family, and the internal `login`/`authenticate`/`withAuth` renames. The
+> sections above reflect the refined API; these checkboxes are left as-is.
 
 - [x] **1. Scaffold types.** Add `Client` (unexported fields), `Record` data
    type, and the declarative `find.go` types with `MarshalJSON` + unit tests for
@@ -491,10 +540,10 @@ _ = found.Records
    the Data API envelope (`CreateResponse{RecordID,ModID}`,
    `UpdateResponse{ModID}`, `FindResponse{Records,DataInfo}`; `Delete` returns
    only `error`), so every reachable field is guaranteed populated. Writes do
-   **not** auto-issue a follow-up read. `Record` gains `ModID` and `PortalData`.
+   **not** auto-issue a follow-up read. `Record` gains `ModID` and portal data.
 2. **`context.Context`: yes.** Every network method takes `ctx` as its first
-   argument (`Find`, `Create`, `Update`, `Delete`, `Destroy`, container
-   upload/download), built via `http.NewRequestWithContext`.
+   argument (`Find`, `Create`, `Update`, `Delete`, `Authenticate`, `Logout`,
+   container upload/download), built via `http.NewRequestWithContext`.
 3. **Token auto-refresh: opt-in, two orthogonal triggers.** Off by default.
    `WithReauthOnInvalidToken` (reactive) re-auths + retries once on a 952;
    `WithReauthOnIdle(timeout ...)` (proactive) refreshes before a request when
@@ -504,4 +553,26 @@ _ = found.Records
 4. **Synchronization primitive: `sync.RWMutex`.** Chosen over atomics because
    `lastActivity` is multi-word, the auto-reauth path needs a check-then-act
    critical section, and contention is negligible. (See Concurrency model.)
+6. **Lazy authentication; `New` is pure.** `New` does no network I/O and its
+   error is cheap validation only. The session is established on first use (or
+   eagerly via `Authenticate`). Rationale: Go expects constructors to be cheap,
+   and the de-dup machinery already handles a `""` observed token as the
+   first-use key, so lazy auth is nearly free. Teardown is `Logout` (not
+   `Destroy`/`Close`): lazy auth makes the client non-terminal — it re-auths
+   after logout — so `io.Closer` semantics would lie.
+7. **Records are immutable; field/portal maps unexported.** Read via the typed
+   accessors or `Fields()`/`Portals()` (which return faithful copies). Enforces
+   the "records are caller-owned, concurrent-read-safe" invariant by construction
+   and removes the whole-record-resend footgun. Decided pre-release because the
+   restrictive choice is the reversible one (exposing later is additive).
+8. **Write/container ops use a bare/qualified pair.** Bare verbs take a `Record`
+   (`Update(rec, fields)`, `Delete(rec)`, `UploadToContainer(rec, …)`,
+   `DownloadFromContainer(rec, field)`); the qualified forms take raw addressing
+   (`UpdateByID`/`DeleteByID`/`UploadToContainerByID` with `layout, id`;
+   `DownloadFromContainerByURL` with a URL). The `By…` suffix lands on the raw
+   address (idiomatic, cf. `…ByID`) rather than an awkward `…ForRecord` on the
+   high-level form. Both forms stay because `Find` hands you records while
+   `Create` hands you an id. `Create`/`Find` have no record to address, so no
+   pair. (`Update`'s `fields` is a patch; `rec` only addresses — its own field
+   values are never sent.)
 ```

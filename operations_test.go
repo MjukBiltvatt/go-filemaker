@@ -44,8 +44,11 @@ func TestFind(t *testing.T) {
 	if resp.Records[0].ID != "1" || resp.Records[0].ModID != "3" || resp.Records[0].Layout != "People" {
 		t.Errorf("record[0] = %+v", resp.Records[0])
 	}
-	if resp.Records[0].FieldData["Name"] != "Mark" {
-		t.Errorf("Name = %v, want Mark", resp.Records[0].FieldData["Name"])
+	if resp.Records[0].Get("Name") != "Mark" {
+		t.Errorf("Name = %v, want Mark", resp.Records[0].Get("Name"))
+	}
+	if resp.Records[0].Fields()["Name"] != "Mark" {
+		t.Errorf("Fields()[Name] = %v, want Mark", resp.Records[0].Fields()["Name"])
 	}
 	if resp.DataInfo.FoundCount != 2 || resp.DataInfo.TotalRecordCount != 10 {
 		t.Errorf("dataInfo = %+v", resp.DataInfo)
@@ -173,7 +176,7 @@ func TestCreateNilFields(t *testing.T) {
 	}
 }
 
-func TestUpdate(t *testing.T) {
+func TestUpdateByID(t *testing.T) {
 	var mu sync.Mutex
 	var gotMethod, gotPath, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +189,7 @@ func TestUpdate(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	resp, err := c.Update(context.Background(), "People", "9", FieldData{"Name": "Jane"})
+	resp, err := c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "Jane"})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -221,7 +224,7 @@ func TestUpdateWithModID(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	resp, err := c.Update(context.Background(), "People", "9", FieldData{"Name": "Jane"}, WithModID("3"))
+	resp, err := c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "Jane"}, WithModID("3"))
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -247,13 +250,194 @@ func TestUpdateModIDMismatch(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	_, err := c.Update(context.Background(), "People", "9", FieldData{"Name": "Jane"}, WithModID("3"))
+	_, err := c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "Jane"}, WithModID("3"))
 	if !errors.Is(err, ErrRecordModified) {
 		t.Fatalf("got %v, want ErrRecordModified", err)
 	}
 }
 
-func TestDelete(t *testing.T) {
+func TestUpdateByRecord(t *testing.T) {
+	var mu sync.Mutex
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotPath = r.URL.Path
+		mu.Unlock()
+		writeJSON(w, `{"response":{"modId":"5"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	rec := Record{Layout: "People", ID: "9"}
+	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	mu.Lock()
+	path := gotPath
+	mu.Unlock()
+	if !strings.HasSuffix(path, "/layouts/People/records/9") {
+		t.Errorf("path = %q, want it addressed from the record", path)
+	}
+}
+
+func TestRecordWriteNoID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("must not make a request for a record without an ID")
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	rec := Record{Layout: "People"} // no ID
+
+	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "x"}); err == nil {
+		t.Error("Update: expected error for record without ID")
+	}
+	if err := c.Delete(context.Background(), rec); err == nil {
+		t.Error("Delete: expected error for record without ID")
+	}
+	if err := c.UploadToContainer(context.Background(), rec, "Photo", "f.png", strings.NewReader("x")); err == nil {
+		t.Error("UploadToContainer: expected error for record without ID")
+	}
+}
+
+func TestUpdateIfUnchanged(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"modId":"4"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	rec := Record{Layout: "People", ID: "9", ModID: "3"}
+
+	lastBody := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return gotBody
+	}
+
+	// IfUnchanged locks against the record's own ModID.
+	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}, IfUnchanged()); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !strings.Contains(lastBody(), `"modId":"3"`) {
+		t.Errorf("body = %q, want modId 3 from the record", lastBody())
+	}
+
+	// Combining the two is order-independent: WithModID pins the explicit version.
+	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}, IfUnchanged(), WithModID("9")); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !strings.Contains(lastBody(), `"modId":"9"`) {
+		t.Errorf("body = %q, want modId 9 (WithModID pins the version)", lastBody())
+	}
+
+	// Same result with the options in the opposite order.
+	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}, WithModID("9"), IfUnchanged()); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !strings.Contains(lastBody(), `"modId":"9"`) {
+		t.Errorf("body = %q, want modId 9 (order-independent)", lastBody())
+	}
+}
+
+func TestWithModIDEmpty(t *testing.T) {
+	var mu sync.Mutex
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		writeJSON(w, `{"response":{"modId":"4"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	rec := Record{Layout: "People", ID: "9", ModID: "3"}
+
+	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "x"}, WithModID("")); err == nil {
+		t.Error("Update: expected error for WithModID(\"\")")
+	}
+	if _, err := c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "x"}, WithModID("")); err == nil {
+		t.Error("UpdateByID: expected error for WithModID(\"\")")
+	}
+
+	mu.Lock()
+	n := hits
+	mu.Unlock()
+	if n != 0 {
+		t.Errorf("made %d HTTP calls, want 0 (WithModID(\"\") errors before the request)", n)
+	}
+}
+
+func TestIfUnchangedErrors(t *testing.T) {
+	var mu sync.Mutex
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		writeJSON(w, `{"response":{"modId":"4"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+
+	// IfUnchanged on a record without a ModID must error, not silently degrade to
+	// an unconditional write.
+	if _, err := c.Update(context.Background(), Record{Layout: "People", ID: "9"}, FieldData{"Name": "x"}, IfUnchanged()); err == nil {
+		t.Error("Update: expected error for IfUnchanged on a record without a ModID")
+	}
+
+	// IfUnchanged on the id-addressed form has no record to source a ModID from.
+	if _, err := c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "x"}, IfUnchanged()); err == nil {
+		t.Error("UpdateByID: expected error for IfUnchanged without a record")
+	}
+
+	mu.Lock()
+	n := hits
+	mu.Unlock()
+	if n != 0 {
+		t.Errorf("made %d HTTP calls, want 0 (both should error before the request)", n)
+	}
+}
+
+func TestUpdateDoesNotMutateCallerOpts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{"modId":"4"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	rec := Record{Layout: "People", ID: "9", ModID: "3"}
+
+	// A slice with spare capacity (len 1, cap 2) whose extra slot holds a sentinel.
+	// If Update appends its resolved WithModID into the caller's array instead of a
+	// fresh one, it clobbers the sentinel at index 1.
+	var sentinelCalled bool
+	sentinel := UpdateOption(func(cfg *updateConfig) { sentinelCalled = true })
+	backing := []UpdateOption{IfUnchanged(), sentinel}
+	opts := backing[:1] // len 1, cap 2, shares backing with sentinel at [1]
+
+	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "x"}, opts...); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// backing[1] must still be the sentinel — invoke it and confirm it runs.
+	var cfg updateConfig
+	backing[1](&cfg)
+	if !sentinelCalled {
+		t.Error("Update mutated the caller's opts backing array (sentinel at index 1 was overwritten)")
+	}
+}
+
+func TestDeleteByID(t *testing.T) {
 	var mu sync.Mutex
 	var gotMethod, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +449,7 @@ func TestDelete(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	if err := c.Delete(context.Background(), "People", "9"); err != nil {
+	if err := c.DeleteByID(context.Background(), "People", "9"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -280,7 +464,7 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func TestUploadToContainer(t *testing.T) {
+func TestUploadToContainerByID(t *testing.T) {
 	var mu sync.Mutex
 	var gotMethod, gotPath, gotContentType, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +477,7 @@ func TestUploadToContainer(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	err := c.UploadToContainer(context.Background(), "People", "1", "Photo", "pic.png", strings.NewReader("imgdata"))
+	err := c.UploadToContainerByID(context.Background(), "People", "1", "Photo", "pic.png", strings.NewReader("imgdata"))
 	if err != nil {
 		t.Fatalf("UploadToContainer: %v", err)
 	}
@@ -315,7 +499,7 @@ func TestUploadToContainer(t *testing.T) {
 	}
 }
 
-func TestContainerData(t *testing.T) {
+func TestDownloadFromContainer(t *testing.T) {
 	var mu sync.Mutex
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -327,10 +511,10 @@ func TestContainerData(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{Layout: "People", FieldData: FieldData{"Photo": srv.URL + "/Streaming/abc"}}
-	data, err := c.ContainerData(context.Background(), rec.String("Photo"))
+	rec := Record{Layout: "People", fieldData: map[string]any{"Photo": srv.URL + "/Streaming/abc"}}
+	data, err := c.DownloadFromContainer(context.Background(), rec, "Photo")
 	if err != nil {
-		t.Fatalf("ContainerData: %v", err)
+		t.Fatalf("DownloadFromContainer: %v", err)
 	}
 	if string(data) != "filecontents" {
 		t.Errorf("data = %q, want filecontents", data)
@@ -344,26 +528,42 @@ func TestContainerData(t *testing.T) {
 	}
 }
 
-func TestContainerDataForeignHost(t *testing.T) {
+func TestDownloadFromContainerNotAURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("must not make a request when the field holds no container URL")
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	rec := Record{Layout: "People", fieldData: map[string]any{"Age": float64(42)}}
+	if _, err := c.DownloadFromContainer(context.Background(), rec, "Age"); err == nil {
+		t.Error("expected error for a non-string field")
+	}
+	if _, err := c.DownloadFromContainer(context.Background(), rec, "Missing"); err == nil {
+		t.Error("expected error for a missing field")
+	}
+}
+
+func TestDownloadFromContainerByURLForeignHost(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("must not request a foreign host")
 	}))
 	defer srv.Close()
 
 	c := testClient(srv)
-	if _, err := c.ContainerData(context.Background(), "https://evil.example.com/steal"); err == nil {
+	if _, err := c.DownloadFromContainerByURL(context.Background(), "https://evil.example.com/steal"); err == nil {
 		t.Fatal("expected error for foreign-host container URL")
 	}
 }
 
-func TestContainerDataEmptyURL(t *testing.T) {
+func TestDownloadFromContainerByURLEmpty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("must not make a request for an empty container URL")
 	}))
 	defer srv.Close()
 
 	c := testClient(srv)
-	if _, err := c.ContainerData(context.Background(), ""); err == nil {
+	if _, err := c.DownloadFromContainerByURL(context.Background(), ""); err == nil {
 		t.Fatal("expected error for empty container URL")
 	}
 }

@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 func testRecord() Record {
 	return Record{
 		Layout: "People",
-		FieldData: FieldData{
+		fieldData: map[string]any{
 			"string":              "string",
 			"int":                 float64(100),
 			"int8":                float64(8),
@@ -37,6 +38,59 @@ func testRecord() Record {
 			"list_blank_internal": "a\n\nb",
 			"list_empty":          "",
 		},
+	}
+}
+
+func TestFieldsAndPortalsAreFaithfulCopies(t *testing.T) {
+	cases := []struct {
+		name string
+		rec  Record
+	}{
+		{"nil", Record{}},
+		{"empty", Record{fieldData: map[string]any{}, portalData: map[string][]map[string]any{}}},
+		{"populated", Record{
+			fieldData: map[string]any{"Name": "Mark", "Age": float64(42), "Note": ""},
+			portalData: map[string][]map[string]any{
+				"Lines":   {{"Item": "Widget", "Qty": float64(3)}, {"Item": "Gadget", "Qty": float64(0)}},
+				"Empty":   {},
+				"NilRows": nil,
+			},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.rec.Fields(); !reflect.DeepEqual(got, tc.rec.fieldData) {
+				t.Errorf("Fields() = %#v, want %#v", got, tc.rec.fieldData)
+			}
+			if got := tc.rec.Portals(); !reflect.DeepEqual(got, tc.rec.portalData) {
+				t.Errorf("Portals() = %#v, want %#v", got, tc.rec.portalData)
+			}
+		})
+	}
+
+	// Mutating the returned copies must not reach the record.
+	rec := Record{
+		fieldData:  map[string]any{"Name": "Mark"},
+		portalData: map[string][]map[string]any{"Lines": {{"Item": "Widget"}}},
+	}
+	f := rec.Fields()
+	f["Name"] = "CHANGED"
+	f["New"] = "x"
+	p := rec.Portals()
+	p["Lines"][0]["Item"] = "CHANGED"
+	p["Lines"] = append(p["Lines"], map[string]any{"Item": "Extra"})
+
+	if rec.Get("Name") != "Mark" {
+		t.Errorf("record Name mutated to %v via Fields() copy", rec.Get("Name"))
+	}
+	if rec.Has("New") {
+		t.Error("record gained a field via mutated Fields() copy")
+	}
+	if got := rec.portalData["Lines"][0]["Item"]; got != "Widget" {
+		t.Errorf("portal row mutated to %v via Portals() copy", got)
+	}
+	if n := len(rec.portalData["Lines"]); n != 1 {
+		t.Errorf("portal slice grew to %d rows via Portals() copy", n)
 	}
 }
 
@@ -163,7 +217,7 @@ func TestRecordGetters(t *testing.T) {
 func TestRecordTimeLocation(t *testing.T) {
 	loc := time.FixedZone("TEST", 2*60*60) // +02:00
 
-	r := Record{FieldData: FieldData{"ts": "01/02/2006 15:04:05"}, loc: loc}
+	r := Record{fieldData: map[string]any{"ts": "01/02/2006 15:04:05"}, loc: loc}
 	got := r.Time("ts")
 	if got.Location() != loc {
 		t.Errorf("Time location = %v, want %v", got.Location(), loc)
@@ -178,7 +232,7 @@ func TestRecordTimeLocation(t *testing.T) {
 	}
 
 	// No configured location defaults to UTC.
-	r2 := Record{FieldData: FieldData{"ts": "01/02/2006 15:04:05"}}
+	r2 := Record{fieldData: map[string]any{"ts": "01/02/2006 15:04:05"}}
 	if loc := r2.Time("ts").Location(); loc != time.UTC {
 		t.Errorf("default location = %v, want UTC", loc)
 	}
@@ -257,7 +311,7 @@ func TestRecordDecodeClearsStaleTimePointer(t *testing.T) {
 	}
 
 	// First decode: a parseable value sets the pointer.
-	if err := (Record{FieldData: FieldData{"ts": "01/02/2006 15:04:05"}}).Decode(&value); err != nil {
+	if err := (Record{fieldData: map[string]any{"ts": "01/02/2006 15:04:05"}}).Decode(&value); err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
 	if value.T == nil {
@@ -266,7 +320,7 @@ func TestRecordDecodeClearsStaleTimePointer(t *testing.T) {
 
 	// Second decode: an empty value must clear the pointer back to nil rather
 	// than leaving the stale value.
-	if err := (Record{FieldData: FieldData{"ts": ""}}).Decode(&value); err != nil {
+	if err := (Record{fieldData: map[string]any{"ts": ""}}).Decode(&value); err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
 	if value.T != nil {

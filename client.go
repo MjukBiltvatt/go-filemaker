@@ -282,10 +282,16 @@ func (c *Client) Find(ctx context.Context, layout string, query Query) (FindResp
 		return FindResponse{}, err
 	}
 
-	records := rb.Response.Data
-	for i := range records {
-		records[i].Layout = layout
-		records[i].loc = c.location
+	records := make([]Record, len(rb.Response.Data))
+	for i, w := range rb.Response.Data {
+		records[i] = Record{
+			ID:         w.ID,
+			ModID:      w.ModID,
+			Layout:     layout,
+			fieldData:  w.FieldData,
+			portalData: w.PortalData,
+			loc:        c.location,
+		}
 	}
 	return FindResponse{Records: records, DataInfo: rb.Response.DataInfo}, nil
 }
@@ -309,27 +315,107 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (C
 	return CreateResponse{RecordID: rb.Response.RecordID, ModID: rb.Response.ModID}, nil
 }
 
-// UpdateOption configures an Update.
+// UpdateOption configures an Update or UpdateByID.
 type UpdateOption func(*updateConfig)
 
 // updateConfig holds the optional parameters applied by UpdateOption values.
+// Optimistic concurrency is one flag plus a version: conditional means a mod-ID
+// check is wanted, and modID is the version to check against (empty means
+// "source it from the record"). Both WithModID and IfUnchanged set conditional,
+// so the options are order-independent. err carries deferred option validation
+// (an UpdateOption cannot return an error directly), surfaced when resolved.
 type updateConfig struct {
-	modID string
+	conditional bool
+	modID       string
+	err         error
 }
 
-// WithModID makes the update conditional (optimistic locking): the host rejects
-// it with ErrRecordModified if the record's current mod ID differs from modID —
-// i.e. the record changed since modID was read. Pass a Record's ModID from a
-// prior Find.
+// WithModID makes the update conditional (optimistic concurrency) against a
+// specific mod ID: the host rejects it with ErrRecordModified if the record's
+// current mod ID differs — i.e. it changed since modID was read. modID must be
+// non-empty; an empty one is reported as an error from Update/UpdateByID. To
+// lock against the record you are updating, prefer IfUnchanged.
 func WithModID(modID string) UpdateOption {
 	return func(c *updateConfig) {
+		if modID == "" {
+			c.err = errors.New("filemaker: WithModID requires a non-empty mod ID")
+			return
+		}
+		c.conditional = true
 		c.modID = modID
 	}
 }
 
-// Update writes the given field data to an existing record and returns the new
-// mod ID.
-func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
+// IfUnchanged makes the update conditional on the record not having changed
+// since it was read: it locks against the record's own ModID, so the host
+// rejects the write with ErrRecordModified if another writer modified the record
+// in the meantime. It is the ergonomic form of WithModID(rec.ModID).
+//
+// Only the record-based Update can honor it (UpdateByID has no record to read a
+// ModID from, and reports an error); a record without a ModID is likewise an
+// error rather than a silent unconditional write. Combining it with WithModID is
+// redundant — the explicit version from WithModID is used, regardless of order.
+func IfUnchanged() UpdateOption {
+	return func(c *updateConfig) {
+		c.conditional = true
+	}
+}
+
+// resolveUpdateConfig applies the options and resolves the mod ID. A conditional
+// update with no explicit version sources it from rec (nil for the id-addressed
+// path, which cannot honor IfUnchanged). Deferred option errors surface here.
+func resolveUpdateConfig(opts []UpdateOption, rec *Record) (updateConfig, error) {
+	var cfg updateConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	if cfg.err != nil {
+		return cfg, cfg.err
+	}
+	if cfg.conditional && cfg.modID == "" {
+		switch {
+		case rec == nil:
+			return cfg, errors.New("filemaker: IfUnchanged requires a record; use WithModID with UpdateByID")
+		case rec.ModID == "":
+			return cfg, errors.New("filemaker: IfUnchanged requires a record with a ModID")
+		}
+		cfg.modID = rec.ModID
+	}
+	return cfg, nil
+}
+
+// Update writes the given field data to the record, identified by rec, and
+// returns the new mod ID. fields is a patch: only the named fields are written,
+// and the rest of the record is left unchanged on the host. rec is used solely
+// to address the record (its Layout and ID); its own field values are not sent.
+// Writes are unconditional by default; pass IfUnchanged for optimistic
+// concurrency against the record's ModID.
+func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
+	if rec.ID == "" {
+		return UpdateResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	}
+	// IfUnchanged is record-relative, so resolve it here (UpdateByID has no record
+	// to read a ModID from) and append the resolved lock as an explicit WithModID.
+	// Every other option passes through untouched, so new UpdateOptions need no
+	// change here; delegating also keeps layout/id validation and the write in one
+	// place, like Delete and UploadToContainer.
+	cfg, err := resolveUpdateConfig(opts, &rec)
+	if err != nil {
+		return UpdateResponse{}, err
+	}
+	if cfg.conditional {
+		// Full-slice expression so the append never mutates the caller's array.
+		opts = append(opts[:len(opts):len(opts)], WithModID(cfg.modID))
+	}
+	return c.UpdateByID(ctx, rec.Layout, rec.ID, fields, opts...)
+}
+
+// UpdateByID writes the given field data to an existing record addressed by
+// layout and id, and returns the new mod ID. See Update for the patch semantics.
+// For optimistic concurrency pass WithModID (IfUnchanged needs a record).
+func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
 	switch {
 	case layout == "":
 		return UpdateResponse{}, errors.New("filemaker: no layout specified")
@@ -337,11 +423,9 @@ func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData
 		return UpdateResponse{}, errors.New("filemaker: no record id specified")
 	}
 
-	var cfg updateConfig
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
+	cfg, err := resolveUpdateConfig(opts, nil)
+	if err != nil {
+		return UpdateResponse{}, err
 	}
 
 	body, err := marshalRecordBody(fields, cfg.modID)
@@ -359,8 +443,16 @@ func (c *Client) Update(ctx context.Context, layout, id string, fields FieldData
 	return UpdateResponse{ModID: rb.Response.ModID}, nil
 }
 
-// Delete removes a record by its internal ID.
-func (c *Client) Delete(ctx context.Context, layout, id string) error {
+// Delete removes the record identified by rec.
+func (c *Client) Delete(ctx context.Context, rec Record) error {
+	if rec.ID == "" {
+		return errors.New("filemaker: record has no ID; create or find it first")
+	}
+	return c.DeleteByID(ctx, rec.Layout, rec.ID)
+}
+
+// DeleteByID removes a record addressed by layout and id.
+func (c *Client) DeleteByID(ctx context.Context, layout, id string) error {
 	switch {
 	case layout == "":
 		return errors.New("filemaker: no layout specified")
@@ -372,9 +464,18 @@ func (c *Client) Delete(ctx context.Context, layout, id string) error {
 	return c.do(ctx, http.MethodDelete, c.recordURL(layout, id), nil, &rb)
 }
 
-// UploadToContainer uploads data to a container field of an existing record. The
-// record must already exist (created or returned by a find).
-func (c *Client) UploadToContainer(ctx context.Context, layout, id, field, filename string, data io.Reader) error {
+// UploadToContainer uploads data to a container field of the record identified
+// by rec. The record must already exist (created or returned by a find).
+func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader) error {
+	if rec.ID == "" {
+		return errors.New("filemaker: record has no ID; create or find it first")
+	}
+	return c.UploadToContainerByID(ctx, rec.Layout, rec.ID, field, filename, data)
+}
+
+// UploadToContainerByID uploads data to a container field of an existing record
+// addressed by layout and id.
+func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, filename string, data io.Reader) error {
 	switch {
 	case layout == "":
 		return errors.New("filemaker: no layout specified")
@@ -405,11 +506,23 @@ func (c *Client) UploadToContainer(ctx context.Context, layout, id, field, filen
 	})
 }
 
-// ContainerData downloads the binary contents of a container field. The URL must
-// be a container streaming URL on the session host (typically obtained from a
-// record via record.String(field)); the bearer token is never sent to a foreign
-// host.
-func (c *Client) ContainerData(ctx context.Context, containerURL string) ([]byte, error) {
+// DownloadFromContainer downloads the binary contents of a container field of
+// the record identified by rec. The field must hold a container streaming URL
+// (the value FileMaker returns for a container field); an empty or non-string
+// field is reported as an error.
+func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) ([]byte, error) {
+	u, err := rec.StringE(field)
+	if err != nil || u == "" {
+		return nil, fmt.Errorf("filemaker: field %q is not a container URL", field)
+	}
+	return c.DownloadFromContainerByURL(ctx, u)
+}
+
+// DownloadFromContainerByURL downloads the binary contents of a container from
+// its streaming URL. The URL must be on the session host (typically obtained
+// from a record via record.String(field)); the bearer token is never sent to a
+// foreign host.
+func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL string) ([]byte, error) {
 	if containerURL == "" {
 		return nil, errors.New("filemaker: empty container url")
 	}
@@ -471,16 +584,27 @@ func marshalRecordBody(fields FieldData, modID string) ([]byte, error) {
 // encodes message codes as strings; check() converts them.
 type responseBody struct {
 	Response struct {
-		Token    string   `json:"token"`
-		RecordID string   `json:"recordId"`
-		ModID    string   `json:"modId"`
-		DataInfo DataInfo `json:"dataInfo"`
-		Data     []Record `json:"data"`
+		Token    string       `json:"token"`
+		RecordID string       `json:"recordId"`
+		ModID    string       `json:"modId"`
+		DataInfo DataInfo     `json:"dataInfo"`
+		Data     []recordWire `json:"data"`
 	} `json:"response"`
 	Messages []struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"messages"`
+}
+
+// recordWire is the wire shape of a "data" item. Record's field and portal maps
+// are unexported (so records are immutable), which encoding/json cannot set, so
+// the response decodes into this exported-field struct and Find builds Records
+// from it.
+type recordWire struct {
+	ID         string                      `json:"recordId"`
+	ModID      string                      `json:"modId"`
+	FieldData  map[string]any              `json:"fieldData"`
+	PortalData map[string][]map[string]any `json:"portalData"`
 }
 
 // check inspects the host messages and returns an *APIError unless the primary
