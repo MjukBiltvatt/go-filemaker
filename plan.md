@@ -188,36 +188,45 @@ type DataInfo struct {
 
 ```go
 type Record struct {
-    ID     string
-    ModID  string
-    Layout string
-
-    fieldData  map[string]any              // unexported: records are immutable
-    portalData map[string][]map[string]any // portal name → rows
+    id     string
+    modID  string
+    layout string
+    fieldData  map[string]any
+    portalData map[string][]map[string]any
     // loc carries the client's WithLocation for the time accessors
 }
 
-func (r Record) Fields() map[string]any               // copy of the field values
-func (r Record) Portals() map[string][]map[string]any // deep copy of portal rows
+func (r Record) ID() string                            // host record ID
+func (r Record) ModID() string                         // modification ID (optimistic concurrency)
+func (r Record) Layout() string                        // layout it was read through
+func (r Record) Fields() map[string]any                // copy of the field values
+func (r Record) Portals() map[string][]map[string]any  // deep copy of portal rows
 ```
 
 - **No `*Session` back-pointer, no mutating methods.** This is the core of the
   client-based redesign and removes the copy bug entirely.
-- **Records are immutable.** `fieldData`/`portalData` are unexported and read
-  only through the typed accessors (`String`, `Int`, …, `Decode`, `Get`, `Has`)
-  or the raw `Fields()`/`Portals()` accessors, which return *copies* (shallow for
+- **`Record` is a fully opaque, immutable value (the `time.Time` model).** *All*
+  fields are unexported and read through accessors — `ID()`, `ModID()`,
+  `Layout()`, the typed getters (`String`, `Int`, …, `Decode`, `Get`, `Has`), and
+  the raw `Fields()`/`Portals()`. `Fields`/`Portals` return *copies* (shallow for
   `Fields` — values are immutable scalars; deep for `Portals` — nested maps/slices
   are rebuilt) so a returned record can never be mutated. Decoupling the public
   type from the wire shape means the response decodes into an internal
   `recordWire` (exported fields) and `Find` builds `Record`s from it, since
-  `encoding/json` cannot populate unexported fields. Pre-release the more
-  restrictive choice is correct: exposing the map later is additive, unexporting
-  it later would be breaking.
+  `encoding/json` cannot populate unexported fields. Exposing scalar fields was
+  considered but rejected: every "set" case is already served by an explicit
+  affordance (`TimeIn` for the zone, `WithModID` for a specific lock version, the
+  `ByID` methods for raw addressing), so read-only accessors lose no capability.
+  Pre-release the more restrictive choice is correct: loosening later is additive,
+  tightening later would be breaking.
 - **`ModID` and portal data are new in v4**, populated from the `data[]` items
-  the API returns. `ModID` powers optional optimistic-locking on `Update` via the
-  `WithModID(modID)` update option: the host rejects the write (code `306`) if
-  the record changed since `modID` was read, surfaced as the `errors.Is`-friendly
-  `ErrRecordModified` sentinel.
+  the API returns. `ModID()` powers optional optimistic concurrency on `Update`
+  via two options: `IfUnchanged()` locks against the record's own mod ID (the
+  ergonomic, record-relative form), and `WithModID(modID)` locks against a
+  specific one. The host rejects a stale write (code `306`), surfaced as the
+  `errors.Is`-friendly `ErrRecordModified` sentinel. Both options set one
+  "conditional" flag and are order-independent; an empty `WithModID` or a record
+  with no mod ID is an error, never a silent unconditional write.
 - Keep the **read-only typed accessors** — pure functions of the data, all value
   receivers. The set is trimmed to what FileMaker actually needs (numbers come
   back as `float64`, so the small int/float sizes were dropped):
@@ -321,7 +330,7 @@ Responsibilities, in one place:
   **proactive** refresh when idle (`WithReauthOnIdle`); and **reactive** re-login
   + retry on a 952 (`WithReauthOnInvalidToken`). All three call one de-duplicated
   `authenticate(ctx, observedToken)` (the raw login is `login(ctx)`), which uses
-  `reauthSem` (a cap-1 channel) plus a double-check on the *observed* token (the
+  `authSem` (a cap-1 channel) plus a double-check on the *observed* token (the
   token the failed/last request carried, `""` for first use), so concurrent
   callers collapse to a single login and the network call never holds the
   read/write lock (reads stay live). Container download bypasses `do` but calls
@@ -461,10 +470,12 @@ for _, rec := range found.Records {
 ## Implementation phases
 
 > Note: phases 1–6 below record the original build. The public API was then
-> refined (see Settled decisions 6–8): lazy auth + pure `New`, `Destroy`→`Logout`,
-> immutable records with `Fields()`/`Portals()`, the `ByID`/`ByURL` write+container
-> family, and the internal `login`/`authenticate`/`withAuth` renames. The
-> sections above reflect the refined API; these checkboxes are left as-is.
+> refined (see Settled decisions 6–9): lazy auth + pure `New`, `Destroy`→`Logout`,
+> a fully opaque immutable `Record` (`ID()`/`ModID()`/`Layout()` getters plus
+> `Fields()`/`Portals()`), the `ByID`/`ByURL` write+container family, the
+> `IfUnchanged()` optimistic-concurrency option, and the internal
+> `login`/`authenticate`/`withAuth`/`authSem` renames. The sections above reflect
+> the refined API; these checkboxes are left as-is.
 
 - [x] **1. Scaffold types.** Add `Client` (unexported fields), `Record` data
    type, and the declarative `find.go` types with `MarshalJSON` + unit tests for
@@ -560,11 +571,15 @@ for _, rec := range found.Records {
    first-use key, so lazy auth is nearly free. Teardown is `Logout` (not
    `Destroy`/`Close`): lazy auth makes the client non-terminal — it re-auths
    after logout — so `io.Closer` semantics would lie.
-7. **Records are immutable; field/portal maps unexported.** Read via the typed
-   accessors or `Fields()`/`Portals()` (which return faithful copies). Enforces
-   the "records are caller-owned, concurrent-read-safe" invariant by construction
-   and removes the whole-record-resend footgun. Decided pre-release because the
-   restrictive choice is the reversible one (exposing later is additive).
+7. **`Record` is a fully opaque immutable value.** *All* fields are unexported
+   (`id`/`modID`/`layout` plus the maps), read through accessors — `ID()`,
+   `ModID()`, `Layout()`, the typed getters, and `Fields()`/`Portals()` (which
+   return faithful copies). Enforces the "records are caller-owned,
+   concurrent-read-safe" invariant by construction and removes the
+   whole-record-resend footgun. Exposing scalar fields was rejected because every
+   "set" case already has an explicit affordance (`TimeIn`, `WithModID`, `ByID`),
+   so read-only loses no capability. Decided pre-release because the restrictive
+   choice is the reversible one (exposing later is additive).
 8. **Write/container ops use a bare/qualified pair.** Bare verbs take a `Record`
    (`Update(rec, fields)`, `Delete(rec)`, `UploadToContainer(rec, …)`,
    `DownloadFromContainer(rec, field)`); the qualified forms take raw addressing
@@ -575,4 +590,9 @@ for _, rec := range found.Records {
    `Create` hands you an id. `Create`/`Find` have no record to address, so no
    pair. (`Update`'s `fields` is a patch; `rec` only addresses — its own field
    values are never sent.)
+9. **Optimistic concurrency is opt-in, two options.** Updates are unconditional
+   by default (matching the Data API and the PATCH model); `IfUnchanged()` locks
+   against the record's mod ID, `WithModID(x)` against a specific one. They set
+   one order-independent "conditional" flag; an empty `WithModID` or a record
+   without a mod ID errors rather than silently writing unconditionally.
 ```
