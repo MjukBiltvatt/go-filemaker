@@ -87,6 +87,16 @@ matters. A minimal setup is one top-level script plus one folder with one script
 inside it. Grant the test account access to the scripts (or use **Full Access**)
 so the Data API returns them.
 
+### Layouts
+
+`TestIntegrationLayouts` reads the database's layout catalog. The `ParentTable`
+layout (the `FM_LAYOUT` you already created above) supplies the top-level entry,
+and the test confirms it shows up in the catalog. To exercise the recursive
+`folderLayoutNames` decode, the file also needs **at least one layout folder that
+contains a layout** — in **Manage → Layouts**, create a folder and put any layout
+inside it (a duplicate of `ParentTable` is fine; it is never used). As with
+scripts, an empty folder will not satisfy the test.
+
 ## 2. Configure `.env`
 
 Copy the template and fill it in. `.env` is gitignored; `.env.example` is
@@ -141,6 +151,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationProductInfo` | Unauthenticated connectivity / metadata |
 | `TestIntegrationDatabases` | Database listing (Basic-auth path) |
 | `TestIntegrationScripts` | Script catalog listing; recursive folder hierarchy (needs the script fixture) |
+| `TestIntegrationLayouts` | Layout catalog listing; recursive folder hierarchy; `FM_LAYOUT` present (needs the layout folder fixture) |
 | `TestIntegrationCRUD` | Create → find → update (patch) → delete; number coercion |
 | `TestIntegrationDateTime` | Date/timestamp wrappers and read-back parsing |
 | `TestIntegrationDateTimeLocation` | `WithLocation` zone applied on read (needs `FM_LOCATION`) |
@@ -194,3 +205,5 @@ In rough order of how often they bite:
 6. **No script fixture (or an empty folder)** — `TestIntegrationScripts` fails
    asking for a top-level script and a folder that *contains* a script; an empty
    folder doesn't exercise the nested decode and won't satisfy it.
+7. **No layout folder fixture (or an empty one)** — `TestIntegrationLayouts`
+   fails asking for a folder that *contains* a layout, for the same reason.

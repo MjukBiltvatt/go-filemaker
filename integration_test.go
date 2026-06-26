@@ -73,13 +73,19 @@
 // Every test that writes data deletes it again via t.Cleanup, so a passing run
 // leaves the layout empty.
 //
-// # Expected scripts
+// # Expected scripts and layout folder
 //
-// TestIntegrationScripts needs a small script fixture, since the Data API cannot
-// create scripts. The database must define at least one runnable script at the
-// top level and at least one script folder that contains a script (the nested
-// script is what exercises the recursive folderScriptNames decode). The names do
-// not matter; only the shape does.
+// TestIntegrationScripts and TestIntegrationLayouts need small design-time
+// fixtures the Data API cannot create:
+//
+//   - Scripts: at least one runnable script at the top level and at least one
+//     script folder that contains a script (the nested script is what exercises
+//     the recursive folderScriptNames decode).
+//   - Layouts: at least one layout folder that contains a layout (exercising the
+//     recursive folderLayoutNames decode). The configured FM_LAYOUT supplies the
+//     top-level layout, and the test also confirms it appears in the catalog.
+//
+// The names do not matter; only the shape does.
 package filemaker
 
 import (
@@ -284,6 +290,55 @@ func TestIntegrationScripts(t *testing.T) {
 	if !folderWithScript {
 		t.Error("no folder containing a script found; the test database must define a script folder with at least one script in it (see docs/integration-testing.md)")
 	}
+}
+
+// TestIntegrationLayouts lists the database's layouts and checks the folder
+// hierarchy round-trips. Like scripts, layouts are design-time objects, so the
+// test relies on a fixture (see docs/integration-testing.md): at least one
+// folder that itself contains a layout, which exercises the recursive
+// folderLayoutNames decode. It also confirms the configured FM_LAYOUT appears
+// somewhere in the catalog — a real-data check the scripts test cannot make.
+func TestIntegrationLayouts(t *testing.T) {
+	requireServer(t)
+
+	layouts, err := itClient.Layouts(context.Background())
+	if err != nil {
+		t.Fatalf("Layouts: %v", err)
+	}
+	t.Logf("layouts: %+v", layouts)
+
+	if !findLayout(layouts, itLayout) {
+		t.Errorf("configured layout %q not found in the catalog", itLayout)
+	}
+
+	var folderWithLayout bool
+	for _, l := range layouts {
+		if !l.IsFolder {
+			continue
+		}
+		for _, nested := range l.FolderLayoutNames {
+			if !nested.IsFolder {
+				folderWithLayout = true
+			}
+		}
+	}
+	if !folderWithLayout {
+		t.Error("no folder containing a layout found; the test database must define a layout folder with at least one layout in it (see docs/integration-testing.md)")
+	}
+}
+
+// findLayout reports whether a layout with the given name exists anywhere in the
+// catalog, descending into folders.
+func findLayout(layouts []Layout, name string) bool {
+	for _, l := range layouts {
+		if !l.IsFolder && l.Name == name {
+			return true
+		}
+		if l.IsFolder && findLayout(l.FolderLayoutNames, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestIntegrationCRUD exercises the full record lifecycle against a real host:

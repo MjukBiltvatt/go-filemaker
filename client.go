@@ -253,6 +253,7 @@ type responseBody struct {
 		ProductInfo ProductInfo  `json:"productInfo"`
 		Databases   []Database   `json:"databases"`
 		Scripts     []Script     `json:"scripts"`
+		Layouts     []Layout     `json:"layouts"`
 	} `json:"response"`
 	Messages []struct {
 		Code    string `json:"code"`

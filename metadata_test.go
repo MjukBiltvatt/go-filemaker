@@ -263,3 +263,75 @@ func TestScriptsAPIError(t *testing.T) {
 		t.Error("expected error from non-zero message code")
 	}
 }
+
+func TestLayouts(t *testing.T) {
+	var mu sync.Mutex
+	var gotMethod, gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		mu.Unlock()
+		writeJSON(w, `{"response":{"layouts":[
+			{"name":"Customers"},
+			{"name":"Details"},
+			{"name":"Package Management","isFolder":true,"folderLayoutNames":[
+				{"name":"Mark as sent"},
+				{"name":"Subfolder","isFolder":true,"folderLayoutNames":[
+					{"name":"Find Unsent"}
+				]}
+			]}
+		]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	layouts, err := c.Layouts(context.Background())
+	if err != nil {
+		t.Fatalf("Layouts: %v", err)
+	}
+
+	want := []Layout{
+		{Name: "Customers"},
+		{Name: "Details"},
+		{Name: "Package Management", IsFolder: true, FolderLayoutNames: []Layout{
+			{Name: "Mark as sent"},
+			{Name: "Subfolder", IsFolder: true, FolderLayoutNames: []Layout{
+				{Name: "Find Unsent"},
+			}},
+		}},
+	}
+	if !reflect.DeepEqual(layouts, want) {
+		t.Errorf("layouts = %+v, want %+v", layouts, want)
+	}
+
+	mu.Lock()
+	method, path, auth := gotMethod, gotPath, gotAuth
+	mu.Unlock()
+	if method != http.MethodGet {
+		t.Errorf("method = %q, want GET", method)
+	}
+	// The endpoint is database-scoped: the path carries the /databases/db/ segment.
+	if path != "/fmi/data/v1/databases/db/layouts" {
+		t.Errorf("path = %q, want /fmi/data/v1/databases/db/layouts", path)
+	}
+	// Like Scripts, it authenticates with the session bearer token, not Basic.
+	if auth != "Bearer tok" {
+		t.Errorf("auth = %q, want %q (Bearer session token)", auth, "Bearer tok")
+	}
+	// It is a database-scoped session call, so it counts as session activity.
+	if c.LastActivity().IsZero() {
+		t.Error("LastActivity is zero, want stamped (layouts is a session call)")
+	}
+}
+
+func TestLayoutsAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{},"messages":[{"code":"802","message":"Unable to open file"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if _, err := c.Layouts(context.Background()); err == nil {
+		t.Error("expected error from non-zero message code")
+	}
+}
