@@ -146,9 +146,11 @@ func IfUnchanged() UpdateOption {
 // alongside the field-data patch. Pass the rows in the same shape Record.Portals
 // returns: a portal name mapped to its rows, each row's field values keyed by
 // fully qualified name ("TableOccurrence::FieldName"). A row carrying a record ID
-// ("TableOccurrence::recordId") edits that existing related record — add
-// "TableOccurrence::modId" for optimistic locking — and a row without one is
-// added as a new related record.
+// (a plain "recordId" key) edits that existing related record — add a plain
+// "modId" for optimistic locking — and a row without one is added as a new
+// related record. Note the record ID is not table-occurrence qualified like the
+// field values are: the host reads "TableOccurrence::recordId" as a field and
+// rejects the edit with code 102 ("Field is missing").
 //
 // Only the named portal rows are touched; rows you omit are left unchanged. To
 // remove related records, set "deleteRelated" in the FieldData patch (e.g.

@@ -453,8 +453,11 @@ func TestUpdateWithPortalData(t *testing.T) {
 	c := testClient(srv)
 	portals := PortalData{
 		"Orders": {
-			// An existing related record to edit (carries a recordId/modId).
-			{"Orders::recordId": "70", "Orders::modId": "4", "Orders::Qty": 3},
+			// An existing related record to edit. The record ID and mod ID are
+			// plain keys, not table-occurrence qualified like the field values:
+			// the host reads "Orders::recordId" as a field and rejects the edit
+			// (code 102). Field values stay qualified ("Orders::Qty").
+			{"recordId": "70", "modId": "4", "Orders::Qty": 3},
 			// A new related record to add (no recordId).
 			{"Orders::Item": "Widget"},
 		},
@@ -481,10 +484,10 @@ func TestUpdateWithPortalData(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("portalData[Orders] = %d rows, want 2 (body %q)", len(rows), body)
 	}
-	if rows[0]["Orders::recordId"] != "70" || rows[0]["Orders::modId"] != "4" {
+	if rows[0]["recordId"] != "70" || rows[0]["modId"] != "4" {
 		t.Errorf("edit row = %v, want recordId 70 / modId 4", rows[0])
 	}
-	if _, ok := rows[1]["Orders::recordId"]; ok {
+	if _, ok := rows[1]["recordId"]; ok {
 		t.Errorf("add row should carry no recordId, got %v", rows[1])
 	}
 	if rows[1]["Orders::Item"] != "Widget" {

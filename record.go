@@ -19,10 +19,12 @@ type FieldData map[string]any
 //
 // Within a row, field values are keyed by their fully qualified name
 // ("TableOccurrence::FieldName"). When writing, a row that carries a record ID
-// ("TableOccurrence::recordId", optionally with "TableOccurrence::modId" for
-// optimistic locking) edits that existing related record; a row without one is
-// added as a new related record. See the Claris Data API guide's "Edit record"
-// page for the wire format.
+// (a plain "recordId" key, optionally with a plain "modId" for optimistic
+// locking) edits that existing related record; a row without one is added as a
+// new related record. The record ID is not table-occurrence qualified like the
+// field values are — "TableOccurrence::recordId" is read as a field and rejected
+// (code 102). See the Claris Data API guide's "Edit record" page for the wire
+// format.
 type PortalData map[string][]map[string]any
 
 // Record is a single record returned by a read operation (Find). It is a plain,
