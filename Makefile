@@ -9,8 +9,9 @@
 #                        make integration RUN=TestIntegrationDateTime
 #                      Toggle request/response logging inline with FM_DEBUG:
 #                        make integration FM_DEBUG=1 RUN=TestIntegrationCRUD
+# `make test-all`    - unit tests, then the full integration suite.
 
-.PHONY: test integration vet
+.PHONY: test integration test-all vet
 
 # -run regexp for the integration suite; defaults to every TestIntegration*.
 RUN ?= Integration
@@ -20,6 +21,11 @@ test:
 
 vet:
 	go vet ./...
+
+# Unit tests first (fast, no server), then integration. Running them in this
+# order surfaces hermetic failures before the suite touches the host, and a unit
+# failure stops the run before integration starts.
+test-all: test integration
 
 # Loads .env into the environment, then runs the integration-tagged suite.
 # Tests skip (rather than fail) when the required FM_* variables are absent.
