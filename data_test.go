@@ -699,3 +699,67 @@ func TestDownloadFromContainerByURLEmpty(t *testing.T) {
 		t.Fatal("expected error for empty container URL")
 	}
 }
+
+func TestCreateWithDateFormatISO(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"recordId":"1","modId":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	iso := DateFormatISO
+	c.dateFormat = &iso
+	if _, err := c.Create(context.Background(), "People", FieldData{
+		"DOB":     Date(time.Date(1990, 6, 23, 0, 0, 0, 0, time.UTC)),
+		"Created": Timestamp(time.Date(2026, 6, 23, 14, 5, 0, 0, time.UTC)),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+	if !strings.Contains(body, `"dateformats":2`) {
+		t.Errorf("body = %q, want dateformats=2", body)
+	}
+	if !strings.Contains(body, `"DOB":"1990-06-23"`) || !strings.Contains(body, `"Created":"2026-06-23 14:05:00"`) {
+		t.Errorf("body = %q, want ISO-formatted date and timestamp", body)
+	}
+}
+
+func TestCreateWithoutDateFormatOmitsParam(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"recordId":"1","modId":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	// testClient leaves dateFormat at its zero value (unset).
+	c := testClient(srv)
+	if _, err := c.Create(context.Background(), "People", FieldData{
+		"DOB": Date(time.Date(1990, 6, 23, 0, 0, 0, 0, time.UTC)),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+	if strings.Contains(body, "dateformats") {
+		t.Errorf("body = %q, want no dateformats parameter when unset", body)
+	}
+	if !strings.Contains(body, `"DOB":"06/23/1990"`) {
+		t.Errorf("body = %q, want US DOB when unset", body)
+	}
+}

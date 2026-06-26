@@ -36,6 +36,7 @@ Two tables in a one-to-many relationship.
 | `TextSecondary` | Text | Left out of an update, to prove a patch doesn't clear it |
 | `DateField` | Date | |
 | `TimestampField` | Timestamp | |
+| `TimeField` | Time | Time-of-day round-trip (clock value and >24h duration) |
 | `ContainerField` | Container | Upload/download round-trip |
 | `RequiredField` | Text | **Validation:** Not Empty, **"Validate always"** (not "only during data entry"), and **"Allow user to override during data entry" OFF** |
 | `Id` | Number _or_ Text | Relationship match key — Number with auto-enter **serial**, or Text with an auto-enter UUID; must be the **same type** as `ChildTable::ParentId`. Never touched by the tests |
@@ -132,6 +133,28 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationUpdateIfUnchanged` | Record-relative optimistic lock; conflict → 306 |
 | `TestIntegrationFindQuery` | Sort, limit, offset, omit, OR across requests, `DataInfo` |
 | `TestIntegrationReauthOnInvalidToken` | Expired-session recovery via `WithReauthOnInvalidToken` |
+| `TestIntegrationTimeOfDay` | Time field round-trip: `Time`/`Duration` wrappers and `Time()`/`Duration()` getters |
+| `TestIntegrationWithDateFormatISO` | `WithDateFormat(DateFormatISO)` writes ISO + sends `dateformats=2` |
+
+## Date formats (`WithDateFormat`)
+
+A few facts established against a live host, in case the behavior ever looks
+surprising:
+
+- The Data API's `dateformats` parameter controls only the **textual
+  representation** of date/timestamp values, never the stored value or the
+  instant. The stored value is format-independent.
+- It is **representation-only on reads** (`0` US, `1` locale, `2` ISO; default
+  `0`) and **input-parsing on writes**. The library uses it on writes only:
+  `WithDateFormat` is opt-in, sends the parameter only when set, and requires
+  FileMaker Server 2023+. Reads stay tolerant and parse either format.
+- A write quirk: ISO timestamps must use a **space** separator
+  (`2006-01-02 15:04:05`); a `T` is rejected on input (error 500) — even though
+  the host *emits* a `T` when returning `dateformats=2` reads.
+- The write format only affects how a record displays "as entered" / in data
+  entry in FileMaker clients (durably, per record); it does not change the
+  value. Apply explicit date formatting on the layout for consistent browse
+  display — though the entered format is still used during subsequent value entry.
 
 ## Common first-run snags
 

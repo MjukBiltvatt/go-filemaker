@@ -3,6 +3,7 @@ package filemaker
 import (
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -234,18 +235,25 @@ func (r Record) Bool(fieldName string) bool {
 	return false
 }
 
-// timeFormats are the FileMaker date/timestamp layouts the Time accessors
-// recognize, ordered most-specific first so a timestamp is not truncated to a
-// date.
+// timeFormats are the FileMaker date, timestamp and time-of-day layouts the Time
+// accessors recognize, ordered most-specific first so a timestamp is not
+// truncated to a date. Both US and ISO forms are accepted, including the
+// "T"-separated ISO timestamp the host emits for dateformats=2 reads, so the
+// accessors parse a value regardless of the format it was written in.
 var timeFormats = []string{
 	"01/02/2006 15:04:05",
 	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05",
 	"01/02/2006",
 	"2006-01-02",
+	"15:04:05",
 }
 
 // TimeInE parses the field value as a time.Time in the given location, returning
-// ErrUnknownFormat if it matches none of the supported date/timestamp formats.
+// ErrUnknownFormat if it matches none of the supported date/timestamp/time
+// formats. A Time field holding 24 hours or more (an elapsed duration rather
+// than a clock time) is out of the wall-clock range and will not parse here; read
+// such a field with Duration instead.
 func (r Record) TimeInE(fieldName string, loc *time.Location) (time.Time, error) {
 	data := r.String(fieldName)
 	for _, layout := range timeFormats {
@@ -275,6 +283,45 @@ func (r Record) Time(fieldName string) time.Time {
 	return r.TimeIn(fieldName, r.location())
 }
 
+// DurationE parses the field value as a time.Duration, for a FileMaker Time
+// field returned as a clock string ([-]HH:MM:SS). Unlike Time it represents the
+// value as elapsed time, so it handles 24 hours or more and negative values. It
+// returns ErrUnknownFormat if the value is not such a string.
+func (r Record) DurationE(fieldName string) (time.Duration, error) {
+	return parseFMDuration(r.String(fieldName))
+}
+
+// Duration parses the field value as a time.Duration. Errors are ignored; use
+// DurationE to detect them.
+func (r Record) Duration(fieldName string) time.Duration {
+	d, _ := r.DurationE(fieldName)
+	return d
+}
+
+// parseFMDuration parses a FileMaker time clock string ([-]H[H…]:MM:SS) into a
+// time.Duration. Hours may exceed 24; minutes and seconds must be 0–59.
+func parseFMDuration(s string) (time.Duration, error) {
+	neg := false
+	if strings.HasPrefix(s, "-") {
+		neg, s = true, s[1:]
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) != 3 {
+		return 0, ErrUnknownFormat
+	}
+	h, errH := strconv.Atoi(parts[0])
+	m, errM := strconv.Atoi(parts[1])
+	sec, errS := strconv.Atoi(parts[2])
+	if errH != nil || errM != nil || errS != nil || h < 0 || m < 0 || m > 59 || sec < 0 || sec > 59 {
+		return 0, ErrUnknownFormat
+	}
+	d := time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(sec)*time.Second
+	if neg {
+		d = -d
+	}
+	return d, nil
+}
+
 // Decode populates obj's fields from the record, matching each struct field's
 // `fm` tag to a record field name. obj must be a non-nil pointer to a struct.
 //
@@ -299,7 +346,7 @@ func (r Record) Time(fieldName string) time.Time {
 // pointer to a struct.
 //
 // Supported field types: string, int, int8, int16, int32, int64, float32,
-// float64, bool, time.Time, *time.Time.
+// float64, bool, time.Duration, time.Time, *time.Time.
 func (r Record) Decode(obj any) error {
 	v := reflect.ValueOf(obj)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
@@ -331,6 +378,10 @@ func (r Record) Decode(obj any) error {
 			field.SetFloat(r.Float64(tag))
 		case bool:
 			field.SetBool(r.Bool(tag))
+		case time.Duration:
+			// A distinct named type (underlying int64), so it is matched here
+			// rather than by the integer case above.
+			field.Set(reflect.ValueOf(r.Duration(tag)))
 		case time.Time:
 			field.Set(reflect.ValueOf(r.Time(tag)))
 		case *time.Time:

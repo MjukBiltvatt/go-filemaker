@@ -83,7 +83,7 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (C
 		return CreateResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	body, err := marshalRecordBody(fields, nil, "")
+	body, err := marshalRecordBody(fields, nil, "", c.dateFormat)
 	if err != nil {
 		return CreateResponse{}, err
 	}
@@ -232,7 +232,7 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 		return UpdateResponse{}, err
 	}
 
-	body, err := marshalRecordBody(fields, cfg.portalData, cfg.modID)
+	body, err := marshalRecordBody(fields, cfg.portalData, cfg.modID, c.dateFormat)
 	if err != nil {
 		return UpdateResponse{}, err
 	}
@@ -372,19 +372,88 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 // (each omitted when empty). A nil fields map becomes an empty object so the host
 // applies defaults on create and leaves the record's own fields untouched on a
 // portal-only edit.
-func marshalRecordBody(fields FieldData, portals PortalData, modID string) ([]byte, error) {
+//
+// When format is non-nil, Date/Timestamp wrapper values are rewritten to that
+// format and a "dateformats" parameter is added so the host interprets the input
+// accordingly; when nil, no parameter is sent — the host applies its default
+// format (US) and the wrappers self-marshal in US to match (works on any server).
+func marshalRecordBody(fields FieldData, portals PortalData, modID string, format *DateFormat) ([]byte, error) {
 	if fields == nil {
 		fields = FieldData{}
 	}
+
+	var dateFormats *int
+	if format != nil {
+		fields = applyDateFormat(fields, *format)
+		portals = applyDateFormatPortals(portals, *format)
+		v := int(*format)
+		dateFormats = &v
+	}
+
 	body, err := json.Marshal(struct {
-		FieldData  FieldData  `json:"fieldData"`
-		PortalData PortalData `json:"portalData,omitempty"`
-		ModID      string     `json:"modId,omitempty"`
-	}{fields, portals, modID})
+		FieldData   FieldData  `json:"fieldData"`
+		PortalData  PortalData `json:"portalData,omitempty"`
+		ModID       string     `json:"modId,omitempty"`
+		DateFormats *int       `json:"dateformats,omitempty"`
+	}{fields, portals, modID, dateFormats})
 	if err != nil {
 		return nil, fmt.Errorf("filemaker: failed to marshal field data: %w", err)
 	}
 	return body, nil
+}
+
+// formatDateValue rewrites a Date/Timestamp wrapper to its string form in the
+// given format (preserving the zero-time-clears-the-field convention). Any other
+// value — including the Time/Duration wrappers, whose format does not depend on
+// the date format — is returned unchanged to marshal itself.
+func formatDateValue(v any, format DateFormat) any {
+	switch val := v.(type) {
+	case Date:
+		t := time.Time(val)
+		if t.IsZero() {
+			return ""
+		}
+		return fmDate(t, format)
+	case Timestamp:
+		t := time.Time(val)
+		if t.IsZero() {
+			return ""
+		}
+		return fmTimestamp(t, format)
+	default:
+		return v
+	}
+}
+
+// applyDateFormat returns a copy of fields with Date/Timestamp values rewritten
+// in the given format. The caller's map is never mutated.
+func applyDateFormat(fields FieldData, format DateFormat) FieldData {
+	out := make(FieldData, len(fields))
+	for k, v := range fields {
+		out[k] = formatDateValue(v, format)
+	}
+	return out
+}
+
+// applyDateFormatPortals does the same as applyDateFormat but for portal rows,
+// deep-copying so the caller's data is never mutated.
+func applyDateFormatPortals(portals PortalData, format DateFormat) PortalData {
+	if portals == nil {
+		return nil
+	}
+	out := make(PortalData, len(portals))
+	for name, rows := range portals {
+		newRows := make([]map[string]any, len(rows))
+		for i, row := range rows {
+			nr := make(map[string]any, len(row))
+			for k, v := range row {
+				nr[k] = formatDateValue(v, format)
+			}
+			newRows[i] = nr
+		}
+		out[name] = newRows
+	}
+	return out
 }
 
 // recordsURL is the collection endpoint for a layout (used to create records).

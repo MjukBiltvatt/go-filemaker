@@ -423,3 +423,22 @@ func TestConcurrentDo(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestWithDateFormatWiring(t *testing.T) {
+	c, err := New("https://example.com", "db", "user", "pass", WithDateFormat(DateFormatISO))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if c.dateFormat == nil || *c.dateFormat != DateFormatISO {
+		t.Errorf("dateFormat = %v, want DateFormatISO", c.dateFormat)
+	}
+
+	// Unset (nil) by default.
+	d, err := New("https://example.com", "db", "user", "pass")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if d.dateFormat != nil {
+		t.Errorf("default dateFormat = %v, want nil (unset)", d.dateFormat)
+	}
+}

@@ -47,6 +47,7 @@
 //	                not clear the fields it omits.
 //	DateField       date.
 //	TimestampField  timestamp.
+//	TimeField       time (time-of-day).
 //	ContainerField  container.
 //	RequiredField   text, validated Not Empty, "Validate always" (not just during
 //	                data entry) and not user-overridable, so the host enforces it
@@ -90,6 +91,7 @@ const (
 	fieldTextSecondary = "TextSecondary"
 	fieldDate          = "DateField"
 	fieldTimestamp     = "TimestampField"
+	fieldTime          = "TimeField"
 	fieldRequired      = "RequiredField"
 	fieldContainer     = "ContainerField"
 
@@ -969,5 +971,109 @@ func TestIntegrationReauthOnInvalidToken(t *testing.T) {
 	reauth.mu.RUnlock()
 	if newToken == "" || newToken == dead {
 		t.Errorf("token after reauth = %q, want a fresh non-empty token (was %q)", newToken, dead)
+	}
+}
+
+// TestIntegrationTimeOfDay round-trips a FileMaker Time field both ways: a clock
+// value written via the Time wrapper and read back with Time()/Duration(), then
+// an elapsed duration exceeding 24h written via the Duration wrapper and read
+// back with Duration().
+func TestIntegrationTimeOfDay(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	marker := "go-filemaker-it-tod-" + time.Now().UTC().Format("20060102T150405.000000000")
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldText:     marker,
+		fieldTime:     Time(time.Date(2025, 6, 23, 15, 4, 5, 0, time.UTC)),
+		fieldRequired: "present",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	rec := findParent(t, ctx, marker)
+	if got := rec.Time(fieldTime).Format("15:04:05"); got != "15:04:05" {
+		t.Errorf("Time(%s) clock = %s, want 15:04:05", fieldTime, got)
+	}
+	if got, want := rec.Duration(fieldTime), 15*time.Hour+4*time.Minute+5*time.Second; got != want {
+		t.Errorf("Duration(%s) = %v, want %v", fieldTime, got, want)
+	}
+
+	// An elapsed duration over 24h, via the Duration wrapper.
+	if _, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, FieldData{
+		fieldTime: Duration(37*time.Hour + 30*time.Minute),
+	}); err != nil {
+		t.Fatalf("UpdateByID: %v", err)
+	}
+	rec = findParent(t, ctx, marker)
+	if got, want := rec.Duration(fieldTime), 37*time.Hour+30*time.Minute; got != want {
+		t.Errorf("Duration(%s) after update = %v, want %v", fieldTime, got, want)
+	}
+}
+
+// TestIntegrationWithDateFormatISO exercises WithDateFormat against a real host.
+// A sibling client configured for ISO writes the date in ISO 8601 and sends
+// dateformats=2; the create succeeding is itself the proof that the parameter
+// was applied, since ISO date strings without it are rejected (error 500). The
+// stored value is then confirmed unchanged by reading it back through the
+// default (US) client.
+func TestIntegrationWithDateFormatISO(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	c := buildITClient(t, WithDateFormat(DateFormatISO))
+
+	marker := "go-filemaker-it-iso-" + time.Now().UTC().Format("20060102T150405.000000000")
+	date := time.Date(2025, 6, 23, 0, 0, 0, 0, time.UTC)
+	ts := time.Date(2025, 6, 23, 15, 4, 5, 0, time.UTC)
+
+	created, err := c.Create(ctx, itLayout, FieldData{
+		fieldText:      marker,
+		fieldDate:      Date(date),
+		fieldTimestamp: Timestamp(ts),
+		fieldRequired:  "present",
+	})
+	if err != nil {
+		t.Fatalf("Create with WithDateFormat(ISO): %v", err)
+	}
+	t.Cleanup(func() {
+		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	// Read back through the default client: the value is unchanged by the write
+	// format (both parse to the same instant in UTC).
+	rec := findParent(t, ctx, marker)
+	if got, err := rec.TimeE(fieldDate); err != nil || !got.Equal(date) {
+		t.Errorf("DateField round-trip = %v (err %v), want %v", got, err, date)
+	}
+	if got, err := rec.TimeE(fieldTimestamp); err != nil || !got.Equal(ts) {
+		t.Errorf("TimestampField round-trip = %v (err %v), want %v", got, err, ts)
+	}
+
+	// Edit also carries dateformats=2: confirm the host accepts ISO input on the
+	// PATCH endpoint, not just create. Like the create, success is the proof —
+	// an ISO date without the parameter would be rejected (error 500).
+	newDate := time.Date(2024, 12, 25, 0, 0, 0, 0, time.UTC)
+	newTS := time.Date(2024, 12, 25, 8, 30, 0, 0, time.UTC)
+	if _, err := c.UpdateByID(ctx, itLayout, created.RecordID, FieldData{
+		fieldDate:      Date(newDate),
+		fieldTimestamp: Timestamp(newTS),
+	}); err != nil {
+		t.Fatalf("UpdateByID with WithDateFormat(ISO): %v", err)
+	}
+	rec = findParent(t, ctx, marker)
+	if got, err := rec.TimeE(fieldDate); err != nil || !got.Equal(newDate) {
+		t.Errorf("DateField after ISO edit = %v (err %v), want %v", got, err, newDate)
+	}
+	if got, err := rec.TimeE(fieldTimestamp); err != nil || !got.Equal(newTS) {
+		t.Errorf("TimestampField after ISO edit = %v (err %v), want %v", got, err, newTS)
 	}
 }

@@ -37,6 +37,7 @@ type Client struct {
 	reauthOnInvalidToken bool
 	idleTimeout          time.Duration // > 0 enables proactive (idle) reauth
 	location             *time.Location
+	dateFormat           *DateFormat // nil (option unset): no parameter sent, host's default format (US) applies
 
 	authSem      chan struct{} // cap-1 channel used as a context-aware mutex serializing logins
 	mu           sync.RWMutex
@@ -53,10 +54,31 @@ type config struct {
 	reauthOnInvalidToken bool
 	idleTimeout          time.Duration
 	location             *time.Location
+	dateFormat           *DateFormat
 	allowInsecureHTTP    bool
 	debug                bool
 	debugWriter          io.Writer
 }
+
+// DateFormat selects how the client writes date and timestamp values and which
+// "dateformats" parameter it sends on create/edit. Its values are the integers
+// the Data API uses for that parameter, so they match the Claris documentation
+// directly; only the two below are supported.
+//
+// The option is opt-in (see WithDateFormat): a client built without it sends no
+// parameter, so the host interprets values in its own default format (US), and
+// the wrappers write US to match — which works against any server version.
+// Setting it — even to DateFormatUS — sends the parameter and so requires
+// FileMaker Server 2023 or later. It governs writes only; reads parse whatever
+// the host returns.
+type DateFormat int
+
+const (
+	// DateFormatUS writes US-format dates (MM/DD/YYYY) and sends dateformats=0.
+	DateFormatUS DateFormat = 0
+	// DateFormatISO writes ISO 8601 dates (YYYY-MM-DD) and sends dateformats=2.
+	DateFormatISO DateFormat = 2
+)
 
 // WithTimeout sets the timeout applied to every HTTP request made by the
 // client. The default is 30 seconds; a timeout of 0 disables it entirely.
@@ -133,6 +155,24 @@ func WithLocation(loc *time.Location) Option {
 	}
 }
 
+// WithDateFormat sets the format the client writes date and timestamp values in,
+// and makes it send the matching "dateformats" parameter on create and edit so
+// the host interprets the input accordingly. Left unset, the client sends no
+// parameter and the host falls back to its default format (US), which works
+// against any server; setting this — to DateFormatISO for ISO 8601, or
+// explicitly to DateFormatUS — sends the parameter and so requires FileMaker
+// Server 2023 or later.
+//
+// It affects writes only. Reads continue to parse whatever the host returns (the
+// record accessors accept both US and ISO), so the stored value is unchanged by
+// this option; what changes is how date and timestamp fields are represented
+// when a FileMaker client displays a record "as entered" or in data entry.
+func WithDateFormat(format DateFormat) Option {
+	return func(c *config) {
+		c.dateFormat = &format
+	}
+}
+
 // New builds a client for the given host and credentials. It performs no
 // network I/O: the session is established lazily, on the first operation that
 // needs it (or eagerly via Authenticate). The errors it returns are therefore
@@ -186,6 +226,7 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 		reauthOnInvalidToken: cfg.reauthOnInvalidToken,
 		idleTimeout:          cfg.idleTimeout,
 		location:             cfg.location,
+		dateFormat:           cfg.dateFormat,
 		authSem:              make(chan struct{}, 1),
 	}, nil
 }

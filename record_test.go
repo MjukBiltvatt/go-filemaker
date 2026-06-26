@@ -346,3 +346,112 @@ func TestRecordDecodeErrors(t *testing.T) {
 		t.Error("Decode(*int) = nil, want error")
 	}
 }
+
+// TestTimeGetterFormats checks every layout TimeE accepts, in both US and ISO
+// form, and confirms a timestamp keeps its time component (it is not truncated
+// to a date). Each layout requires a full match — Go's time.Parse errors on
+// extra or missing text — so the order of timeFormats is not load-bearing; this
+// asserts each value parses to the right instant regardless.
+func TestTimeGetterFormats(t *testing.T) {
+	loc := time.UTC
+	tsWant := time.Date(2026, 6, 23, 15, 4, 5, 0, loc)
+	dateWant := time.Date(2026, 6, 23, 0, 0, 0, 0, loc)
+	todWant := time.Date(0, 1, 1, 15, 4, 5, 0, loc) // time-only: Go's zero date
+
+	cases := []struct {
+		name, value string
+		want        time.Time
+	}{
+		{"US timestamp", "06/23/2026 15:04:05", tsWant},
+		{"ISO timestamp space", "2026-06-23 15:04:05", tsWant},
+		{"ISO timestamp T", "2026-06-23T15:04:05", tsWant},
+		{"US date", "06/23/2026", dateWant},
+		{"ISO date", "2026-06-23", dateWant},
+		{"time of day", "15:04:05", todWant},
+	}
+	for _, c := range cases {
+		r := Record{loc: loc, fieldData: map[string]any{"f": c.value}}
+		got, err := r.TimeE("f")
+		if err != nil {
+			t.Errorf("%s: TimeE(%q) error: %v", c.name, c.value, err)
+			continue
+		}
+		if !got.Equal(c.want) {
+			t.Errorf("%s: TimeE(%q) = %v, want %v", c.name, c.value, got, c.want)
+		}
+	}
+}
+
+// TestTimeGetterErrors covers the values TimeE rejects: an unparseable string, a
+// missing field, and a Time value of 24h or more (out of the wall-clock range —
+// read those with Duration). Time (the non-E form) returns the zero time.
+func TestTimeGetterErrors(t *testing.T) {
+	r := Record{fieldData: map[string]any{
+		"bad":  "not a date",
+		"over": "37:30:00", // >= 24h: a duration, not a clock time
+		"num":  float64(5), // a number field, not a date string
+	}}
+	for _, f := range []string{"bad", "over", "num", "missing"} {
+		if _, err := r.TimeE(f); !errors.Is(err, ErrUnknownFormat) {
+			t.Errorf("TimeE(%q) err = %v, want ErrUnknownFormat", f, err)
+		}
+		if got := r.Time(f); !got.IsZero() {
+			t.Errorf("Time(%q) = %v, want zero time", f, got)
+		}
+	}
+}
+
+func TestDurationGetter(t *testing.T) {
+	valid := map[string]time.Duration{
+		"00:00:00":  0,
+		"15:04:05":  15*time.Hour + 4*time.Minute + 5*time.Second,
+		"37:30:00":  37*time.Hour + 30*time.Minute, // exceeds 24h
+		"100:00:00": 100 * time.Hour,
+		"-01:30:00": -(time.Hour + 30*time.Minute), // negative
+		"-00:00:01": -time.Second,
+	}
+	for v, want := range valid {
+		r := Record{fieldData: map[string]any{"f": v}}
+		got, err := r.DurationE("f")
+		if err != nil {
+			t.Errorf("DurationE(%q) error: %v", v, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("DurationE(%q) = %v, want %v", v, got, want)
+		}
+	}
+
+	invalid := []string{
+		"",                    // empty
+		"12:00",               // too few components
+		"12:00:00:00",         // too many components
+		"aa:bb:cc",            // non-numeric
+		"12:60:00",            // minute out of range
+		"12:00:60",            // second out of range
+		"2026-06-23",          // a date
+		"2026-06-23T15:04:05", // a timestamp
+	}
+	for _, v := range invalid {
+		r := Record{fieldData: map[string]any{"f": v}}
+		if _, err := r.DurationE("f"); !errors.Is(err, ErrUnknownFormat) {
+			t.Errorf("DurationE(%q) err = %v, want ErrUnknownFormat", v, err)
+		}
+		if got := r.Duration("f"); got != 0 {
+			t.Errorf("Duration(%q) = %v, want 0", v, got)
+		}
+	}
+}
+
+func TestDecodeDuration(t *testing.T) {
+	r := Record{fieldData: map[string]any{"worked": "37:30:00"}}
+	var got struct {
+		Worked time.Duration `fm:"worked"`
+	}
+	if err := r.Decode(&got); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if want := 37*time.Hour + 30*time.Minute; got.Worked != want {
+		t.Errorf("Worked = %v, want %v", got.Worked, want)
+	}
+}
