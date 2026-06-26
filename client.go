@@ -252,6 +252,7 @@ type responseBody struct {
 		Data        []recordWire `json:"data"`
 		ProductInfo ProductInfo  `json:"productInfo"`
 		Databases   []Database   `json:"databases"`
+		Scripts     []Script     `json:"scripts"`
 	} `json:"response"`
 	Messages []struct {
 		Code    string `json:"code"`

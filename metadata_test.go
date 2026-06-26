@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -188,6 +189,77 @@ func TestDatabasesAPIError(t *testing.T) {
 
 	c := testClient(srv)
 	if _, err := c.Databases(context.Background()); err == nil {
+		t.Error("expected error from non-zero message code")
+	}
+}
+
+func TestScripts(t *testing.T) {
+	var mu sync.Mutex
+	var gotMethod, gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		mu.Unlock()
+		writeJSON(w, `{"response":{"scripts":[
+			{"name":"Daily Cleanup","isFolder":false},
+			{"name":"Reports","isFolder":true,"folderScriptNames":[
+				{"name":"Monthly","isFolder":false},
+				{"name":"Archived","isFolder":true,"folderScriptNames":[
+					{"name":"Legacy","isFolder":false}
+				]}
+			]}
+		]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	scripts, err := c.Scripts(context.Background())
+	if err != nil {
+		t.Fatalf("Scripts: %v", err)
+	}
+
+	want := []Script{
+		{Name: "Daily Cleanup", IsFolder: false},
+		{Name: "Reports", IsFolder: true, FolderScriptNames: []Script{
+			{Name: "Monthly", IsFolder: false},
+			{Name: "Archived", IsFolder: true, FolderScriptNames: []Script{
+				{Name: "Legacy", IsFolder: false},
+			}},
+		}},
+	}
+	if !reflect.DeepEqual(scripts, want) {
+		t.Errorf("scripts = %+v, want %+v", scripts, want)
+	}
+
+	mu.Lock()
+	method, path, auth := gotMethod, gotPath, gotAuth
+	mu.Unlock()
+	if method != http.MethodGet {
+		t.Errorf("method = %q, want GET", method)
+	}
+	// The endpoint is database-scoped: the path carries the /databases/db/ segment.
+	if path != "/fmi/data/v1/databases/db/scripts" {
+		t.Errorf("path = %q, want /fmi/data/v1/databases/db/scripts", path)
+	}
+	// Unlike the host-level metadata calls, this one authenticates with the
+	// session bearer token (testClient holds token "tok").
+	if auth != "Bearer tok" {
+		t.Errorf("auth = %q, want %q (Bearer session token)", auth, "Bearer tok")
+	}
+	// It is a database-scoped session call, so it counts as session activity.
+	if c.LastActivity().IsZero() {
+		t.Error("LastActivity is zero, want stamped (scripts is a session call)")
+	}
+}
+
+func TestScriptsAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{},"messages":[{"code":"802","message":"Unable to open file"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if _, err := c.Scripts(context.Background()); err == nil {
 		t.Error("expected error from non-zero message code")
 	}
 }

@@ -72,6 +72,14 @@
 //
 // Every test that writes data deletes it again via t.Cleanup, so a passing run
 // leaves the layout empty.
+//
+// # Expected scripts
+//
+// TestIntegrationScripts needs a small script fixture, since the Data API cannot
+// create scripts. The database must define at least one runnable script at the
+// top level and at least one script folder that contains a script (the nested
+// script is what exercises the recursive folderScriptNames decode). The names do
+// not matter; only the shape does.
 package filemaker
 
 import (
@@ -239,6 +247,43 @@ func TestIntegrationDatabases(t *testing.T) {
 		t.Fatalf("Databases: %v", err)
 	}
 	t.Logf("databases: %+v", dbs)
+}
+
+// TestIntegrationScripts lists the scripts defined in the configured database
+// and checks that the folder hierarchy round-trips. Scripts are design-time
+// objects the Data API cannot create, so the test relies on a small fixture the
+// database must define (see docs/integration-testing.md): at least one runnable
+// script at the top level and at least one folder that itself contains a script.
+// The folder-with-a-script requirement is what actually exercises the recursive
+// folderScriptNames decode — an empty folder would parse without ever reaching a
+// nested entry.
+func TestIntegrationScripts(t *testing.T) {
+	requireServer(t)
+
+	scripts, err := itClient.Scripts(context.Background())
+	if err != nil {
+		t.Fatalf("Scripts: %v", err)
+	}
+	t.Logf("scripts: %+v", scripts)
+
+	var topLevelScript, folderWithScript bool
+	for _, s := range scripts {
+		if !s.IsFolder {
+			topLevelScript = true
+			continue
+		}
+		for _, nested := range s.FolderScriptNames {
+			if !nested.IsFolder {
+				folderWithScript = true
+			}
+		}
+	}
+	if !topLevelScript {
+		t.Error("no top-level script found; the test database must define at least one script outside any folder (see docs/integration-testing.md)")
+	}
+	if !folderWithScript {
+		t.Error("no folder containing a script found; the test database must define a script folder with at least one script in it (see docs/integration-testing.md)")
+	}
 }
 
 // TestIntegrationCRUD exercises the full record lifecycle against a real host:

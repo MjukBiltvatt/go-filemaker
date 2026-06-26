@@ -23,6 +23,17 @@ type Database struct {
 	Name string `json:"name"`
 }
 
+// Script is an entry in a database's script catalog as listed by Scripts:
+// either a runnable script or a script folder. When IsFolder is false the entry
+// is a script and FolderScriptNames is empty; when IsFolder is true the entry is
+// a folder and FolderScriptNames holds its contents, which may themselves be
+// folders, nesting arbitrarily deep.
+type Script struct {
+	Name              string   `json:"name"`
+	IsFolder          bool     `json:"isFolder"`
+	FolderScriptNames []Script `json:"folderScriptNames"`
+}
+
 // Databases lists the databases hosted on the server that are enabled for
 // FileMaker Data API access.
 //
@@ -76,4 +87,23 @@ func (c *Client) ProductInfo(ctx context.Context) (ProductInfo, error) {
 		return ProductInfo{}, err
 	}
 	return rb.Response.ProductInfo, nil
+}
+
+// Scripts lists the scripts defined in the client's database, as reported by the
+// scripts metadata endpoint. The catalog preserves the database's script-folder
+// hierarchy: a folder entry (IsFolder true) carries its contents in
+// FolderScriptNames, nested arbitrarily deep, while a leaf entry is a runnable
+// script.
+//
+// Unlike the host-level ProductInfo and Databases metadata calls, this endpoint
+// is scoped to the client's database and authenticated with the session bearer
+// token, so it establishes a session on first use (and triggers reauth like any
+// other database operation) and counts as session activity, updating
+// LastActivity.
+func (c *Client) Scripts(ctx context.Context) ([]Script, error) {
+	var rb responseBody
+	if err := c.do(ctx, http.MethodGet, c.baseURL()+"/scripts", nil, &rb); err != nil {
+		return nil, err
+	}
+	return rb.Response.Scripts, nil
 }

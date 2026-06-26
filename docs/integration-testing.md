@@ -69,6 +69,24 @@ A layout named **`ParentTable`**, based on the `ParentTable` occurrence:
   portal object name unset (or set it to `ChildTable`) so the Data API keys the
   returned portal data by the table-occurrence name.
 
+### Scripts
+
+`TestIntegrationScripts` reads the database's script catalog. Scripts are
+design-time objects the Data API cannot create, so the suite cannot seed them —
+the file must define a small fixture by hand. Open **Scripts → Script Workspace**
+and create:
+
+- **At least one script at the top level** (not inside any folder) — proves a
+  leaf entry parses.
+- **At least one script folder that contains at least one script** — the nested
+  script is what exercises the recursive `folderScriptNames` decode; an empty
+  folder would not.
+
+The names and bodies are irrelevant (the scripts are never run); only the shape
+matters. A minimal setup is one top-level script plus one folder with one script
+inside it. Grant the test account access to the scripts (or use **Full Access**)
+so the Data API returns them.
+
 ## 2. Configure `.env`
 
 Copy the template and fill it in. `.env` is gitignored; `.env.example` is
@@ -122,6 +140,7 @@ make test    # go test ./...  — no server needed
 | --- | --- |
 | `TestIntegrationProductInfo` | Unauthenticated connectivity / metadata |
 | `TestIntegrationDatabases` | Database listing (Basic-auth path) |
+| `TestIntegrationScripts` | Script catalog listing; recursive folder hierarchy (needs the script fixture) |
 | `TestIntegrationCRUD` | Create → find → update (patch) → delete; number coercion |
 | `TestIntegrationDateTime` | Date/timestamp wrappers and read-back parsing |
 | `TestIntegrationDateTimeLocation` | `WithLocation` zone applied on read (needs `FM_LOCATION`) |
@@ -172,3 +191,6 @@ In rough order of how often they bite:
 5. **Host configured with a non-US date format** — surfaced by
    `TestIntegrationDateTime` (by design; it confirms the wrappers' format against
    the live host).
+6. **No script fixture (or an empty folder)** — `TestIntegrationScripts` fails
+   asking for a top-level script and a folder that *contains* a script; an empty
+   folder doesn't exercise the nested decode and won't satisfy it.
