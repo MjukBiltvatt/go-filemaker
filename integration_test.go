@@ -119,6 +119,18 @@ const (
 	portalName       = "ChildTable"
 	fieldChildText   = portalName + "::ChildText"
 	keyChildRecordID = "recordId"
+
+	// scriptEcho is a fixture script the database must define (see
+	// docs/integration-testing.md): Exit Script [Get(ScriptParameter)], so it
+	// returns its parameter unchanged. TestIntegrationScriptResults uses it to
+	// confirm a script ran and its result/error round-trip.
+	scriptEcho = "EchoParam"
+
+	// scriptFail is a fixture script that runs and deliberately ends in a
+	// non-zero error state (see docs/integration-testing.md). It checks the
+	// "ran and errored" outcome — distinct from a missing script (a request
+	// error) and from no script at all.
+	scriptFail = "TriggerError"
 )
 
 // itClient is the single shared session for the whole integration suite, built
@@ -467,7 +479,7 @@ func TestIntegrationCRUD(t *testing.T) {
 		t.Fatal("Create returned empty RecordID")
 	}
 	t.Cleanup(func() {
-		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})
@@ -542,7 +554,7 @@ func TestIntegrationSpecialLayoutNames(t *testing.T) {
 		t.Fatalf("Create on %q: %v", layout, err)
 	}
 	t.Cleanup(func() {
-		if err := itClient.DeleteByID(context.Background(), layout, created.RecordID); err != nil {
+		if _, err := itClient.DeleteByID(context.Background(), layout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%q, %s): %v", layout, created.RecordID, err)
 		}
 	})
@@ -591,7 +603,7 @@ func TestIntegrationDateTime(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})
@@ -654,7 +666,7 @@ func TestIntegrationDateTimeLocation(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := c.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+		if _, err := c.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})
@@ -699,7 +711,7 @@ func TestIntegrationRequiredField(t *testing.T) {
 	if err == nil {
 		// It was stored, which means the layout is misconfigured. Remove the
 		// stray record so the run stays clean, then fail with a pointed hint.
-		_ = itClient.DeleteByID(context.Background(), itLayout, created.RecordID)
+		_, _ = itClient.DeleteByID(context.Background(), itLayout, created.RecordID)
 		t.Fatalf("Create with %s omitted succeeded; expected validation failure "+
 			"(is %s set Not Empty, \"Validate always\", and not user-overridable?)", fieldRequired, fieldRequired)
 	}
@@ -750,7 +762,7 @@ func TestIntegrationContainer(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})
@@ -834,7 +846,7 @@ func TestIntegrationPortal(t *testing.T) {
 	t.Cleanup(func() {
 		// The relationship deletes related records, so removing the parent
 		// cascades to its child rows — no separate child cleanup needed.
-		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})
@@ -906,7 +918,7 @@ func TestIntegrationUpdateWithModID(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})
@@ -960,7 +972,7 @@ func TestIntegrationUpdateIfUnchanged(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})
@@ -992,6 +1004,86 @@ func TestIntegrationUpdateIfUnchanged(t *testing.T) {
 	if got := findParent(t, ctx, marker).Int(fieldNumber); got != 2 {
 		t.Errorf("%s = %d after rejected update, want 2 (write should not apply)", fieldNumber, got)
 	}
+}
+
+// TestIntegrationScriptResults exercises the WithScript option and the
+// ScriptOutcomes it returns against a real host — coverage the mocks cannot
+// provide, since only the host actually runs the script. It relies on the
+// scriptEcho fixture (Exit Script [Get(ScriptParameter)]; see
+// docs/integration-testing.md): the after-action script's result must echo the
+// parameter; a script that runs but ends in an error must leave the request
+// successful while ScriptOutcome reports Ran() && !OK() (the scriptFail fixture);
+// and naming a script that does not exist must surface as an *APIError with
+// FileMaker code 104 ("script is missing").
+func TestIntegrationScriptResults(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	marker := "go-filemaker-it-script-" + time.Now().UTC().Format("20060102T150405.000000000")
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldText:     marker,
+		fieldNumber:   1,
+		fieldRequired: "present",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	t.Run("Echo", func(t *testing.T) {
+		const param = "echo-me-123"
+		res, err := itClient.Update(ctx, findParent(t, ctx, marker), FieldData{fieldNumber: 2}, WithScript(scriptEcho, param))
+		if err != nil {
+			t.Fatalf("Update WithScript(%s): %v", scriptEcho, err)
+		}
+		if !res.Scripts.Script.OK() {
+			t.Errorf("script error = %q, want \"0\" (is %s defined and accessible? see docs/integration-testing.md)", res.Scripts.Script.Error, scriptEcho)
+		}
+		if res.Scripts.Script.Result != param {
+			t.Errorf("script result = %q, want %q (does %s do Exit Script [Get(ScriptParameter)]?)", res.Scripts.Script.Result, param, scriptEcho)
+		}
+	})
+
+	t.Run("MissingScript", func(t *testing.T) {
+		// Naming a script that does not exist is a request-level failure: the host
+		// reports FileMaker error 104 ("script is missing") as the primary message,
+		// which the client surfaces as an *APIError (not a per-phase scriptError on
+		// an otherwise successful response). No fixture needed, so this runs even if
+		// scriptEcho is absent.
+		_, err := itClient.Update(ctx, findParent(t, ctx, marker), FieldData{fieldNumber: 3}, WithScript("go-filemaker-no-such-script", ""))
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("Update with a missing script: error = %v (%T), want *APIError", err, err)
+		}
+		const codeScriptMissing = 104
+		if apiErr.Code() != codeScriptMissing {
+			t.Errorf("error code = %d (%v), want %d (script is missing)", apiErr.Code(), apiErr, codeScriptMissing)
+		}
+	})
+
+	t.Run("RanWithError", func(t *testing.T) {
+		// A script that exists, runs, and ends in an error is the case where a
+		// successful response still carries a non-zero per-phase error: the
+		// after-action script runs once the edit has committed, so the request
+		// succeeds (err == nil) while ScriptOutcome reports Ran() && !OK(). This is
+		// the distinction Ran/OK exist for. Relies on the scriptFail fixture; see
+		// docs/integration-testing.md. The specific error code is not asserted —
+		// only that the script ran and did not succeed.
+		res, err := itClient.Update(ctx, findParent(t, ctx, marker), FieldData{fieldNumber: 4}, WithScript(scriptFail, ""))
+		if err != nil {
+			t.Fatalf("Update WithScript(%s) should still succeed (after-script runs post-commit): %v", scriptFail, err)
+		}
+		if !res.Scripts.Script.Ran() {
+			t.Errorf("script Ran() = false, want true (is %s defined and accessible? see docs/integration-testing.md)", scriptFail)
+		}
+		if res.Scripts.Script.OK() {
+			t.Errorf("script OK() = true, want false; Error = %q (does %s end in an error?)", res.Scripts.Script.Error, scriptFail)
+		}
+	})
 }
 
 // recNumbers returns the NumberField of each record, in order.
@@ -1027,7 +1119,7 @@ func TestIntegrationFindQuery(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		for _, id := range ids {
-			if err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
+			if _, err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
 				t.Errorf("cleanup DeleteByID(%s): %v", id, err)
 			}
 		}
@@ -1231,7 +1323,7 @@ func TestIntegrationTimeOfDay(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})
@@ -1282,7 +1374,7 @@ func TestIntegrationWithDateFormatISO(t *testing.T) {
 		t.Fatalf("Create with WithDateFormat(ISO): %v", err)
 	}
 	t.Cleanup(func() {
-		if err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})

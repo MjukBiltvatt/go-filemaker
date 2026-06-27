@@ -36,11 +36,49 @@ type DataInfo struct {
 type CreateResponse struct {
 	RecordID string
 	ModID    string
+	Scripts  ScriptOutcomes
 }
 
 // UpdateResponse is the host's acknowledgement of an Update.
 type UpdateResponse struct {
-	ModID string
+	ModID   string
+	Scripts ScriptOutcomes
+}
+
+// DeleteResponse is the host's acknowledgement of a Delete. The delete returns
+// no record data; it carries the script outcomes when scripts were run.
+type DeleteResponse struct {
+	Scripts ScriptOutcomes
+}
+
+// ScriptOutcome is what one script phase produced: the value the script returned
+// via Exit Script, and a FileMaker error code ("0" on success). Both are empty
+// when no script ran for that phase.
+//
+// Use Ran/OK rather than inspecting Result: the host returns an Error code
+// whenever a script runs and omits it otherwise, so Error is the reliable signal
+// of whether a script ran. An empty Result is ambiguous on its own (a script may
+// return an empty value).
+type ScriptOutcome struct {
+	Result string
+	Error  string
+}
+
+// Ran reports whether a script ran for this phase. The host returns an Error
+// code ("0" on success) whenever a script runs and omits it otherwise, so an
+// empty Error means no script ran.
+func (o ScriptOutcome) Ran() bool { return o.Error != "" }
+
+// OK reports whether a script ran and completed without error.
+func (o ScriptOutcome) OK() bool { return o.Error == "0" }
+
+// ScriptOutcomes groups the outcomes of the scripts run with a request, one per
+// phase, matching the WithScript / WithPrerequestScript / WithPresortScript
+// options.
+type ScriptOutcomes struct {
+	Script     ScriptOutcome // WithScript — runs after the action
+	Prerequest ScriptOutcome // WithPrerequestScript
+	Presort    ScriptOutcome // WithPresortScript
 }
 
 // Find runs the query against the layout. A query that matches no records
@@ -79,7 +117,8 @@ func (c *Client) Find(ctx context.Context, layout string, query Query) (FindResp
 
 // Create inserts a new record with the given field data and returns the host's
 // acknowledgement (record ID and mod ID). Pass WithPortalData to add related
-// records, or WithScript and friends to run scripts, in the same request.
+// records, or WithScript and friends to run scripts, in the same request; script
+// outcomes are returned in the CreateResponse.
 func (c *Client) Create(ctx context.Context, layout string, fields FieldData, opts ...CreateOption) (CreateResponse, error) {
 	if layout == "" {
 		return CreateResponse{}, errors.New("filemaker: no layout specified")
@@ -99,7 +138,7 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 	if err := c.do(ctx, http.MethodPost, c.recordsURL(layout), body, &rb); err != nil {
 		return CreateResponse{}, err
 	}
-	return CreateResponse{RecordID: rb.Response.RecordID, ModID: rb.Response.ModID}, nil
+	return CreateResponse{RecordID: rb.Response.RecordID, ModID: rb.Response.ModID, Scripts: rb.scriptOutcomes()}, nil
 }
 
 // Update writes the given field data to the record, identified by rec, and
@@ -107,8 +146,9 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 // and the rest of the record is left unchanged on the host. rec is used solely
 // to address the record (its Layout and ID); its own field values are not sent.
 // Writes are unconditional by default; pass IfUnchanged for optimistic
-// concurrency against the record's ModID, or WithPortalData to edit related
-// records in the same request.
+// concurrency against the record's ModID, WithPortalData to edit related records,
+// or WithScript and friends to run scripts, in the same request; script outcomes
+// are returned in the UpdateResponse.
 func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
 	if rec.id == "" {
 		return UpdateResponse{}, errors.New("filemaker: record has no ID; create or find it first")
@@ -133,7 +173,8 @@ func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts 
 // layout and id, and returns the new mod ID. See Update for the patch semantics.
 // For optimistic concurrency pass WithModID (IfUnchanged needs a record); pass
 // WithPortalData to edit related records, or WithScript and friends to run
-// scripts, in the same request.
+// scripts, in the same request; script outcomes are returned in the
+// UpdateResponse.
 func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
 	switch {
 	case layout == "":
@@ -159,32 +200,34 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 		}
 		return UpdateResponse{}, err
 	}
-	return UpdateResponse{ModID: rb.Response.ModID}, nil
+	return UpdateResponse{ModID: rb.Response.ModID, Scripts: rb.scriptOutcomes()}, nil
 }
 
 // Delete removes the record identified by rec. Pass WithScript and friends to
-// run scripts with the request.
-func (c *Client) Delete(ctx context.Context, rec Record, opts ...DeleteOption) error {
+// run scripts with the request; their outcomes are returned in the
+// DeleteResponse.
+func (c *Client) Delete(ctx context.Context, rec Record, opts ...DeleteOption) (DeleteResponse, error) {
 	if rec.id == "" {
-		return errors.New("filemaker: record has no ID; create or find it first")
+		return DeleteResponse{}, errors.New("filemaker: record has no ID; create or find it first")
 	}
 	return c.DeleteByID(ctx, rec.layout, rec.id, opts...)
 }
 
 // DeleteByID removes a record addressed by layout and id. Pass WithScript and
 // friends to run scripts with the request; unlike the other record writes the
-// delete endpoint has no body, so those ride in the URL query string.
-func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...DeleteOption) error {
+// delete endpoint has no body, so those ride in the URL query string, and their
+// outcomes are returned in the DeleteResponse.
+func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...DeleteOption) (DeleteResponse, error) {
 	switch {
 	case layout == "":
-		return errors.New("filemaker: no layout specified")
+		return DeleteResponse{}, errors.New("filemaker: no layout specified")
 	case id == "":
-		return errors.New("filemaker: no record id specified")
+		return DeleteResponse{}, errors.New("filemaker: no record id specified")
 	}
 
 	cfg, err := resolveDeleteConfig(opts)
 	if err != nil {
-		return err
+		return DeleteResponse{}, err
 	}
 
 	u := c.recordURL(layout, id)
@@ -193,7 +236,10 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...Dele
 	}
 
 	var rb responseBody
-	return c.do(ctx, http.MethodDelete, u, nil, &rb)
+	if err := c.do(ctx, http.MethodDelete, u, nil, &rb); err != nil {
+		return DeleteResponse{}, err
+	}
+	return DeleteResponse{Scripts: rb.scriptOutcomes()}, nil
 }
 
 // UploadToContainer uploads data to a container field of the record identified

@@ -83,10 +83,33 @@ and create:
   script is what exercises the recursive `folderScriptNames` decode; an empty
   folder would not.
 
-The names and bodies are irrelevant (the scripts are never run); only the shape
-matters. A minimal setup is one top-level script plus one folder with one script
-inside it. Grant the test account access to the scripts (or use **Full Access**)
-so the Data API returns them.
+For the catalog test above the names and bodies are irrelevant (those scripts are
+never run); only the shape matters. A minimal setup is one top-level script plus
+one folder with one script inside it. Grant the test account access to the scripts
+(or use **Full Access**) so the Data API returns them.
+
+`TestIntegrationScriptResults` additionally runs scripts and checks their
+results, so it needs **two specifically named, runnable fixture scripts**:
+
+- **`EchoParam`** (top level), a single step: **`Exit Script [ Get ( ScriptParameter ) ]`**.
+  It returns its parameter unchanged, so the test can confirm the script ran and
+  the result/error round-trip. (This can double as the required top-level script
+  above.)
+- **`TriggerError`** (top level), a script that runs and deliberately ends in a
+  non-zero error state — for example:
+
+  ```
+  Set Error Capture [ On ]
+  Perform Find [ ]      # with a stored request that matches no records → error 401
+  ```
+
+  Any deterministic error works; the test only checks that the script ran and did
+  *not* succeed (`Ran() && !OK()`), not a specific code. It confirms that a script
+  which errors leaves the request itself successful while reporting the error in
+  the response.
+
+The missing-script half of that test runs a name that does not exist and needs no
+fixture. Grant the test account access to both fixtures (or use **Full Access**).
 
 ### Layouts
 

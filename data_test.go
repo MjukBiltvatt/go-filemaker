@@ -259,7 +259,7 @@ func TestDeleteWithScript(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	if err := c.DeleteByID(context.Background(), "People", "9",
+	if _, err := c.DeleteByID(context.Background(), "People", "9",
 		WithScript("AfterDelete", "p1"),
 		WithPresortScript("Sorter", "p2"),
 	); err != nil {
@@ -275,6 +275,77 @@ func TestDeleteWithScript(t *testing.T) {
 	}
 	if q.Get("script.presort") != "Sorter" || q.Get("script.presort.param") != "p2" {
 		t.Errorf("query = %v, want script.presort=Sorter script.presort.param=p2", q)
+	}
+}
+
+func TestScriptResultsDecoded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{
+			"recordId":"7","modId":"0",
+			"scriptResult":"after-val","scriptError":"0",
+			"scriptResult.prerequest":"pre-val","scriptError.prerequest":"3",
+			"scriptResult.presort":"sort-val","scriptError.presort":"0"
+		},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	resp, err := c.Create(context.Background(), "People", FieldData{"Name": "Mark"}, WithScript("S", "p"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	want := ScriptOutcomes{
+		Script:     ScriptOutcome{Result: "after-val", Error: "0"},
+		Prerequest: ScriptOutcome{Result: "pre-val", Error: "3"},
+		Presort:    ScriptOutcome{Result: "sort-val", Error: "0"},
+	}
+	if resp.Scripts != want {
+		t.Errorf("Scripts = %+v, want %+v", resp.Scripts, want)
+	}
+	if !resp.Scripts.Script.Ran() || !resp.Scripts.Script.OK() {
+		t.Errorf("after-script: Ran=%v OK=%v, want true/true", resp.Scripts.Script.Ran(), resp.Scripts.Script.OK())
+	}
+	// prerequest ran but errored (code 3): Ran true, OK false.
+	if !resp.Scripts.Prerequest.Ran() || resp.Scripts.Prerequest.OK() {
+		t.Errorf("prerequest: Ran=%v OK=%v, want true/false", resp.Scripts.Prerequest.Ran(), resp.Scripts.Prerequest.OK())
+	}
+}
+
+// A response with no script keys (no script was requested) must report that no
+// script ran — distinguishable from a script that ran and returned an empty
+// value, which still carries Error "0".
+func TestScriptResultsAbsentWhenNoScript(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{"recordId":"7","modId":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	resp, err := c.Create(context.Background(), "People", FieldData{"Name": "Mark"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if resp.Scripts != (ScriptOutcomes{}) {
+		t.Errorf("Scripts = %+v, want zero value when no script ran", resp.Scripts)
+	}
+	if resp.Scripts.Script.Ran() {
+		t.Error("Script.Ran() = true, want false when no script ran")
+	}
+}
+
+func TestDeleteScriptResultsDecoded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{"scriptResult":"done","scriptError":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	resp, err := c.DeleteByID(context.Background(), "People", "9", WithScript("S", "p"))
+	if err != nil {
+		t.Fatalf("DeleteByID: %v", err)
+	}
+	if resp.Scripts.Script.Result != "done" || resp.Scripts.Script.Error != "0" {
+		t.Errorf("Scripts.Script = %+v, want {done 0}", resp.Scripts.Script)
 	}
 }
 
@@ -395,7 +466,7 @@ func TestRecordWriteNoID(t *testing.T) {
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "x"}); err == nil {
 		t.Error("Update: expected error for record without ID")
 	}
-	if err := c.Delete(context.Background(), rec); err == nil {
+	if _, err := c.Delete(context.Background(), rec); err == nil {
 		t.Error("Delete: expected error for record without ID")
 	}
 	if err := c.UploadToContainer(context.Background(), rec, "Photo", "f.png", strings.NewReader("x")); err == nil {
@@ -682,7 +753,7 @@ func TestDeleteByID(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	if err := c.DeleteByID(context.Background(), "People", "9"); err != nil {
+	if _, err := c.DeleteByID(context.Background(), "People", "9"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
