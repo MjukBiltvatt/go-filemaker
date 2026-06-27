@@ -457,22 +457,30 @@ func applyDateFormatPortals(portals PortalData, format DateFormat) PortalData {
 	return out
 }
 
+// layoutURL is the endpoint root for a single layout, with the layout name
+// percent-escaped into the path. Every layout-scoped endpoint (records, find,
+// containers, and the layout-metadata call in metadata.go) builds on it, so the
+// escaping lives in exactly one place.
+func (c *Client) layoutURL(layout string) string {
+	return c.baseURL() + "/layouts/" + url.PathEscape(layout)
+}
+
 // recordsURL is the collection endpoint for a layout (used to create records).
 func (c *Client) recordsURL(layout string) string {
-	return fmt.Sprintf("%s/layouts/%s/records", c.baseURL(), url.PathEscape(layout))
+	return c.layoutURL(layout) + "/records"
 }
 
 // recordURL is the endpoint for a single record by ID.
 func (c *Client) recordURL(layout, id string) string {
-	return fmt.Sprintf("%s/layouts/%s/records/%s", c.baseURL(), url.PathEscape(layout), url.PathEscape(id))
+	return c.recordsURL(layout) + "/" + url.PathEscape(id)
 }
 
 // findURL is the find endpoint for a layout.
 func (c *Client) findURL(layout string) string {
-	return fmt.Sprintf("%s/layouts/%s/_find", c.baseURL(), url.PathEscape(layout))
+	return c.layoutURL(layout) + "/_find"
 }
 
 // containerURL is the upload endpoint for a record's container field.
 func (c *Client) containerURL(layout, id, field string) string {
-	return fmt.Sprintf("%s/layouts/%s/records/%s/containers/%s", c.baseURL(), url.PathEscape(layout), url.PathEscape(id), url.PathEscape(field))
+	return c.recordURL(layout, id) + "/containers/" + url.PathEscape(field)
 }

@@ -779,6 +779,7 @@ func TestURLBuildersEscapeSegments(t *testing.T) {
 		want string
 	}{
 		{"baseURL", c.baseURL(), base},
+		{"layoutURL", c.layoutURL("Sales #1"), base + "/layouts/Sales%20%231"},
 		{"findURL", c.findURL("Sales #1"), base + "/layouts/Sales%20%231/_find"},
 		{"recordsURL", c.recordsURL("Sales #1"), base + "/layouts/Sales%20%231/records"},
 		{"recordURL", c.recordURL("A/B", "7"), base + "/layouts/A%2FB/records/7"},

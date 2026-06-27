@@ -231,9 +231,9 @@ func (c *Client) LayoutMetadata(ctx context.Context, layout string, opts ...Layo
 		}
 	}
 
-	// Escape the layout name into the path so names with spaces or other special
-	// characters (e.g. "Package Management") address correctly.
-	u := c.baseURL() + "/layouts/" + url.PathEscape(layout)
+	// layoutURL escapes the layout name into the path, so names with spaces or
+	// other special characters (e.g. "Package Management") address correctly.
+	u := c.layoutURL(layout)
 	if cfg.recordID != "" {
 		u += "?" + url.Values{"recordId": {cfg.recordID}}.Encode()
 	}
