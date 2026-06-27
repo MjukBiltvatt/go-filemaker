@@ -19,7 +19,7 @@ func TestQueryMarshalJSON(t *testing.T) {
 		{
 			name: "single request with criteria",
 			query: Query{
-				Requests: []Request{
+				Requests: []FindRequest{
 					{Criteria: map[string]string{
 						"Firstname": "Mark",
 						"Age":       "*",
@@ -31,7 +31,7 @@ func TestQueryMarshalJSON(t *testing.T) {
 		{
 			name: "omit request",
 			query: Query{
-				Requests: []Request{
+				Requests: []FindRequest{
 					{Criteria: map[string]string{"Lastname": "==Johnson"}, Omit: true},
 				},
 			},
@@ -40,7 +40,7 @@ func TestQueryMarshalJSON(t *testing.T) {
 		{
 			name: "multiple requests",
 			query: Query{
-				Requests: []Request{
+				Requests: []FindRequest{
 					{Criteria: map[string]string{"Firstname": "Mark"}},
 					{Criteria: map[string]string{"Lastname": "Johnson"}, Omit: true},
 				},
@@ -50,7 +50,7 @@ func TestQueryMarshalJSON(t *testing.T) {
 		{
 			name: "limit, offset and sort",
 			query: Query{
-				Requests: []Request{
+				Requests: []FindRequest{
 					{Criteria: map[string]string{"Firstname": "Mark"}},
 				},
 				Sort: []SortRule{

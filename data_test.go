@@ -33,7 +33,7 @@ func TestFind(t *testing.T) {
 
 	c := testClient(srv)
 	resp, err := c.Find(context.Background(), "People", Query{
-		Requests: []Request{{Criteria: map[string]string{"Name": "Mark"}}},
+		Requests: []FindRequest{{Criteria: map[string]string{"Name": "Mark"}}},
 	})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
