@@ -515,6 +515,49 @@ func TestIntegrationCRUD(t *testing.T) {
 	}
 }
 
+// TestIntegrationSpecialLayoutNames verifies that a layout name containing
+// URL-reserved characters round-trips through the request path. It runs a
+// create → find → delete cycle (exercising recordsURL, findURL, and recordURL)
+// against "Sales #1", a duplicate of ParentTable that must exist in the test
+// database (see docs/integration-testing.md). The space and '#' escape to %20 and
+// %23; without escaping the '#' truncates the path into a dropped fragment and
+// the host rejects the request (error 1704).
+//
+// A literal '/' in a layout name is a known, unfixable exception: FileMaker's web
+// server returns 404 for the %2F-encoded slash before the request reaches the
+// Data API, so such layouts are unreachable no matter how the client encodes the
+// path. It is deliberately not exercised here.
+func TestIntegrationSpecialLayoutNames(t *testing.T) {
+	requireServer(t)
+	ctx := context.Background()
+
+	const layout = "Sales #1"
+	marker := "go-filemaker-it-" + time.Now().UTC().Format("20060102T150405.000000000")
+
+	created, err := itClient.Create(ctx, layout, FieldData{
+		fieldText:     marker,
+		fieldRequired: "present",
+	})
+	if err != nil {
+		t.Fatalf("Create on %q: %v", layout, err)
+	}
+	t.Cleanup(func() {
+		if err := itClient.DeleteByID(context.Background(), layout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%q, %s): %v", layout, created.RecordID, err)
+		}
+	})
+
+	found, err := itClient.Find(ctx, layout, Query{
+		Requests: []Request{{Criteria: map[string]string{fieldText: "==" + marker}}},
+	})
+	if err != nil {
+		t.Fatalf("Find on %q: %v", layout, err)
+	}
+	if len(found.Records) != 1 {
+		t.Fatalf("Find on %q returned %d records, want 1", layout, len(found.Records))
+	}
+}
+
 // wallClock formats a time as its zone-free wall-clock representation, so two
 // times can be compared on calendar/clock components alone — independent of the
 // host's and client's time zones, which a date/timestamp round-trip should not

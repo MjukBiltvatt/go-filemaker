@@ -763,3 +763,30 @@ func TestCreateWithoutDateFormatOmitsParam(t *testing.T) {
 		t.Errorf("body = %q, want US DOB when unset", body)
 	}
 }
+
+// TestURLBuildersEscapeSegments guards that the request-path builders percent-
+// escape the database, layout, id, and field segments, so names with
+// URL-reserved characters (spaces, '#', '/') address the right resource instead
+// of corrupting the path. It is the hermetic counterpart to
+// TestIntegrationSpecialLayoutNames.
+func TestURLBuildersEscapeSegments(t *testing.T) {
+	c := &Client{host: "https://h", database: "My DB"}
+	const base = "https://h/fmi/data/v1/databases/My%20DB"
+
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"baseURL", c.baseURL(), base},
+		{"findURL", c.findURL("Sales #1"), base + "/layouts/Sales%20%231/_find"},
+		{"recordsURL", c.recordsURL("Sales #1"), base + "/layouts/Sales%20%231/records"},
+		{"recordURL", c.recordURL("A/B", "7"), base + "/layouts/A%2FB/records/7"},
+		{"containerURL", c.containerURL("Lay #2", "7", "My Field"), base + "/layouts/Lay%20%232/records/7/containers/My%20Field"},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}

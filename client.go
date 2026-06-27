@@ -420,7 +420,7 @@ func (c *Client) apiURL() string {
 
 // baseURL builds the database-scoped root of the Data API URL.
 func (c *Client) baseURL() string {
-	return fmt.Sprintf("%s/databases/%s", c.apiURL(), c.database)
+	return fmt.Sprintf("%s/databases/%s", c.apiURL(), url.PathEscape(c.database))
 }
 
 // normalizeHost defaults the scheme to https when none is present, then

@@ -98,6 +98,22 @@ contains a layout** — in **Manage → Layouts**, create a folder and put any l
 inside it (a duplicate of `ParentTable` is fine; it is never used). As with
 scripts, an empty folder will not satisfy the test.
 
+### Special-character layout
+
+`TestIntegrationSpecialLayoutNames` checks that the client percent-escapes
+URL-reserved characters in a layout name into the request path. It needs a layout
+named exactly **`Sales #1`** — easiest is to **duplicate the `ParentTable` layout
+and rename the copy** so it carries the same fields. The test does a small
+create → find → delete cycle on it (the `#` and space must escape to `%23`/`%20`,
+or the path is corrupted and the host rejects the call).
+
+> **Note — slashes are unsupported.** A layout name containing a literal `/`
+> cannot be reached through the Data API: FileMaker's web server returns 404 for
+> the `%2F`-encoded slash before the request reaches the Data API, regardless of
+> how the client encodes the path. There is no client-side workaround, so the
+> test deliberately does not cover it. Avoid `/` in layout names you intend to
+> reach via the API.
+
 ## 2. Configure `.env`
 
 Copy the template and fill it in. `.env` is gitignored; `.env.example` is
@@ -154,6 +170,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationScripts` | Script catalog listing; recursive folder hierarchy (needs the script fixture) |
 | `TestIntegrationLayouts` | Layout catalog listing; recursive folder hierarchy; `FM_LAYOUT` present (needs the layout folder fixture) |
 | `TestIntegrationLayoutMetadata` | Single-layout metadata for `FM_LAYOUT`: doubles as an environment check — every documented field present with the right result type, only `RequiredField` Not-Empty, `ChildTable` portal exposes `ChildText` (no extra fixture) |
+| `TestIntegrationSpecialLayoutNames` | URL-reserved characters in a layout name are escaped into the path (needs the `Sales #1` layout) |
 | `TestIntegrationCRUD` | Create → find → update (patch) → delete; number coercion |
 | `TestIntegrationDateTime` | Date/timestamp wrappers and read-back parsing |
 | `TestIntegrationDateTimeLocation` | `WithLocation` zone applied on read (needs `FM_LOCATION`) |

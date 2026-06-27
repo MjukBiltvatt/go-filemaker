@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -458,20 +459,20 @@ func applyDateFormatPortals(portals PortalData, format DateFormat) PortalData {
 
 // recordsURL is the collection endpoint for a layout (used to create records).
 func (c *Client) recordsURL(layout string) string {
-	return fmt.Sprintf("%s/layouts/%s/records", c.baseURL(), layout)
+	return fmt.Sprintf("%s/layouts/%s/records", c.baseURL(), url.PathEscape(layout))
 }
 
 // recordURL is the endpoint for a single record by ID.
 func (c *Client) recordURL(layout, id string) string {
-	return fmt.Sprintf("%s/layouts/%s/records/%s", c.baseURL(), layout, id)
+	return fmt.Sprintf("%s/layouts/%s/records/%s", c.baseURL(), url.PathEscape(layout), url.PathEscape(id))
 }
 
 // findURL is the find endpoint for a layout.
 func (c *Client) findURL(layout string) string {
-	return fmt.Sprintf("%s/layouts/%s/_find", c.baseURL(), layout)
+	return fmt.Sprintf("%s/layouts/%s/_find", c.baseURL(), url.PathEscape(layout))
 }
 
 // containerURL is the upload endpoint for a record's container field.
 func (c *Client) containerURL(layout, id, field string) string {
-	return fmt.Sprintf("%s/layouts/%s/records/%s/containers/%s", c.baseURL(), layout, id, field)
+	return fmt.Sprintf("%s/layouts/%s/records/%s/containers/%s", c.baseURL(), url.PathEscape(layout), url.PathEscape(id), url.PathEscape(field))
 }
