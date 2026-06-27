@@ -63,8 +63,9 @@ must be enabled on the **`ChildTable`** side of the relationship dialog:
 
 A layout named **`ParentTable`**, based on the `ParentTable` occurrence:
 
-- Place the seven `ParentTable` fields on it (the Data API only sees fields that
-  are on the layout).
+- Place the eight non-`Id` `ParentTable` fields on it (the Data API only sees
+  fields that are on the layout): `TextField`, `NumberField`, `TextSecondary`,
+  `DateField`, `TimestampField`, `TimeField`, `ContainerField`, `RequiredField`.
 - Add a **portal** showing `ChildTable`, with `ChildText` in it. Leave the
   portal object name unset (or set it to `ChildTable`) so the Data API keys the
   returned portal data by the table-occurrence name.
@@ -152,6 +153,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationDatabases` | Database listing (Basic-auth path) |
 | `TestIntegrationScripts` | Script catalog listing; recursive folder hierarchy (needs the script fixture) |
 | `TestIntegrationLayouts` | Layout catalog listing; recursive folder hierarchy; `FM_LAYOUT` present (needs the layout folder fixture) |
+| `TestIntegrationLayoutMetadata` | Single-layout metadata for `FM_LAYOUT`: doubles as an environment check — every documented field present with the right result type, only `RequiredField` Not-Empty, `ChildTable` portal exposes `ChildText` (no extra fixture) |
 | `TestIntegrationCRUD` | Create → find → update (patch) → delete; number coercion |
 | `TestIntegrationDateTime` | Date/timestamp wrappers and read-back parsing |
 | `TestIntegrationDateTimeLocation` | `WithLocation` zone applied on read (needs `FM_LOCATION`) |

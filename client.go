@@ -254,6 +254,11 @@ type responseBody struct {
 		Databases   []Database   `json:"databases"`
 		Scripts     []Script     `json:"scripts"`
 		Layouts     []Layout     `json:"layouts"`
+
+		// Layout metadata (single-layout endpoint).
+		FieldMetaData  []FieldMetadata            `json:"fieldMetaData"`
+		PortalMetaData map[string][]FieldMetadata `json:"portalMetaData"`
+		ValueLists     []ValueList                `json:"valueLists"`
 	} `json:"response"`
 	Messages []struct {
 		Code    string `json:"code"`

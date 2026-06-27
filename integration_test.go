@@ -327,6 +327,106 @@ func TestIntegrationLayouts(t *testing.T) {
 	}
 }
 
+// TestIntegrationLayoutMetadata fetches the metadata for FM_LAYOUT and verifies
+// it against the schema documented in docs/integration-testing.md. Because the
+// endpoint reports the whole layout in one call, this doubles as a check that
+// the test environment is set up correctly: every documented field must be
+// present with the expected result type, only RequiredField may be Not-Empty,
+// and the ChildTable portal must expose ChildText. Each failure points at a
+// specific misconfiguration (and the doc) rather than a library bug.
+//
+// It verifies the *declared* schema, not validation enforcement: the metadata
+// notEmpty flag shows a Not-Empty validation exists but cannot reveal whether it
+// is set to "Validate always", so TestIntegrationRequiredField remains the real
+// check that the host rejects an empty write. No extra fixture is needed — the
+// existing test layout supplies everything.
+func TestIntegrationLayoutMetadata(t *testing.T) {
+	requireLayout(t)
+
+	meta, err := itClient.LayoutMetadata(context.Background(), itLayout)
+	if err != nil {
+		t.Fatalf("LayoutMetadata: %v", err)
+	}
+	t.Logf("layout metadata: %+v", meta)
+
+	fields := make(map[string]FieldMetadata, len(meta.FieldMetadata))
+	for _, f := range meta.FieldMetadata {
+		fields[f.Name] = f
+	}
+
+	// Every documented ParentTable field must be on the layout with the result
+	// type its row in the doc's schema table implies. A missing field or wrong
+	// type is an environment problem, not a library bug — hence the doc pointer.
+	// (Result strings, e.g. "timeStamp" casing, are the host's; adjust here if a
+	// future server version reports them differently.)
+	wantResult := map[string]string{
+		fieldText:          "text",
+		fieldNumber:        "number",
+		fieldTextSecondary: "text",
+		fieldDate:          "date",
+		fieldTimestamp:     "timeStamp",
+		fieldTime:          "time",
+		fieldContainer:     "container",
+		fieldRequired:      "text",
+	}
+	for name, result := range wantResult {
+		f, ok := fields[name]
+		if !ok {
+			t.Errorf("field %q not on layout %q — place it on the layout (see docs/integration-testing.md)", name, itLayout)
+			continue
+		}
+		if f.Result != result {
+			t.Errorf("field %q result = %q, want %q — check the field's type (see docs/integration-testing.md)", name, f.Result, result)
+		}
+	}
+
+	// RequiredField is the only field defined Not Empty; the write tests rely on
+	// every other field being freely omittable (e.g. TextSecondary is left out of
+	// an update). An unexpected Not-Empty field would break those tests in a more
+	// confusing place, so assert the validation is declared on RequiredField and
+	// nowhere else.
+	if rf, ok := fields[fieldRequired]; ok && !rf.NotEmpty {
+		t.Errorf("%s NotEmpty = false, want true — set it Not Empty, \"Validate always\" (see docs/integration-testing.md)", fieldRequired)
+	}
+	for name, f := range fields {
+		if name != fieldRequired && f.NotEmpty {
+			t.Errorf("field %q is Not-Empty but only %s should be — the write tests omit other fields (see docs/integration-testing.md)", name, fieldRequired)
+		}
+	}
+
+	// Note: the host reports TimeOfDay=false for a plain Time field, so that flag
+	// is not a reliable "this is a time-of-day field" signal and is not asserted —
+	// TimeField's behavior is covered by TestIntegrationTimeOfDay instead.
+
+	// The ChildTable portal is keyed by its table-occurrence name and exposes
+	// ChildText (fully qualified, as on the layout) as a text field.
+	portal, ok := meta.PortalMetadata[portalName]
+	if !ok {
+		t.Fatalf("portal %q not in portalMetaData (keys: %v) — add a ChildTable portal to the layout (see docs/integration-testing.md)", portalName, portalKeys(meta.PortalMetadata))
+	}
+	var childText *FieldMetadata
+	for i := range portal {
+		if portal[i].Name == fieldChildText {
+			childText = &portal[i]
+		}
+	}
+	if childText == nil {
+		t.Errorf("portal %q does not expose %q — add ChildText to the portal (see docs/integration-testing.md)", portalName, fieldChildText)
+	} else if childText.Result != "text" {
+		t.Errorf("portal field %q result = %q, want \"text\"", fieldChildText, childText.Result)
+	}
+}
+
+// portalKeys returns the portal names present in a portalMetaData map, for
+// diagnostics.
+func portalKeys(m map[string][]FieldMetadata) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // findLayout reports whether a layout with the given name exists anywhere in the
 // catalog, descending into folders.
 func findLayout(layouts []Layout, name string) bool {
