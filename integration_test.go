@@ -810,19 +810,24 @@ func portalRows(t *testing.T, rec Record) map[string]string {
 }
 
 // TestIntegrationPortal exercises the related-record lifecycle the mocks cannot:
-// add rows through WithPortalData, read them back via Record.Portals, edit an
-// existing row by its record ID, and delete one through the deleteRelated
-// field-data directive. Because Create never sends portal data, related records
-// are always added by a follow-up Update.
+// add rows at Create time through WithPortalData, read them back via
+// Record.Portals, edit an existing row by its record ID, and delete one through
+// the deleteRelated field-data directive. The edit and delete still go through
+// Update, since they address related records that already exist.
 func TestIntegrationPortal(t *testing.T) {
 	requireLayout(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-portal-" + time.Now().UTC().Format("20060102T150405.000000000")
+	// Create the parent with two related rows in the same request; a row without
+	// a record ID is created.
 	created, err := itClient.Create(ctx, itLayout, FieldData{
 		fieldText:     marker,
 		fieldRequired: "present",
-	})
+	}, WithPortalData(PortalData{portalName: {
+		{fieldChildText: "row-1"},
+		{fieldChildText: "row-2"},
+	}}))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -833,15 +838,6 @@ func TestIntegrationPortal(t *testing.T) {
 			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
 		}
 	})
-
-	// Add two related rows. A row without a record ID is created.
-	addRows := WithPortalData(PortalData{portalName: {
-		{fieldChildText: "row-1"},
-		{fieldChildText: "row-2"},
-	}})
-	if _, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, nil, addRows); err != nil {
-		t.Fatalf("Update (add rows): %v", err)
-	}
 
 	rows := portalRows(t, findParent(t, ctx, marker))
 	if len(rows) != 2 {

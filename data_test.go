@@ -177,6 +177,35 @@ func TestCreateNilFields(t *testing.T) {
 	}
 }
 
+func TestCreateWithPortalData(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"recordId":"7","modId":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	portals := PortalData{"Orders": {{"Orders::Item": "Widget"}}}
+	if _, err := c.Create(context.Background(), "People", FieldData{"Name": "Mark"}, WithPortalData(portals)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+	if !strings.Contains(body, `"fieldData":{"Name":"Mark"}`) {
+		t.Errorf("body = %q, want fieldData", body)
+	}
+	if !strings.Contains(body, `"portalData":{"Orders":`) {
+		t.Errorf("body = %q, want portalData threaded through Create", body)
+	}
+}
+
 func TestUpdateByID(t *testing.T) {
 	var mu sync.Mutex
 	var gotMethod, gotPath, gotBody string
@@ -422,7 +451,7 @@ func TestUpdateDoesNotMutateCallerOpts(t *testing.T) {
 	// If Update appends its resolved WithModID into the caller's array instead of a
 	// fresh one, it clobbers the sentinel at index 1.
 	var sentinelCalled bool
-	sentinel := UpdateOption(func(cfg *updateConfig) { sentinelCalled = true })
+	var sentinel UpdateOption = option(func(cfg *recordConfig) { sentinelCalled = true })
 	backing := []UpdateOption{IfUnchanged(), sentinel}
 	opts := backing[:1] // len 1, cap 2, shares backing with sentinel at [1]
 
@@ -431,8 +460,8 @@ func TestUpdateDoesNotMutateCallerOpts(t *testing.T) {
 	}
 
 	// backing[1] must still be the sentinel — invoke it and confirm it runs.
-	var cfg updateConfig
-	backing[1](&cfg)
+	var cfg recordConfig
+	backing[1].applyUpdate(&cfg)
 	if !sentinelCalled {
 		t.Error("Update mutated the caller's opts backing array (sentinel at index 1 was overwritten)")
 	}

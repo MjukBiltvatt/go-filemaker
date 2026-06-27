@@ -78,13 +78,19 @@ func (c *Client) Find(ctx context.Context, layout string, query Query) (FindResp
 }
 
 // Create inserts a new record with the given field data and returns the host's
-// acknowledgement (record ID and mod ID).
-func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (CreateResponse, error) {
+// acknowledgement (record ID and mod ID). Pass WithPortalData to add related
+// records in the same request.
+func (c *Client) Create(ctx context.Context, layout string, fields FieldData, opts ...CreateOption) (CreateResponse, error) {
 	if layout == "" {
 		return CreateResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	body, err := marshalRecordBody(fields, nil, "", c.dateFormat)
+	cfg, err := resolveCreateConfig(opts)
+	if err != nil {
+		return CreateResponse{}, err
+	}
+
+	body, err := marshalRecordBody(fields, cfg.portalData, "", c.dateFormat)
 	if err != nil {
 		return CreateResponse{}, err
 	}
@@ -94,99 +100,6 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData) (C
 		return CreateResponse{}, err
 	}
 	return CreateResponse{RecordID: rb.Response.RecordID, ModID: rb.Response.ModID}, nil
-}
-
-// UpdateOption configures an Update or UpdateByID.
-type UpdateOption func(*updateConfig)
-
-// updateConfig holds the optional parameters applied by UpdateOption values.
-// Optimistic concurrency is one flag plus a version: conditional means a mod-ID
-// check is wanted, and modID is the version to check against (empty means
-// "source it from the record"). Both WithModID and IfUnchanged set conditional,
-// so the options are order-independent. err carries deferred option validation
-// (an UpdateOption cannot return an error directly), surfaced when resolved.
-type updateConfig struct {
-	conditional bool
-	modID       string
-	portalData  PortalData
-	err         error
-}
-
-// WithModID makes the update conditional (optimistic concurrency) against a
-// specific mod ID: the host rejects it with ErrRecordModified if the record's
-// current mod ID differs — i.e. it changed since modID was read. modID must be
-// non-empty; an empty one is reported as an error from Update/UpdateByID. To
-// lock against the record you are updating, prefer IfUnchanged.
-func WithModID(modID string) UpdateOption {
-	return func(c *updateConfig) {
-		if modID == "" {
-			c.err = errors.New("filemaker: WithModID requires a non-empty mod ID")
-			return
-		}
-		c.conditional = true
-		c.modID = modID
-	}
-}
-
-// IfUnchanged makes the update conditional on the record not having changed
-// since it was read: it locks against the record's own ModID, so the host
-// rejects the write with ErrRecordModified if another writer modified the record
-// in the meantime. It is the ergonomic form of WithModID(rec.ModID()).
-//
-// Only the record-based Update can honor it (UpdateByID has no record to read a
-// ModID from, and reports an error); a record without a ModID is likewise an
-// error rather than a silent unconditional write. Combining it with WithModID is
-// redundant — the explicit version from WithModID is used, regardless of order.
-func IfUnchanged() UpdateOption {
-	return func(c *updateConfig) {
-		c.conditional = true
-	}
-}
-
-// WithPortalData attaches related-record edits to an update, applied by the host
-// alongside the field-data patch. Pass the rows in the same shape Record.Portals
-// returns: a portal name mapped to its rows, each row's field values keyed by
-// fully qualified name ("TableOccurrence::FieldName"). A row carrying a record ID
-// (a plain "recordId" key) edits that existing related record — add a plain
-// "modId" for optimistic locking — and a row without one is added as a new
-// related record. Note the record ID is not table-occurrence qualified like the
-// field values are: the host reads "TableOccurrence::recordId" as a field and
-// rejects the edit with code 102 ("Field is missing").
-//
-// Only the named portal rows are touched; rows you omit are left unchanged. To
-// remove related records, set "deleteRelated" in the FieldData patch (e.g.
-// "Orders.3", or a slice for several): it is a field-data directive, not a portal
-// edit. To edit only portals and leave the record's own fields untouched, pass a
-// nil or empty FieldData. See the Claris Data API guide's "Edit record" page.
-func WithPortalData(portals PortalData) UpdateOption {
-	return func(c *updateConfig) {
-		c.portalData = portals
-	}
-}
-
-// resolveUpdateConfig applies the options and resolves the mod ID. A conditional
-// update with no explicit version sources it from rec (nil for the id-addressed
-// path, which cannot honor IfUnchanged). Deferred option errors surface here.
-func resolveUpdateConfig(opts []UpdateOption, rec *Record) (updateConfig, error) {
-	var cfg updateConfig
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
-	if cfg.err != nil {
-		return cfg, cfg.err
-	}
-	if cfg.conditional && cfg.modID == "" {
-		switch {
-		case rec == nil:
-			return cfg, errors.New("filemaker: IfUnchanged requires a record; use WithModID with UpdateByID")
-		case rec.modID == "":
-			return cfg, errors.New("filemaker: IfUnchanged requires a record with a ModID")
-		}
-		cfg.modID = rec.modID
-	}
-	return cfg, nil
 }
 
 // Update writes the given field data to the record, identified by rec, and
