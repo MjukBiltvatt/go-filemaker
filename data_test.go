@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -203,6 +204,77 @@ func TestCreateWithPortalData(t *testing.T) {
 	}
 	if !strings.Contains(body, `"portalData":{"Orders":`) {
 		t.Errorf("body = %q, want portalData threaded through Create", body)
+	}
+}
+
+func TestCreateWithScript(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"recordId":"7","modId":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if _, err := c.Create(context.Background(), "People", FieldData{"Name": "Mark"},
+		WithScript("AfterCreate", "p1"),
+		WithPrerequestScript("Pre", ""),
+	); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("unmarshal body %q: %v", body, err)
+	}
+	if got["script"] != "AfterCreate" || got["script.param"] != "p1" {
+		t.Errorf("script keys = %v, want script=AfterCreate script.param=p1 (body %q)", got, body)
+	}
+	if got["script.prerequest"] != "Pre" {
+		t.Errorf("script.prerequest = %v, want Pre", got["script.prerequest"])
+	}
+	// An empty param is omitted, not sent as an empty string.
+	if _, ok := got["script.prerequest.param"]; ok {
+		t.Errorf("script.prerequest.param should be omitted for an empty param (body %q)", body)
+	}
+}
+
+func TestDeleteWithScript(t *testing.T) {
+	var mu sync.Mutex
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotQuery = r.URL.Query()
+		mu.Unlock()
+		writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if err := c.DeleteByID(context.Background(), "People", "9",
+		WithScript("AfterDelete", "p1"),
+		WithPresortScript("Sorter", "p2"),
+	); err != nil {
+		t.Fatalf("DeleteByID: %v", err)
+	}
+
+	mu.Lock()
+	q := gotQuery
+	mu.Unlock()
+	// Delete has no body, so scripts ride in the query string.
+	if q.Get("script") != "AfterDelete" || q.Get("script.param") != "p1" {
+		t.Errorf("query = %v, want script=AfterDelete script.param=p1", q)
+	}
+	if q.Get("script.presort") != "Sorter" || q.Get("script.presort.param") != "p2" {
+		t.Errorf("query = %v, want script.presort=Sorter script.presort.param=p2", q)
 	}
 }
 

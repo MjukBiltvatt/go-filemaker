@@ -79,7 +79,7 @@ func (c *Client) Find(ctx context.Context, layout string, query Query) (FindResp
 
 // Create inserts a new record with the given field data and returns the host's
 // acknowledgement (record ID and mod ID). Pass WithPortalData to add related
-// records in the same request.
+// records, or WithScript and friends to run scripts, in the same request.
 func (c *Client) Create(ctx context.Context, layout string, fields FieldData, opts ...CreateOption) (CreateResponse, error) {
 	if layout == "" {
 		return CreateResponse{}, errors.New("filemaker: no layout specified")
@@ -90,7 +90,7 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 		return CreateResponse{}, err
 	}
 
-	body, err := marshalRecordBody(fields, cfg.portalData, "", c.dateFormat)
+	body, err := marshalRecordBody(fields, cfg, c.dateFormat)
 	if err != nil {
 		return CreateResponse{}, err
 	}
@@ -132,7 +132,8 @@ func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts 
 // UpdateByID writes the given field data to an existing record addressed by
 // layout and id, and returns the new mod ID. See Update for the patch semantics.
 // For optimistic concurrency pass WithModID (IfUnchanged needs a record); pass
-// WithPortalData to edit related records in the same request.
+// WithPortalData to edit related records, or WithScript and friends to run
+// scripts, in the same request.
 func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
 	switch {
 	case layout == "":
@@ -146,7 +147,7 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 		return UpdateResponse{}, err
 	}
 
-	body, err := marshalRecordBody(fields, cfg.portalData, cfg.modID, c.dateFormat)
+	body, err := marshalRecordBody(fields, cfg, c.dateFormat)
 	if err != nil {
 		return UpdateResponse{}, err
 	}
@@ -161,16 +162,19 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 	return UpdateResponse{ModID: rb.Response.ModID}, nil
 }
 
-// Delete removes the record identified by rec.
-func (c *Client) Delete(ctx context.Context, rec Record) error {
+// Delete removes the record identified by rec. Pass WithScript and friends to
+// run scripts with the request.
+func (c *Client) Delete(ctx context.Context, rec Record, opts ...DeleteOption) error {
 	if rec.id == "" {
 		return errors.New("filemaker: record has no ID; create or find it first")
 	}
-	return c.DeleteByID(ctx, rec.layout, rec.id)
+	return c.DeleteByID(ctx, rec.layout, rec.id, opts...)
 }
 
-// DeleteByID removes a record addressed by layout and id.
-func (c *Client) DeleteByID(ctx context.Context, layout, id string) error {
+// DeleteByID removes a record addressed by layout and id. Pass WithScript and
+// friends to run scripts with the request; unlike the other record writes the
+// delete endpoint has no body, so those ride in the URL query string.
+func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...DeleteOption) error {
 	switch {
 	case layout == "":
 		return errors.New("filemaker: no layout specified")
@@ -178,8 +182,18 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string) error {
 		return errors.New("filemaker: no record id specified")
 	}
 
+	cfg, err := resolveDeleteConfig(opts)
+	if err != nil {
+		return err
+	}
+
+	u := c.recordURL(layout, id)
+	if q := cfg.queryParams(); len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+
 	var rb responseBody
-	return c.do(ctx, http.MethodDelete, c.recordURL(layout, id), nil, &rb)
+	return c.do(ctx, http.MethodDelete, u, nil, &rb)
 }
 
 // UploadToContainer uploads data to a container field of the record identified
@@ -282,19 +296,24 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 }
 
 // marshalRecordBody wraps fields in the {"fieldData": ...} envelope the host
-// expects, optionally including portal edits and a modId for optimistic locking
-// (each omitted when empty). A nil fields map becomes an empty object so the host
-// applies defaults on create and leaves the record's own fields untouched on a
-// portal-only edit.
+// expects, drawing the optional parameters (portal data, a modId for optimistic
+// locking, and any script directives) from cfg and omitting each when unset. A
+// nil fields map becomes an empty object so the host applies defaults on create
+// and leaves the record's own fields untouched on a portal-only edit.
 //
 // When format is non-nil, Date/Timestamp wrapper values are rewritten to that
 // format and a "dateformats" parameter is added so the host interprets the input
 // accordingly; when nil, no parameter is sent — the host applies its default
 // format (US) and the wrappers self-marshal in US to match (works on any server).
-func marshalRecordBody(fields FieldData, portals PortalData, modID string, format *DateFormat) ([]byte, error) {
+//
+// The body is assembled as a map so the script directives (whose keys carry dots,
+// e.g. "script.param") share one source of truth with the Delete query string:
+// both read recordConfig.scriptParams.
+func marshalRecordBody(fields FieldData, cfg recordConfig, format *DateFormat) ([]byte, error) {
 	if fields == nil {
 		fields = FieldData{}
 	}
+	portals := cfg.portalData
 
 	var dateFormats *int
 	if format != nil {
@@ -304,16 +323,25 @@ func marshalRecordBody(fields FieldData, portals PortalData, modID string, forma
 		dateFormats = &v
 	}
 
-	body, err := json.Marshal(struct {
-		FieldData   FieldData  `json:"fieldData"`
-		PortalData  PortalData `json:"portalData,omitempty"`
-		ModID       string     `json:"modId,omitempty"`
-		DateFormats *int       `json:"dateformats,omitempty"`
-	}{fields, portals, modID, dateFormats})
+	body := map[string]any{"fieldData": fields}
+	if len(portals) > 0 {
+		body["portalData"] = portals
+	}
+	if cfg.modID != "" {
+		body["modId"] = cfg.modID
+	}
+	for _, kv := range cfg.scriptParams() {
+		body[kv[0]] = kv[1]
+	}
+	if dateFormats != nil {
+		body["dateformats"] = *dateFormats
+	}
+
+	out, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("filemaker: failed to marshal field data: %w", err)
 	}
-	return body, nil
+	return out, nil
 }
 
 // formatDateValue rewrites a Date/Timestamp wrapper to its string form in the

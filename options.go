@@ -1,6 +1,9 @@
 package filemaker
 
-import "errors"
+import (
+	"errors"
+	"net/url"
+)
 
 // This file defines the option type lattice shared by the record-writing
 // endpoints.
@@ -23,11 +26,23 @@ type CreateOption interface{ applyCreate(*recordConfig) }
 // UpdateOption configures an Update or UpdateByID.
 type UpdateOption interface{ applyUpdate(*recordConfig) }
 
+// DeleteOption configures a Delete or DeleteByID.
+type DeleteOption interface{ applyDelete(*recordConfig) }
+
 // WriteOption configures any record write: it is accepted by both Create and
 // Update (and UpdateByID).
 type WriteOption interface {
 	CreateOption
 	UpdateOption
+}
+
+// RecordOption configures any record-context endpoint that can run scripts with
+// the request. It is accepted by Create, Update (and UpdateByID), and Delete (and
+// DeleteByID).
+type RecordOption interface {
+	CreateOption
+	UpdateOption
+	DeleteOption
 }
 
 // recordConfig accumulates the optional parameters the options set; each
@@ -41,7 +56,53 @@ type recordConfig struct {
 	conditional bool
 	modID       string
 	portalData  PortalData
-	err         error
+
+	// Scripts run with the request: script after the action, prerequest before
+	// the request is processed, presort after the action but before the sort.
+	script     scriptCall
+	prerequest scriptCall
+	presort    scriptCall
+
+	err error
+}
+
+// scriptCall is a script to run with a request: its name and an optional
+// parameter. A zero scriptCall (empty name) means no script for that phase.
+type scriptCall struct {
+	name  string
+	param string
+}
+
+// scriptParams returns the script-directive wire key/value pairs the config
+// carries, in a stable order, with empty phases (and empty params) omitted. The
+// keys are identical for the JSON body (Create/Update) and the URL query string
+// (Delete), so both serializers draw from here.
+func (c recordConfig) scriptParams() [][2]string {
+	var out [][2]string
+	add := func(key string, s scriptCall) {
+		if s.name == "" {
+			return
+		}
+		out = append(out, [2]string{key, s.name})
+		if s.param != "" {
+			out = append(out, [2]string{key + ".param", s.param})
+		}
+	}
+	add("script", c.script)
+	add("script.prerequest", c.prerequest)
+	add("script.presort", c.presort)
+	return out
+}
+
+// queryParams returns the parameters that ride in the URL query string rather
+// than a request body — used by Delete, which has no body. Currently that is the
+// script directives, whose names match their body keys.
+func (c recordConfig) queryParams() url.Values {
+	v := url.Values{}
+	for _, kv := range c.scriptParams() {
+		v.Set(kv[0], kv[1])
+	}
+	return v
 }
 
 // option is the single adapter behind every option constructor: a closure that
@@ -52,6 +113,7 @@ type option func(*recordConfig)
 
 func (o option) applyCreate(c *recordConfig) { o(c) }
 func (o option) applyUpdate(c *recordConfig) { o(c) }
+func (o option) applyDelete(c *recordConfig) { o(c) }
 
 // WithModID makes the update conditional (optimistic concurrency) against a
 // specific mod ID: the host rejects it with ErrRecordModified if the record's
@@ -107,6 +169,35 @@ func WithPortalData(portals PortalData) WriteOption {
 	})
 }
 
+// WithScript runs a FileMaker script after the request's action completes,
+// passing param as its script parameter (pass "" for none). The script runs in
+// the layout's context. It is accepted by Create, Update, and Delete.
+func WithScript(name, param string) RecordOption {
+	return option(func(c *recordConfig) {
+		c.script = scriptCall{name, param}
+	})
+}
+
+// WithPrerequestScript runs a script before the request is processed — the Data
+// API script.prerequest — passing param as its parameter (pass "" for none). It
+// is accepted by Create, Update, and Delete.
+func WithPrerequestScript(name, param string) RecordOption {
+	return option(func(c *recordConfig) {
+		c.prerequest = scriptCall{name, param}
+	})
+}
+
+// WithPresortScript runs a script after the request's action but before the
+// result is sorted — the Data API script.presort — passing param as its
+// parameter (pass "" for none). The presort phase is most meaningful for reads;
+// the endpoint accepts it regardless. It is accepted by Create, Update, and
+// Delete.
+func WithPresortScript(name, param string) RecordOption {
+	return option(func(c *recordConfig) {
+		c.presort = scriptCall{name, param}
+	})
+}
+
 // resolveCreateConfig applies the create options. Deferred option errors surface
 // here.
 func resolveCreateConfig(opts []CreateOption) (recordConfig, error) {
@@ -114,6 +205,18 @@ func resolveCreateConfig(opts []CreateOption) (recordConfig, error) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt.applyCreate(&cfg)
+		}
+	}
+	return cfg, cfg.err
+}
+
+// resolveDeleteConfig applies the delete options. Deferred option errors surface
+// here.
+func resolveDeleteConfig(opts []DeleteOption) (recordConfig, error) {
+	var cfg recordConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyDelete(&cfg)
 		}
 	}
 	return cfg, cfg.err

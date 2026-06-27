@@ -109,11 +109,11 @@ func TestMarshalRecordBodyDateFormat(t *testing.T) {
 		want   string
 	}{
 		{"unset", nil, `{"fieldData":{"Created":"06/23/2026 14:05:00","DOB":"06/23/1990"}}`},
-		{"US", &us, `{"fieldData":{"Created":"06/23/2026 14:05:00","DOB":"06/23/1990"},"dateformats":0}`},
-		{"ISO", &iso, `{"fieldData":{"Created":"2026-06-23 14:05:00","DOB":"1990-06-23"},"dateformats":2}`},
+		{"US", &us, `{"dateformats":0,"fieldData":{"Created":"06/23/2026 14:05:00","DOB":"06/23/1990"}}`},
+		{"ISO", &iso, `{"dateformats":2,"fieldData":{"Created":"2026-06-23 14:05:00","DOB":"1990-06-23"}}`},
 	}
 	for _, c := range cases {
-		body, err := marshalRecordBody(fields, nil, "", c.format)
+		body, err := marshalRecordBody(fields, recordConfig{}, c.format)
 		if err != nil {
 			t.Fatalf("%s: marshalRecordBody: %v", c.name, err)
 		}
@@ -129,7 +129,7 @@ func TestFieldDataWithTypedValues(t *testing.T) {
 		"DOB":     Date(time.Date(1990, 6, 23, 0, 0, 0, 0, time.UTC)),
 		"Created": Timestamp(time.Date(2026, 6, 23, 14, 5, 0, 0, time.UTC)),
 		"Name":    "Mark",
-	}, nil, "", nil)
+	}, recordConfig{}, nil)
 	if err != nil {
 		t.Fatalf("marshalRecordBody: %v", err)
 	}
