@@ -120,6 +120,10 @@ func (o option) applyDelete(c *recordConfig) { o(c) }
 // current mod ID differs — i.e. it changed since modID was read. modID must be
 // non-empty; an empty one is reported as an error from Update/UpdateByID. To
 // lock against the record you are updating, prefer IfUnchanged.
+//
+// It sets a single mod ID; calling WithModID again keeps only the last value.
+// (Combining it with IfUnchanged is a documented exception, not a duplicate: the
+// explicit version from WithModID is used regardless of order.)
 func WithModID(modID string) UpdateOption {
 	return option(func(c *recordConfig) {
 		if modID == "" {
@@ -163,6 +167,9 @@ func IfUnchanged() UpdateOption {
 // "Orders.3", or a slice for several): it is a field-data directive, not a portal
 // edit. To edit only portals and leave the record's own fields untouched, pass a
 // nil or empty FieldData. See the Claris Data API guide's "Edit record" page.
+//
+// It sets a single portal-data object; calling WithPortalData again replaces it
+// rather than merging — pass all the portals and rows in one call.
 func WithPortalData(portals PortalData) WriteOption {
 	return option(func(c *recordConfig) {
 		c.portalData = portals
@@ -172,6 +179,12 @@ func WithPortalData(portals PortalData) WriteOption {
 // WithScript runs a FileMaker script after the request's action completes,
 // passing param as its script parameter (pass "" for none). The script runs in
 // the layout's context. It is accepted by Create, Update, and Delete.
+//
+// The Data API runs at most one script per phase, so this sets a single script:
+// calling WithScript more than once keeps only the last. The three phases
+// (WithScript, WithPrerequestScript, WithPresortScript) are independent and
+// compose; to run several steps in one phase, chain them inside a single
+// FileMaker script.
 func WithScript(name, param string) RecordOption {
 	return option(func(c *recordConfig) {
 		c.script = scriptCall{name, param}
@@ -180,7 +193,8 @@ func WithScript(name, param string) RecordOption {
 
 // WithPrerequestScript runs a script before the request is processed — the Data
 // API script.prerequest — passing param as its parameter (pass "" for none). It
-// is accepted by Create, Update, and Delete.
+// is accepted by Create, Update, and Delete. Like WithScript it sets a single
+// script; calling it again keeps only the last.
 func WithPrerequestScript(name, param string) RecordOption {
 	return option(func(c *recordConfig) {
 		c.prerequest = scriptCall{name, param}
@@ -191,7 +205,8 @@ func WithPrerequestScript(name, param string) RecordOption {
 // result is sorted — the Data API script.presort — passing param as its
 // parameter (pass "" for none). The presort phase is most meaningful for reads;
 // the endpoint accepts it regardless. It is accepted by Create, Update, and
-// Delete.
+// Delete. Like WithScript it sets a single script; calling it again keeps only
+// the last.
 func WithPresortScript(name, param string) RecordOption {
 	return option(func(c *recordConfig) {
 		c.presort = scriptCall{name, param}
