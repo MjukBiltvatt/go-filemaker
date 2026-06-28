@@ -40,12 +40,13 @@ type WriteOption interface {
 }
 
 // RecordOption configures any record-context endpoint that can run scripts with
-// the request. It is accepted by Create, Update (and UpdateByID), and Delete (and
-// DeleteByID).
+// the request. It is accepted by Create, Update (and UpdateByID), Delete (and
+// DeleteByID), and Find.
 type RecordOption interface {
 	CreateOption
 	UpdateOption
 	DeleteOption
+	FindOption
 }
 
 // ReadManyOption configures a read that returns multiple records — sorting and
@@ -224,7 +225,8 @@ func WithPortalData(portals PortalData) WriteOption {
 
 // WithScript runs a FileMaker script after the request's action completes,
 // passing param as its script parameter (pass "" for none). The script runs in
-// the layout's context. It is accepted by Create, Update, and Delete.
+// the layout's context. It is accepted by Create, Update, Delete, and Find; the
+// outcome is reported in the corresponding response's Scripts field.
 //
 // The Data API runs at most one script per phase, so this sets a single script:
 // calling WithScript more than once keeps only the last. The three phases
@@ -239,8 +241,8 @@ func WithScript(name, param string) RecordOption {
 
 // WithPrerequestScript runs a script before the request is processed — the Data
 // API script.prerequest — passing param as its parameter (pass "" for none). It
-// is accepted by Create, Update, and Delete. Like WithScript it sets a single
-// script; calling it again keeps only the last.
+// is accepted by Create, Update, Delete, and Find. Like WithScript it sets a
+// single script; calling it again keeps only the last.
 func WithPrerequestScript(name, param string) RecordOption {
 	return option(func(c *recordConfig) {
 		c.prerequest = scriptCall{name, param}
@@ -249,10 +251,10 @@ func WithPrerequestScript(name, param string) RecordOption {
 
 // WithPresortScript runs a script after the request's action but before the
 // result is sorted — the Data API script.presort — passing param as its
-// parameter (pass "" for none). The presort phase is most meaningful for reads;
-// the endpoint accepts it regardless. It is accepted by Create, Update, and
-// Delete. Like WithScript it sets a single script; calling it again keeps only
-// the last.
+// parameter (pass "" for none). The presort phase is most meaningful on Find,
+// where it can shape the found set before sorting; the other endpoints accept it
+// regardless. It is accepted by Create, Update, Delete, and Find. Like WithScript
+// it sets a single script; calling it again keeps only the last.
 func WithPresortScript(name, param string) RecordOption {
 	return option(func(c *recordConfig) {
 		c.presort = scriptCall{name, param}

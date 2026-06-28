@@ -15,10 +15,12 @@ import (
 )
 
 // FindResponse is the result of a Find. Records is empty (non-nil) when no
-// records match. DataInfo carries the host's record counts.
+// records match. DataInfo carries the host's record counts. Scripts holds the
+// outcomes of any scripts run with the request (see WithScript).
 type FindResponse struct {
 	Records  []Record
 	DataInfo DataInfo
+	Scripts  ScriptOutcomes
 }
 
 // DataInfo mirrors the "dataInfo" object the host returns with a find result.
@@ -96,6 +98,9 @@ type ScriptOutcomes struct {
 // at most the layout portal's configured row count, so a record can come back
 // with fewer portal rows than exist. Use WithPortals to choose which portals are
 // returned and WithPortalLimit/WithPortalOffset to page within one.
+//
+// Pass WithScript and friends to run scripts with the request; their outcomes are
+// returned in the FindResponse's Scripts field.
 func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest, opts ...FindOption) (FindResponse, error) {
 	if layout == "" {
 		return FindResponse{}, errors.New("filemaker: no layout specified")
@@ -112,10 +117,10 @@ func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest
 	}
 
 	var rb responseBody
-	if err := c.do(ctx, http.MethodPost, c.findURL(layout), body, &rb); err != nil {
-		if errors.Is(err, ErrNoRecords) {
-			return FindResponse{Records: []Record{}}, nil
-		}
+	// ErrNoRecords means the find simply matched nothing; it is not an error to
+	// the caller. Let it fall through with empty Data, which yields an empty
+	// (non-nil) Records slice and still surfaces DataInfo and any script outcomes.
+	if err := c.do(ctx, http.MethodPost, c.findURL(layout), body, &rb); err != nil && !errors.Is(err, ErrNoRecords) {
 		return FindResponse{}, err
 	}
 
@@ -130,7 +135,7 @@ func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest
 			loc:        c.location,
 		}
 	}
-	return FindResponse{Records: records, DataInfo: rb.Response.DataInfo}, nil
+	return FindResponse{Records: records, DataInfo: rb.Response.DataInfo, Scripts: rb.scriptOutcomes()}, nil
 }
 
 // Create inserts a new record with the given field data and returns the host's
@@ -395,6 +400,9 @@ func marshalFindBody(requests []FindRequest, cfg recordConfig) ([]byte, error) {
 		if pr.limit > 0 {
 			body["limit."+name] = pr.limit
 		}
+	}
+	for _, kv := range cfg.scriptParams() {
+		body[kv[0]] = kv[1]
 	}
 
 	out, err := json.Marshal(body)

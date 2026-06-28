@@ -1069,7 +1069,8 @@ func TestIntegrationUpdateIfUnchanged(t *testing.T) {
 // parameter; a script that runs but ends in an error must leave the request
 // successful while ScriptOutcome reports Ran() && !OK() (the scriptFail fixture);
 // and naming a script that does not exist must surface as an *APIError with
-// FileMaker code 104 ("script is missing").
+// FileMaker code 104 ("script is missing"). A final subtest confirms scripts run
+// on Find too, with the outcome in FindResponse.Scripts.
 func TestIntegrationScriptResults(t *testing.T) {
 	requireLayout(t)
 	ctx := context.Background()
@@ -1137,6 +1138,24 @@ func TestIntegrationScriptResults(t *testing.T) {
 		}
 		if res.Scripts.Script.OK() {
 			t.Errorf("script OK() = true, want false; Error = %q (does %s end in an error?)", res.Scripts.Script.Error, scriptFail)
+		}
+	})
+
+	t.Run("Find", func(t *testing.T) {
+		// Scripts run on Find too; the outcome rides in FindResponse.Scripts.
+		const param = "find-echo-456"
+		res, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}}, WithScript(scriptEcho, param))
+		if err != nil {
+			t.Fatalf("Find WithScript(%s): %v", scriptEcho, err)
+		}
+		if len(res.Records) != 1 {
+			t.Fatalf("Find returned %d records, want 1", len(res.Records))
+		}
+		if !res.Scripts.Script.OK() {
+			t.Errorf("script error = %q, want \"0\"", res.Scripts.Script.Error)
+		}
+		if res.Scripts.Script.Result != param {
+			t.Errorf("script result = %q, want %q", res.Scripts.Script.Result, param)
 		}
 	})
 }

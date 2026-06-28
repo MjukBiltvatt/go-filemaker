@@ -143,6 +143,44 @@ func TestFindWithReadOptions(t *testing.T) {
 	}
 }
 
+func TestFindWithScript(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"data":[],"scriptResult":"done","scriptError":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	resp, err := c.Find(context.Background(), "People",
+		[]FindRequest{{Criteria: map[string]string{"Name": "Mark"}}},
+		WithScript("AfterFind", "p1"),
+	)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+
+	// The script directives go in the find body, like create/update.
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("unmarshal body %q: %v", body, err)
+	}
+	if got["script"] != "AfterFind" || got["script.param"] != "p1" {
+		t.Errorf("script keys = %v, want script=AfterFind script.param=p1 (body %q)", got, body)
+	}
+	// The outcome is decoded into FindResponse.Scripts.
+	if resp.Scripts.Script.Result != "done" || !resp.Scripts.Script.OK() {
+		t.Errorf("Scripts.Script = %+v, want {done 0}", resp.Scripts.Script)
+	}
+}
+
 func TestFindStampsLocation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, `{"response":{"data":[{"recordId":"1","modId":"0","fieldData":{"Created":"01/02/2006 15:04:05"},"portalData":{}}]},"messages":[{"code":"0","message":"OK"}]}`)
