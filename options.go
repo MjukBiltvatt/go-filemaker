@@ -304,8 +304,11 @@ func WithPortals(names ...string) ReadOption {
 }
 
 // WithPortalLimit caps the number of related records returned for the named
-// portal (the host's default is 50). A non-positive limit is treated as unset.
-// Calling it again for the same portal keeps only the last.
+// portal. Without it the host caps them at the layout portal's configured row
+// count (and at most its documented default of 50), so a portal can come back
+// with fewer rows than actually exist; pass this to raise (or lower) that cap. A
+// non-positive limit is treated as unset. Calling it again for the same portal
+// keeps only the last.
 func WithPortalLimit(portal string, limit int) ReadOption {
 	return option(func(c *recordConfig) {
 		c.updatePortalRange(portal, func(pr *portalRange) { pr.limit = limit })

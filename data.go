@@ -91,6 +91,11 @@ type ScriptOutcomes struct {
 // WithLimit (with WithOffset to page) to retrieve more. (The Data API documents
 // this default for the record-range endpoint; the find endpoint applies the same
 // cap.)
+//
+// Returned related (portal) records are capped too: by default a portal returns
+// at most the layout portal's configured row count, so a record can come back
+// with fewer portal rows than exist. Use WithPortals to choose which portals are
+// returned and WithPortalLimit/WithPortalOffset to page within one.
 func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest, opts ...FindOption) (FindResponse, error) {
 	if layout == "" {
 		return FindResponse{}, errors.New("filemaker: no layout specified")

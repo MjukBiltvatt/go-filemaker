@@ -68,7 +68,12 @@ A layout named **`ParentTable`**, based on the `ParentTable` occurrence:
   `DateField`, `TimestampField`, `TimeField`, `ContainerField`, `RequiredField`.
 - Add a **portal** showing `ChildTable`, with `ChildText` in it. Leave the
   portal object name unset (or set it to `ChildTable`) so the Data API keys the
-  returned portal data by the table-occurrence name.
+  returned portal data by the table-occurrence name. Set it to show **exactly 3
+  rows** ("Number of rows: 3" in the portal setup). `TestIntegrationPortalPaging`
+  depends on this: a default find caps returned portal rows at the portal's row
+  count, and the test seeds more rows than that to confirm both the cap and that
+  an explicit `WithPortalLimit` overrides it. (Keep this in sync with the
+  `portalRowHeight` constant in the test.)
 
 ### Scripts
 

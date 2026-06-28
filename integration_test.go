@@ -68,7 +68,9 @@
 //     cascades, keeping teardown clean).
 //   - A portal on FM_LAYOUT showing ChildTable with ChildText. Leave the portal
 //     object name unset (or equal to ChildTable) so the Data API keys the
-//     returned portal data by the table-occurrence name.
+//     returned portal data by the table-occurrence name. Configure it to show
+//     exactly portalRowHeight (3) rows: TestIntegrationPortalPaging relies on the
+//     default find being capped at the portal's height.
 //
 // Every test that writes data deletes it again via t.Cleanup, so a passing run
 // leaves the layout empty.
@@ -95,6 +97,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -119,6 +122,12 @@ const (
 	portalName       = "ChildTable"
 	fieldChildText   = portalName + "::ChildText"
 	keyChildRecordID = "recordId"
+
+	// portalRowHeight is the number of rows the ChildTable portal must be
+	// configured to display (see docs/integration-testing.md). A default find
+	// caps returned portal rows at this; TestIntegrationPortalPaging seeds more
+	// rows than this to confirm the cap and that WithPortalLimit overrides it.
+	portalRowHeight = 3
 
 	// scriptEcho is a fixture script the database must define (see
 	// docs/integration-testing.md): Exit Script [Get(ScriptParameter)], so it
@@ -893,16 +902,18 @@ func TestIntegrationPortalPaging(t *testing.T) {
 	requireLayout(t)
 	ctx := context.Background()
 
+	// Seed more child rows than the portal's configured height so the default cap
+	// is exercised and the override has rows to reveal.
+	const childRows = portalRowHeight + 2
+	rows := make([]map[string]any, childRows)
+	for i := range rows {
+		rows[i] = map[string]any{fieldChildText: "row-" + strconv.Itoa(i+1)}
+	}
 	marker := "go-filemaker-it-portalpage-" + time.Now().UTC().Format("20060102T150405.000000000")
 	created, err := itClient.Create(ctx, itLayout, FieldData{
 		fieldText:     marker,
 		fieldRequired: "present",
-	}, WithPortalData(PortalData{portalName: {
-		{fieldChildText: "row-1"},
-		{fieldChildText: "row-2"},
-		{fieldChildText: "row-3"},
-		{fieldChildText: "row-4"},
-	}}))
+	}, WithPortalData(PortalData{portalName: rows}))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -926,20 +937,21 @@ func TestIntegrationPortalPaging(t *testing.T) {
 		return len(found.Records[0].Portals()[portalName])
 	}
 
-	// A default find caps portal rows at the layout portal's configured row
-	// count, so read the true total with an explicit, generous limit that
-	// overrides that cap; the test only needs enough rows for limit/offset to
-	// slice the set.
-	total := countPortal(WithPortalLimit(portalName, 1000))
-	if total < 3 {
-		t.Fatalf("seeded portal returned %d rows, need at least 3 to test paging", total)
+	// A default find caps portal rows at the layout portal's configured height.
+	if n := countPortal(); n != portalRowHeight {
+		t.Errorf("default: %d portal rows, want %d (the configured portal height; see docs/integration-testing.md)", n, portalRowHeight)
 	}
+	// A generous explicit limit overrides that cap and returns every seeded row.
+	if n := countPortal(WithPortalLimit(portalName, 1000)); n != childRows {
+		t.Errorf("limit 1000: %d portal rows, want all %d", n, childRows)
+	}
+	// A limit below the total caps the result.
 	if n := countPortal(WithPortalLimit(portalName, 2)); n != 2 {
 		t.Errorf("limit 2: %d portal rows, want 2", n)
 	}
 	// Offset 2 (1-based) skips the first row; a generous limit returns the rest.
-	if n := countPortal(WithPortalOffset(portalName, 2), WithPortalLimit(portalName, 1000)); n != total-1 {
-		t.Errorf("offset 2: %d portal rows, want %d", n, total-1)
+	if n := countPortal(WithPortalOffset(portalName, 2), WithPortalLimit(portalName, 1000)); n != childRows-1 {
+		t.Errorf("offset 2: %d portal rows, want %d", n, childRows-1)
 	}
 }
 
