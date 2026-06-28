@@ -358,6 +358,41 @@ func TestCreateWithScript(t *testing.T) {
 	}
 }
 
+func TestCreateWithDataEntryOptions(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"recordId":"7","modId":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if _, err := c.Create(context.Background(), "People", FieldData{"Name": "Mark"},
+		WithEntryMode(EntryModeScript),
+		WithProhibitMode(EntryModeUser),
+	); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+
+	var got struct {
+		Options map[string]string `json:"options"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("unmarshal body %q: %v", body, err)
+	}
+	if got.Options["entrymode"] != "script" || got.Options["prohibitmode"] != "user" {
+		t.Errorf("options = %v, want entrymode=script prohibitmode=user (body %q)", got.Options, body)
+	}
+}
+
 func TestDeleteWithScript(t *testing.T) {
 	var mu sync.Mutex
 	var gotQuery url.Values
@@ -911,6 +946,75 @@ func TestUploadToContainerByID(t *testing.T) {
 	}
 	if !strings.Contains(body, `filename="pic.png"`) || !strings.Contains(body, "imgdata") {
 		t.Errorf("body missing filename or data: %q", body)
+	}
+}
+
+func TestUploadToContainerWithModID(t *testing.T) {
+	var mu sync.Mutex
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotQuery = r.URL.Query()
+		mu.Unlock()
+		writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	// Explicit mod ID via the id-addressed form; the container endpoint has no
+	// body, so it rides in the query string.
+	if err := c.UploadToContainerByID(context.Background(), "People", "1", "Photo", "pic.png", strings.NewReader("x"), WithModID("7")); err != nil {
+		t.Fatalf("UploadToContainerByID: %v", err)
+	}
+
+	mu.Lock()
+	q := gotQuery
+	mu.Unlock()
+	if q.Get("modId") != "7" {
+		t.Errorf("query = %v, want modId=7", q)
+	}
+}
+
+func TestUploadToContainerIfUnchanged(t *testing.T) {
+	var mu sync.Mutex
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotQuery = r.URL.Query()
+		mu.Unlock()
+		writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	// IfUnchanged locks against the record's own ModID, sourced here from rec.
+	rec := Record{layout: "People", id: "1", modID: "5"}
+	if err := c.UploadToContainer(context.Background(), rec, "Photo", "pic.png", strings.NewReader("x"), IfUnchanged()); err != nil {
+		t.Fatalf("UploadToContainer: %v", err)
+	}
+
+	mu.Lock()
+	q := gotQuery
+	mu.Unlock()
+	if q.Get("modId") != "5" {
+		t.Errorf("query = %v, want modId=5 from the record", q)
+	}
+}
+
+func TestUploadIfUnchangedErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("must not make a request when IfUnchanged cannot resolve a mod ID")
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	// IfUnchanged on the id-addressed form has no record to source a ModID from.
+	if err := c.UploadToContainerByID(context.Background(), "People", "1", "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
+		t.Error("UploadToContainerByID: expected error for IfUnchanged without a record")
+	}
+	// IfUnchanged on a record without a ModID must error, not silently degrade.
+	if err := c.UploadToContainer(context.Background(), Record{layout: "People", id: "1"}, "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
+		t.Error("UploadToContainer: expected error for IfUnchanged on a record without a ModID")
 	}
 }
 

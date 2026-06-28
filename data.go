@@ -266,17 +266,32 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...Dele
 }
 
 // UploadToContainer uploads data to a container field of the record identified
-// by rec. The record must already exist (created or returned by a find).
-func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader) error {
+// by rec. The record must already exist (created or returned by a find). Pass
+// IfUnchanged (or WithModID) for optimistic concurrency against the record's
+// current mod ID.
+func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader, opts ...UploadOption) error {
 	if rec.id == "" {
 		return errors.New("filemaker: record has no ID; create or find it first")
 	}
-	return c.UploadToContainerByID(ctx, rec.layout, rec.id, field, filename, data)
+	// IfUnchanged is record-relative, so resolve it here against rec and append
+	// the resolved lock as an explicit WithModID, then delegate — mirroring
+	// Update/UpdateByID.
+	cfg, err := resolveUploadConfig(opts, &rec)
+	if err != nil {
+		return err
+	}
+	if cfg.conditional {
+		// Full-slice expression so the append never mutates the caller's array.
+		opts = append(opts[:len(opts):len(opts)], WithModID(cfg.modID))
+	}
+	return c.UploadToContainerByID(ctx, rec.layout, rec.id, field, filename, data, opts...)
 }
 
 // UploadToContainerByID uploads data to a container field of an existing record
-// addressed by layout and id.
-func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, filename string, data io.Reader) error {
+// addressed by layout and id. For optimistic concurrency pass WithModID
+// (IfUnchanged needs a record); the container endpoint has no JSON body, so the
+// mod ID rides in the URL query string.
+func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, filename string, data io.Reader, opts ...UploadOption) error {
 	switch {
 	case layout == "":
 		return errors.New("filemaker: no layout specified")
@@ -284,6 +299,11 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 		return errors.New("filemaker: no record id specified")
 	case field == "":
 		return errors.New("filemaker: no container field specified")
+	}
+
+	cfg, err := resolveUploadConfig(opts, nil)
+	if err != nil {
+		return err
 	}
 
 	var buf bytes.Buffer
@@ -299,11 +319,16 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 		return fmt.Errorf("filemaker: failed to finalize upload: %w", err)
 	}
 
+	u := c.containerURL(layout, id, field)
+	if q := cfg.queryParams(); len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+
 	contentType := w.FormDataContentType()
 	body := buf.Bytes()
 	var rb responseBody
 	return c.withAuth(ctx, func() (string, error) {
-		return c.attempt(ctx, http.MethodPost, c.containerURL(layout, id, field), contentType, body, &rb)
+		return c.attempt(ctx, http.MethodPost, u, contentType, body, &rb)
 	})
 }
 
@@ -446,6 +471,9 @@ func marshalRecordBody(fields FieldData, cfg recordConfig, format *DateFormat) (
 	}
 	if cfg.modID != "" {
 		body["modId"] = cfg.modID
+	}
+	if opts := cfg.entryOptions(); len(opts) > 0 {
+		body["options"] = opts
 	}
 	for _, kv := range cfg.scriptParams() {
 		body[kv[0]] = kv[1]

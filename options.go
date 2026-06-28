@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 )
 
@@ -32,11 +33,23 @@ type DeleteOption interface{ applyDelete(*recordConfig) }
 // FindOption configures a Find.
 type FindOption interface{ applyFind(*recordConfig) }
 
+// UploadOption configures an UploadToContainer or UploadToContainerByID.
+type UploadOption interface{ applyUpload(*recordConfig) }
+
 // WriteOption configures any record write: it is accepted by both Create and
 // Update (and UpdateByID).
 type WriteOption interface {
 	CreateOption
 	UpdateOption
+}
+
+// ConcurrencyOption configures optimistic concurrency on a write to an existing
+// record. It is accepted by Update (and UpdateByID) and UploadToContainer (and
+// UploadToContainerByID) — the two endpoints that mutate an existing record and
+// support a mod-ID check.
+type ConcurrencyOption interface {
+	UpdateOption
+	UploadOption
 }
 
 // RecordOption configures any record-context endpoint that can run scripts with
@@ -62,6 +75,19 @@ type ReadOption interface {
 	FindOption
 }
 
+// EntryMode selects whether the host applies a field's rules to a write the way
+// interactive data entry would ("user", the default) or the way a server-side
+// script does, bypassing them ("script"). It is the value type for WithEntryMode
+// (validation) and WithProhibitMode (automatic data entry).
+type EntryMode string
+
+const (
+	// EntryModeUser follows the field's rules (the host default).
+	EntryModeUser EntryMode = "user"
+	// EntryModeScript ignores the field's rules.
+	EntryModeScript EntryMode = "script"
+)
+
 // recordConfig accumulates the optional parameters the options set; each
 // endpoint resolves it into a request. Optimistic concurrency is one flag plus a
 // version: conditional means a mod-ID check is wanted, and modID is the version
@@ -73,6 +99,10 @@ type recordConfig struct {
 	conditional bool
 	modID       string
 	portalData  PortalData
+
+	// Data-entry behavior on Create/Update (the body "options" object).
+	entryMode    EntryMode
+	prohibitMode EntryMode
 
 	// Scripts run with the request: script after the action, prerequest before
 	// the request is processed, presort after the action but before the sort.
@@ -140,11 +170,30 @@ func (c recordConfig) scriptParams() [][2]string {
 	return out
 }
 
+// entryOptions returns the body "options" object — the data-entry modes set on a
+// Create/Update — omitting each mode when unset. The result is empty (so the
+// caller omits the key) when neither is set.
+func (c recordConfig) entryOptions() map[string]string {
+	opts := map[string]string{}
+	if c.entryMode != "" {
+		opts["entrymode"] = string(c.entryMode)
+	}
+	if c.prohibitMode != "" {
+		opts["prohibitmode"] = string(c.prohibitMode)
+	}
+	return opts
+}
+
 // queryParams returns the parameters that ride in the URL query string rather
-// than a request body — used by Delete, which has no body. Currently that is the
-// script directives, whose names match their body keys.
+// than a request body — used by the bodyless endpoints: the script directives
+// (Delete) and a mod ID (UploadToContainer). The names match their body keys.
+// Delete never sets a mod ID and Upload never sets scripts, so each endpoint only
+// emits what applies to it.
 func (c recordConfig) queryParams() url.Values {
 	v := url.Values{}
+	if c.modID != "" {
+		v.Set("modId", c.modID)
+	}
 	for _, kv := range c.scriptParams() {
 		v.Set(kv[0], kv[1])
 	}
@@ -161,17 +210,19 @@ func (o option) applyCreate(c *recordConfig) { o(c) }
 func (o option) applyUpdate(c *recordConfig) { o(c) }
 func (o option) applyDelete(c *recordConfig) { o(c) }
 func (o option) applyFind(c *recordConfig)   { o(c) }
+func (o option) applyUpload(c *recordConfig) { o(c) }
 
-// WithModID makes the update conditional (optimistic concurrency) against a
+// WithModID makes the write conditional (optimistic concurrency) against a
 // specific mod ID: the host rejects it with ErrRecordModified if the record's
 // current mod ID differs — i.e. it changed since modID was read. modID must be
-// non-empty; an empty one is reported as an error from Update/UpdateByID. To
-// lock against the record you are updating, prefer IfUnchanged.
+// non-empty; an empty one is reported as an error from the call. To lock against
+// the record you are writing, prefer IfUnchanged. Accepted by Update and
+// UploadToContainer.
 //
 // It sets a single mod ID; calling WithModID again keeps only the last value.
 // (Combining it with IfUnchanged is a documented exception, not a duplicate: the
 // explicit version from WithModID is used regardless of order.)
-func WithModID(modID string) UpdateOption {
+func WithModID(modID string) ConcurrencyOption {
 	return option(func(c *recordConfig) {
 		if modID == "" {
 			c.err = errors.New("filemaker: WithModID requires a non-empty mod ID")
@@ -182,16 +233,18 @@ func WithModID(modID string) UpdateOption {
 	})
 }
 
-// IfUnchanged makes the update conditional on the record not having changed
-// since it was read: it locks against the record's own ModID, so the host
-// rejects the write with ErrRecordModified if another writer modified the record
-// in the meantime. It is the ergonomic form of WithModID(rec.ModID()).
+// IfUnchanged makes the write conditional on the record not having changed since
+// it was read: it locks against the record's own ModID, so the host rejects the
+// write with ErrRecordModified if another writer modified the record in the
+// meantime. It is the ergonomic form of WithModID(rec.ModID()). Accepted by
+// Update and UploadToContainer.
 //
-// Only the record-based Update can honor it (UpdateByID has no record to read a
-// ModID from, and reports an error); a record without a ModID is likewise an
-// error rather than a silent unconditional write. Combining it with WithModID is
-// redundant — the explicit version from WithModID is used, regardless of order.
-func IfUnchanged() UpdateOption {
+// Only the record-based forms (Update, UploadToContainer) can honor it; the
+// *ByID forms have no record to read a ModID from and report an error. A record
+// without a ModID is likewise an error rather than a silent unconditional write.
+// Combining it with WithModID is redundant — the explicit version from WithModID
+// is used, regardless of order.
+func IfUnchanged() ConcurrencyOption {
 	return option(func(c *recordConfig) {
 		c.conditional = true
 	})
@@ -220,6 +273,26 @@ func IfUnchanged() UpdateOption {
 func WithPortalData(portals PortalData) WriteOption {
 	return option(func(c *recordConfig) {
 		c.portalData = portals
+	})
+}
+
+// WithEntryMode sets whether the write honors field data validation — the Data
+// API options.entrymode. EntryModeUser (the default) follows each field's
+// validation requirements; EntryModeScript ignores them. Accepted by Create and
+// Update.
+func WithEntryMode(mode EntryMode) WriteOption {
+	return option(func(c *recordConfig) {
+		c.entryMode = mode
+	})
+}
+
+// WithProhibitMode sets whether the write honors field automatic data entry —
+// the Data API options.prohibitmode. EntryModeUser (the default) follows each
+// field's auto-enter requirements; EntryModeScript ignores them. Accepted by
+// Create and Update.
+func WithProhibitMode(mode EntryMode) WriteOption {
+	return option(func(c *recordConfig) {
+		c.prohibitMode = mode
 	})
 }
 
@@ -362,6 +435,25 @@ func resolveFindConfig(opts []FindOption) (recordConfig, error) {
 	return cfg, cfg.err
 }
 
+// resolveConditional fills in a record-sourced mod ID for a conditional write
+// (IfUnchanged). rec is nil for the *ByID forms, which cannot honor it; byIDForm
+// names that form for the error hint. It also surfaces any deferred option error.
+func (cfg *recordConfig) resolveConditional(rec *Record, byIDForm string) error {
+	if cfg.err != nil {
+		return cfg.err
+	}
+	if cfg.conditional && cfg.modID == "" {
+		switch {
+		case rec == nil:
+			return fmt.Errorf("filemaker: IfUnchanged requires a record; use WithModID with %s", byIDForm)
+		case rec.modID == "":
+			return errors.New("filemaker: IfUnchanged requires a record with a ModID")
+		}
+		cfg.modID = rec.modID
+	}
+	return nil
+}
+
 // resolveUpdateConfig applies the options and resolves the mod ID. A conditional
 // update with no explicit version sources it from rec (nil for the id-addressed
 // path, which cannot honor IfUnchanged). Deferred option errors surface here.
@@ -372,17 +464,23 @@ func resolveUpdateConfig(opts []UpdateOption, rec *Record) (recordConfig, error)
 			opt.applyUpdate(&cfg)
 		}
 	}
-	if cfg.err != nil {
-		return cfg, cfg.err
+	if err := cfg.resolveConditional(rec, "UpdateByID"); err != nil {
+		return cfg, err
 	}
-	if cfg.conditional && cfg.modID == "" {
-		switch {
-		case rec == nil:
-			return cfg, errors.New("filemaker: IfUnchanged requires a record; use WithModID with UpdateByID")
-		case rec.modID == "":
-			return cfg, errors.New("filemaker: IfUnchanged requires a record with a ModID")
+	return cfg, nil
+}
+
+// resolveUploadConfig applies the upload options and resolves the mod ID, the
+// same way resolveUpdateConfig does for writes (IfUnchanged sources it from rec).
+func resolveUploadConfig(opts []UploadOption, rec *Record) (recordConfig, error) {
+	var cfg recordConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyUpload(&cfg)
 		}
-		cfg.modID = rec.modID
+	}
+	if err := cfg.resolveConditional(rec, "UploadToContainerByID"); err != nil {
+		return cfg, err
 	}
 	return cfg, nil
 }
