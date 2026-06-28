@@ -54,6 +54,13 @@ type ReadManyOption interface {
 	FindOption
 }
 
+// ReadOption configures how a read returns records: which portals to include,
+// how to page them, and the layout to return data in. It is accepted by Find
+// (and, in future, the get-single and get-range endpoints).
+type ReadOption interface {
+	FindOption
+}
+
 // recordConfig accumulates the optional parameters the options set; each
 // endpoint resolves it into a request. Optimistic concurrency is one flag plus a
 // version: conditional means a mod-ID check is wanted, and modID is the version
@@ -72,12 +79,36 @@ type recordConfig struct {
 	prerequest scriptCall
 	presort    scriptCall
 
-	// Read shaping for finds (and, later, the get-range endpoint).
-	sort   []SortRule
-	limit  int
-	offset int
+	// Read shaping for finds (and, later, the get endpoints). responseLayout maps
+	// to layout.response; portals selects which portals to return; portalRanges
+	// pages within a named portal (offset.<name>/limit.<name>).
+	sort           []SortRule
+	limit          int
+	offset         int
+	responseLayout string
+	portals        []string
+	portalRanges   map[string]portalRange
 
 	err error
+}
+
+// portalRange is the offset/limit paging for a single named portal. A zero field
+// means unset for that dimension.
+type portalRange struct {
+	offset int
+	limit  int
+}
+
+// updatePortalRange applies fn to the range for the named portal, creating the
+// map and entry on first use. Map values are not addressable, so it reads,
+// mutates, and writes back.
+func (c *recordConfig) updatePortalRange(name string, fn func(*portalRange)) {
+	if c.portalRanges == nil {
+		c.portalRanges = map[string]portalRange{}
+	}
+	pr := c.portalRanges[name]
+	fn(&pr)
+	c.portalRanges[name] = pr
 }
 
 // scriptCall is a script to run with a request: its name and an optional
@@ -249,6 +280,44 @@ func WithLimit(limit int) ReadManyOption {
 func WithOffset(offset int) ReadManyOption {
 	return option(func(c *recordConfig) {
 		c.offset = offset
+	})
+}
+
+// WithResponseLayout returns each record's data in the context of layout rather
+// than the one the read targets — the Data API layout.response. The two layouts
+// must share a base table. Calling it again keeps only the last.
+func WithResponseLayout(layout string) ReadOption {
+	return option(func(c *recordConfig) {
+		c.responseLayout = layout
+	})
+}
+
+// WithPortals restricts which portals the result includes to the named ones (by
+// table-occurrence/portal-object name); portals not listed are omitted. The
+// record's own field data is always returned — this affects only which portals
+// accompany it, not whether field data comes back. Omitting the option (or
+// passing no names) returns all portals. Calling it again replaces the set.
+func WithPortals(names ...string) ReadOption {
+	return option(func(c *recordConfig) {
+		c.portals = names
+	})
+}
+
+// WithPortalLimit caps the number of related records returned for the named
+// portal (the host's default is 50). A non-positive limit is treated as unset.
+// Calling it again for the same portal keeps only the last.
+func WithPortalLimit(portal string, limit int) ReadOption {
+	return option(func(c *recordConfig) {
+		c.updatePortalRange(portal, func(pr *portalRange) { pr.limit = limit })
+	})
+}
+
+// WithPortalOffset sets the 1-based index of the first related record returned
+// for the named portal (the host's default is 1). A non-positive offset is
+// treated as unset. Calling it again for the same portal keeps only the last.
+func WithPortalOffset(portal string, offset int) ReadOption {
+	return option(func(c *recordConfig) {
+		c.updatePortalRange(portal, func(pr *portalRange) { pr.offset = offset })
 	})
 }
 

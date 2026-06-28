@@ -93,9 +93,53 @@ func TestFindWithReadManyOptions(t *testing.T) {
 	mu.Lock()
 	body := gotBody
 	mu.Unlock()
-	want := `{"query":[{"Name":"Mark"}],"sort":[{"fieldName":"Name","sortOrder":"ascend"}],"limit":10,"offset":5}`
+	want := `{"limit":10,"offset":5,"query":[{"Name":"Mark"}],"sort":[{"fieldName":"Name","sortOrder":"ascend"}]}`
 	if body != want {
 		t.Errorf("body =\n %s\nwant:\n %s", body, want)
+	}
+}
+
+func TestFindWithReadOptions(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"data":[]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if _, err := c.Find(context.Background(), "People",
+		[]FindRequest{{Criteria: map[string]string{"Name": "Mark"}}},
+		WithResponseLayout("PeopleAPI"),
+		WithPortals("Orders", "Notes"),
+		WithPortalLimit("Orders", 5),
+		WithPortalOffset("Orders", 2),
+	); err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("unmarshal body %q: %v", body, err)
+	}
+	if got["layout.response"] != "PeopleAPI" {
+		t.Errorf("layout.response = %v, want PeopleAPI (body %q)", got["layout.response"], body)
+	}
+	portals, _ := got["portal"].([]any)
+	if len(portals) != 2 || portals[0] != "Orders" || portals[1] != "Notes" {
+		t.Errorf("portal = %v, want [Orders Notes]", got["portal"])
+	}
+	// Per-portal paging rides in dynamic "offset.<name>"/"limit.<name>" keys.
+	if got["limit.Orders"] != float64(5) || got["offset.Orders"] != float64(2) {
+		t.Errorf("portal paging = offset.Orders=%v limit.Orders=%v, want 2/5 (body %q)", got["offset.Orders"], got["limit.Orders"], body)
 	}
 }
 

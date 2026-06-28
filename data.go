@@ -356,24 +356,47 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 
 // marshalFindBody renders the _find request body: the find requests under the
 // "query" key (each marshals itself, folding in "omit"; see
-// FindRequest.MarshalJSON), plus the sort/limit/offset read shaping the options
-// set, each omitted when empty. A nil requests slice becomes an empty (non-nil)
-// array so the body always carries the required "query" key.
+// FindRequest.MarshalJSON), plus the read shaping the options set, each omitted
+// when unset. A nil requests slice becomes an empty (non-nil) array so the body
+// always carries the required "query" key.
+//
+// It is assembled as a map because the per-portal paging keys are dynamic
+// ("offset.<portal>"/"limit.<portal>"); a fixed struct cannot express them.
 func marshalFindBody(requests []FindRequest, cfg recordConfig) ([]byte, error) {
 	if requests == nil {
 		requests = []FindRequest{}
 	}
 
-	body, err := json.Marshal(struct {
-		Query  []FindRequest `json:"query"`
-		Sort   []SortRule    `json:"sort,omitempty"`
-		Limit  int           `json:"limit,omitempty"`
-		Offset int           `json:"offset,omitempty"`
-	}{requests, cfg.sort, cfg.limit, cfg.offset})
+	body := map[string]any{"query": requests}
+	if len(cfg.sort) > 0 {
+		body["sort"] = cfg.sort
+	}
+	if cfg.limit > 0 {
+		body["limit"] = cfg.limit
+	}
+	if cfg.offset > 0 {
+		body["offset"] = cfg.offset
+	}
+	if cfg.responseLayout != "" {
+		body["layout.response"] = cfg.responseLayout
+	}
+	if len(cfg.portals) > 0 {
+		body["portal"] = cfg.portals
+	}
+	for name, pr := range cfg.portalRanges {
+		if pr.offset > 0 {
+			body["offset."+name] = pr.offset
+		}
+		if pr.limit > 0 {
+			body["limit."+name] = pr.limit
+		}
+	}
+
+	out, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("filemaker: failed to marshal find query: %w", err)
 	}
-	return body, nil
+	return out, nil
 }
 
 // marshalRecordBody wraps fields in the {"fieldData": ...} envelope the host

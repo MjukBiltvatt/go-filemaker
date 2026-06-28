@@ -53,7 +53,7 @@ func TestMarshalFindBody(t *testing.T) {
 				limit:  10,
 				offset: 5,
 			},
-			want: `{"query":[{"Firstname":"Mark"}],"sort":[{"fieldName":"Lastname","sortOrder":"ascend"},{"fieldName":"Age","sortOrder":"descend"}],"limit":10,"offset":5}`,
+			want: `{"limit":10,"offset":5,"query":[{"Firstname":"Mark"}],"sort":[{"fieldName":"Lastname","sortOrder":"ascend"},{"fieldName":"Age","sortOrder":"descend"}]}`,
 		},
 	}
 

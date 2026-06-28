@@ -884,6 +884,65 @@ func TestIntegrationPortal(t *testing.T) {
 	}
 }
 
+// TestIntegrationPortalPaging exercises WithPortalLimit and WithPortalOffset
+// against a real host. This is the coverage the mocks cannot give: the find body
+// pages a portal with "offset.<portal>"/"limit.<portal>" keys (no leading
+// underscore, unlike the get-range endpoint), so only the host confirms the keys
+// are honored. It asserts row counts, which are independent of portal row order.
+func TestIntegrationPortalPaging(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	marker := "go-filemaker-it-portalpage-" + time.Now().UTC().Format("20060102T150405.000000000")
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldText:     marker,
+		fieldRequired: "present",
+	}, WithPortalData(PortalData{portalName: {
+		{fieldChildText: "row-1"},
+		{fieldChildText: "row-2"},
+		{fieldChildText: "row-3"},
+		{fieldChildText: "row-4"},
+	}}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	// countPortal finds the seeded record with the given read options and returns
+	// how many ChildTable rows came back.
+	countPortal := func(opts ...FindOption) int {
+		t.Helper()
+		found, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}}, opts...)
+		if err != nil {
+			t.Fatalf("Find: %v", err)
+		}
+		if len(found.Records) != 1 {
+			t.Fatalf("Find returned %d records, want 1", len(found.Records))
+		}
+		return len(found.Records[0].Portals()[portalName])
+	}
+
+	// A default find caps portal rows at the layout portal's configured row
+	// count, so read the true total with an explicit, generous limit that
+	// overrides that cap; the test only needs enough rows for limit/offset to
+	// slice the set.
+	total := countPortal(WithPortalLimit(portalName, 1000))
+	if total < 3 {
+		t.Fatalf("seeded portal returned %d rows, need at least 3 to test paging", total)
+	}
+	if n := countPortal(WithPortalLimit(portalName, 2)); n != 2 {
+		t.Errorf("limit 2: %d portal rows, want 2", n)
+	}
+	// Offset 2 (1-based) skips the first row; a generous limit returns the rest.
+	if n := countPortal(WithPortalOffset(portalName, 2), WithPortalLimit(portalName, 1000)); n != total-1 {
+		t.Errorf("offset 2: %d portal rows, want %d", n, total-1)
+	}
+}
+
 // TestIntegrationUpdateWithModID exercises the WithModID optimistic-lock option
 // against a real host: a conditional update whose mod ID matches applies and
 // advances the host's mod ID, and re-using the now-stale mod ID is rejected with
