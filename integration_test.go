@@ -1300,6 +1300,69 @@ func TestIntegrationFindQuery(t *testing.T) {
 	})
 }
 
+// TestIntegrationFindMultiSort confirms a multi-rule WithSort is applied in
+// order against a real host: the first rule sorts, the second breaks ties. It
+// seeds records with a tied primary (NumberField) and a distinguishing secondary
+// (TextSecondary) — coverage TestIntegrationFindQuery cannot give, since its rows
+// have distinct NumberField values and so never exercise a tiebreaker.
+func TestIntegrationFindMultiSort(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	marker := "go-filemaker-it-multisort-" + time.Now().UTC().Format("20060102T150405.000000000")
+	// Seeded out of order; each (num, sec) pair is unique so the result order is
+	// deterministic under "num asc, then sec asc".
+	seed := []struct {
+		num int
+		sec string
+	}{
+		{2, "b"},
+		{1, "b"},
+		{2, "a"},
+		{1, "a"},
+	}
+	ids := make([]string, 0, len(seed))
+	for _, s := range seed {
+		created, err := itClient.Create(ctx, itLayout, FieldData{
+			fieldText:          marker,
+			fieldNumber:        s.num,
+			fieldTextSecondary: s.sec,
+			fieldRequired:      "present",
+		})
+		if err != nil {
+			t.Fatalf("Create(%d,%s): %v", s.num, s.sec, err)
+		}
+		ids = append(ids, created.RecordID)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			if _, err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
+				t.Errorf("cleanup DeleteByID(%s): %v", id, err)
+			}
+		}
+	})
+
+	res, err := itClient.Find(ctx, itLayout,
+		[]FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}},
+		WithSort(
+			SortRule{Field: fieldNumber, Order: SortAscending},
+			SortRule{Field: fieldTextSecondary, Order: SortAscending},
+		),
+	)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+
+	var got []string
+	for _, r := range res.Records {
+		got = append(got, strconv.Itoa(r.Int(fieldNumber))+r.String(fieldTextSecondary))
+	}
+	want := []string{"1a", "1b", "2a", "2b"}
+	if !slices.Equal(got, want) {
+		t.Errorf("multi-field sort order = %v, want %v", got, want)
+	}
+}
+
 // invalidateSession ends a client's session token on the host without disturbing
 // the client, so it unknowingly holds a dead token — a faithful stand-in for an
 // expired session. In-package access to the unexported token is what makes this
