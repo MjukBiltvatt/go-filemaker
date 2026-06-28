@@ -81,16 +81,29 @@ type ScriptOutcomes struct {
 	Presort    ScriptOutcome // WithPresortScript
 }
 
-// Find runs the query against the layout. A query that matches no records
-// returns a FindResponse with an empty Records slice and a nil error.
-func (c *Client) Find(ctx context.Context, layout string, query Query) (FindResponse, error) {
+// Find runs the given find requests against the layout. The requests are
+// combined as alternatives (logical OR); within a request the criteria are
+// matched together (logical AND). A find that matches no records returns a
+// FindResponse with an empty Records slice and a nil error.
+//
+// Pass WithSort, WithLimit, and WithOffset to order and page the result. Without
+// WithLimit the host returns at most its default of 100 records, so pass
+// WithLimit (with WithOffset to page) to retrieve more. (The Data API documents
+// this default for the record-range endpoint; the find endpoint applies the same
+// cap.)
+func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest, opts ...FindOption) (FindResponse, error) {
 	if layout == "" {
 		return FindResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	body, err := json.Marshal(query)
+	cfg, err := resolveFindConfig(opts)
 	if err != nil {
-		return FindResponse{}, fmt.Errorf("filemaker: failed to marshal query: %w", err)
+		return FindResponse{}, err
+	}
+
+	body, err := marshalFindBody(requests, cfg)
+	if err != nil {
+		return FindResponse{}, err
 	}
 
 	var rb responseBody
@@ -339,6 +352,28 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 	c.lastActivity = time.Now()
 	c.mu.Unlock()
 	return data, nil
+}
+
+// marshalFindBody renders the _find request body: the find requests under the
+// "query" key (each marshals itself, folding in "omit"; see
+// FindRequest.MarshalJSON), plus the sort/limit/offset read shaping the options
+// set, each omitted when empty. A nil requests slice becomes an empty (non-nil)
+// array so the body always carries the required "query" key.
+func marshalFindBody(requests []FindRequest, cfg recordConfig) ([]byte, error) {
+	if requests == nil {
+		requests = []FindRequest{}
+	}
+
+	body, err := json.Marshal(struct {
+		Query  []FindRequest `json:"query"`
+		Sort   []SortRule    `json:"sort,omitempty"`
+		Limit  int           `json:"limit,omitempty"`
+		Offset int           `json:"offset,omitempty"`
+	}{requests, cfg.sort, cfg.limit, cfg.offset})
+	if err != nil {
+		return nil, fmt.Errorf("filemaker: failed to marshal find query: %w", err)
+	}
+	return body, nil
 }
 
 // marshalRecordBody wraps fields in the {"fieldData": ...} envelope the host

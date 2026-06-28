@@ -27,20 +27,10 @@ const (
 // added later; for now the values are passed through verbatim.
 type Criteria map[string]string
 
-// Query is a declarative find command. It is built as a plain struct literal and
-// marshals to the FileMaker Data API _find request body. A Query with no
-// Requests marshals to an empty query array.
-type Query struct {
-	Requests []FindRequest
-	Sort     []SortRule
-	Limit    int // 0 = server default
-	Offset   int // 0 = no offset
-}
-
-// FindRequest is a single find request within a Query. Criteria maps each field
+// FindRequest is a single find request passed to Find. Criteria maps each field
 // name to a find value using FileMaker find syntax (see Criteria); the criteria
-// are matched together (logical AND). Separate FindRequests in a Query are
-// combined as alternatives (logical OR). Set Omit to exclude matching records.
+// are matched together (logical AND). Separate FindRequests are combined as
+// alternatives (logical OR). Set Omit to exclude matching records.
 type FindRequest struct {
 	Criteria Criteria
 	Omit     bool
@@ -70,32 +60,4 @@ func (r FindRequest) MarshalJSON() ([]byte, error) {
 		m["omit"] = "true"
 	}
 	return json.Marshal(m)
-}
-
-// MarshalJSON renders the Query into the Data API _find request body, e.g.
-//
-//	{"query":[{"Firstname":"Mark","omit":"true"}],"sort":[...],"limit":10}
-//
-// Each request marshals itself (see FindRequest.MarshalJSON); a Query with no
-// requests emits an empty (non-nil) query array so the body always carries the
-// required "query" key.
-func (q Query) MarshalJSON() ([]byte, error) {
-	requests := q.Requests
-	if requests == nil {
-		requests = []FindRequest{}
-	}
-
-	wire := struct {
-		Query  []FindRequest `json:"query"`
-		Sort   []SortRule    `json:"sort,omitempty"`
-		Limit  int           `json:"limit,omitempty"`
-		Offset int           `json:"offset,omitempty"`
-	}{
-		Query:  requests,
-		Sort:   q.Sort,
-		Limit:  q.Limit,
-		Offset: q.Offset,
-	}
-
-	return json.Marshal(wire)
 }

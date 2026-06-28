@@ -29,6 +29,9 @@ type UpdateOption interface{ applyUpdate(*recordConfig) }
 // DeleteOption configures a Delete or DeleteByID.
 type DeleteOption interface{ applyDelete(*recordConfig) }
 
+// FindOption configures a Find.
+type FindOption interface{ applyFind(*recordConfig) }
+
 // WriteOption configures any record write: it is accepted by both Create and
 // Update (and UpdateByID).
 type WriteOption interface {
@@ -43,6 +46,12 @@ type RecordOption interface {
 	CreateOption
 	UpdateOption
 	DeleteOption
+}
+
+// ReadManyOption configures a read that returns multiple records — sorting and
+// paging. It is accepted by Find (and, in future, the get-range endpoint).
+type ReadManyOption interface {
+	FindOption
 }
 
 // recordConfig accumulates the optional parameters the options set; each
@@ -62,6 +71,11 @@ type recordConfig struct {
 	script     scriptCall
 	prerequest scriptCall
 	presort    scriptCall
+
+	// Read shaping for finds (and, later, the get-range endpoint).
+	sort   []SortRule
+	limit  int
+	offset int
 
 	err error
 }
@@ -114,6 +128,7 @@ type option func(*recordConfig)
 func (o option) applyCreate(c *recordConfig) { o(c) }
 func (o option) applyUpdate(c *recordConfig) { o(c) }
 func (o option) applyDelete(c *recordConfig) { o(c) }
+func (o option) applyFind(c *recordConfig)   { o(c) }
 
 // WithModID makes the update conditional (optimistic concurrency) against a
 // specific mod ID: the host rejects it with ErrRecordModified if the record's
@@ -213,6 +228,30 @@ func WithPresortScript(name, param string) RecordOption {
 	})
 }
 
+// WithSort orders a find result by each rule in turn. Calling it again replaces
+// the previous rules; passing no rules leaves the result unsorted.
+func WithSort(rules ...SortRule) ReadManyOption {
+	return option(func(c *recordConfig) {
+		c.sort = rules
+	})
+}
+
+// WithLimit caps the number of records a find returns (the host's default is
+// 100). A non-positive limit is treated as unset, leaving the host default.
+func WithLimit(limit int) ReadManyOption {
+	return option(func(c *recordConfig) {
+		c.limit = limit
+	})
+}
+
+// WithOffset sets the 1-based index of the first record a find returns (the
+// host's default is 1). A non-positive offset is treated as unset.
+func WithOffset(offset int) ReadManyOption {
+	return option(func(c *recordConfig) {
+		c.offset = offset
+	})
+}
+
 // resolveCreateConfig applies the create options. Deferred option errors surface
 // here.
 func resolveCreateConfig(opts []CreateOption) (recordConfig, error) {
@@ -232,6 +271,18 @@ func resolveDeleteConfig(opts []DeleteOption) (recordConfig, error) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt.applyDelete(&cfg)
+		}
+	}
+	return cfg, cfg.err
+}
+
+// resolveFindConfig applies the find options. Deferred option errors surface
+// here.
+func resolveFindConfig(opts []FindOption) (recordConfig, error) {
+	var cfg recordConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyFind(&cfg)
 		}
 	}
 	return cfg, cfg.err

@@ -33,9 +33,7 @@ func TestFind(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	resp, err := c.Find(context.Background(), "People", Query{
-		Requests: []FindRequest{{Criteria: map[string]string{"Name": "Mark"}}},
-	})
+	resp, err := c.Find(context.Background(), "People", []FindRequest{{Criteria: map[string]string{"Name": "Mark"}}})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -70,6 +68,37 @@ func TestFind(t *testing.T) {
 	}
 }
 
+func TestFindWithReadManyOptions(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"data":[]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if _, err := c.Find(context.Background(), "People",
+		[]FindRequest{{Criteria: map[string]string{"Name": "Mark"}}},
+		WithSort(SortRule{Field: "Name", Order: SortAscending}),
+		WithLimit(10),
+		WithOffset(5),
+	); err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+	want := `{"query":[{"Name":"Mark"}],"sort":[{"fieldName":"Name","sortOrder":"ascend"}],"limit":10,"offset":5}`
+	if body != want {
+		t.Errorf("body =\n %s\nwant:\n %s", body, want)
+	}
+}
+
 func TestFindStampsLocation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, `{"response":{"data":[{"recordId":"1","modId":"0","fieldData":{"Created":"01/02/2006 15:04:05"},"portalData":{}}]},"messages":[{"code":"0","message":"OK"}]}`)
@@ -80,7 +109,7 @@ func TestFindStampsLocation(t *testing.T) {
 	c := testClient(srv)
 	c.location = loc
 
-	resp, err := c.Find(context.Background(), "People", Query{})
+	resp, err := c.Find(context.Background(), "People", nil)
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -99,7 +128,7 @@ func TestFindNoRecords(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	resp, err := c.Find(context.Background(), "People", Query{})
+	resp, err := c.Find(context.Background(), "People", nil)
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -113,7 +142,7 @@ func TestFindNoRecords(t *testing.T) {
 
 func TestFindNoLayout(t *testing.T) {
 	c := &Client{}
-	if _, err := c.Find(context.Background(), "", Query{}); err == nil {
+	if _, err := c.Find(context.Background(), "", nil); err == nil {
 		t.Error("expected error for empty layout")
 	}
 }

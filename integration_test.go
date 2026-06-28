@@ -485,9 +485,7 @@ func TestIntegrationCRUD(t *testing.T) {
 	})
 
 	// Find it back by the unique marker.
-	found, err := itClient.Find(ctx, itLayout, Query{
-		Requests: []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}},
-	})
+	found, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -508,9 +506,7 @@ func TestIntegrationCRUD(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	reFound, err := itClient.Find(ctx, itLayout, Query{
-		Requests: []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}},
-	})
+	reFound, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}})
 	if err != nil {
 		t.Fatalf("Find after update: %v", err)
 	}
@@ -559,9 +555,7 @@ func TestIntegrationSpecialLayoutNames(t *testing.T) {
 		}
 	})
 
-	found, err := itClient.Find(ctx, layout, Query{
-		Requests: []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}},
-	})
+	found, err := itClient.Find(ctx, layout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}})
 	if err != nil {
 		t.Fatalf("Find on %q: %v", layout, err)
 	}
@@ -608,9 +602,7 @@ func TestIntegrationDateTime(t *testing.T) {
 		}
 	})
 
-	found, err := itClient.Find(ctx, itLayout, Query{
-		Requests: []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}},
-	})
+	found, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -671,9 +663,7 @@ func TestIntegrationDateTimeLocation(t *testing.T) {
 		}
 	})
 
-	found, err := c.Find(ctx, itLayout, Query{
-		Requests: []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}},
-	})
+	found, err := c.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -732,11 +722,9 @@ func TestIntegrationRequiredField(t *testing.T) {
 func TestIntegrationFindNoMatch(t *testing.T) {
 	requireLayout(t)
 
-	res, err := itClient.Find(context.Background(), itLayout, Query{
-		Requests: []FindRequest{{Criteria: map[string]string{
-			fieldText: "==go-filemaker-it-no-such-record-zzz",
-		}}},
-	})
+	res, err := itClient.Find(context.Background(), itLayout, []FindRequest{{Criteria: map[string]string{
+		fieldText: "==go-filemaker-it-no-such-record-zzz",
+	}}})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -772,9 +760,7 @@ func TestIntegrationContainer(t *testing.T) {
 		t.Fatalf("UploadToContainerByID: %v", err)
 	}
 
-	found, err := itClient.Find(ctx, itLayout, Query{
-		Requests: []FindRequest{{Criteria: map[string]string{fieldText: "==go-filemaker-it-container"}}},
-	})
+	found, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==go-filemaker-it-container"}}})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -795,9 +781,7 @@ func TestIntegrationContainer(t *testing.T) {
 // the host returns anything other than exactly one.
 func findParent(t *testing.T, ctx context.Context, marker string) Record {
 	t.Helper()
-	found, err := itClient.Find(ctx, itLayout, Query{
-		Requests: []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}},
-	})
+	found, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -1129,10 +1113,9 @@ func TestIntegrationFindQuery(t *testing.T) {
 	mine := FindRequest{Criteria: map[string]string{fieldText: "==" + marker}}
 
 	t.Run("SortDescending", func(t *testing.T) {
-		res, err := itClient.Find(ctx, itLayout, Query{
-			Requests: []FindRequest{mine},
-			Sort:     []SortRule{{Field: fieldNumber, Order: SortDescending}},
-		})
+		res, err := itClient.Find(ctx, itLayout, []FindRequest{mine},
+			WithSort(SortRule{Field: fieldNumber, Order: SortDescending}),
+		)
 		if err != nil {
 			t.Fatalf("Find: %v", err)
 		}
@@ -1142,11 +1125,10 @@ func TestIntegrationFindQuery(t *testing.T) {
 	})
 
 	t.Run("SortAscendingLimit", func(t *testing.T) {
-		res, err := itClient.Find(ctx, itLayout, Query{
-			Requests: []FindRequest{mine},
-			Sort:     []SortRule{{Field: fieldNumber, Order: SortAscending}},
-			Limit:    2,
-		})
+		res, err := itClient.Find(ctx, itLayout, []FindRequest{mine},
+			WithSort(SortRule{Field: fieldNumber, Order: SortAscending}),
+			WithLimit(2),
+		)
 		if err != nil {
 			t.Fatalf("Find: %v", err)
 		}
@@ -1165,12 +1147,11 @@ func TestIntegrationFindQuery(t *testing.T) {
 	t.Run("Offset", func(t *testing.T) {
 		// Offset is 1-based, so 3 starts at the third record; with limit 2 that
 		// is the back half of the ascending set.
-		res, err := itClient.Find(ctx, itLayout, Query{
-			Requests: []FindRequest{mine},
-			Sort:     []SortRule{{Field: fieldNumber, Order: SortAscending}},
-			Limit:    2,
-			Offset:   3,
-		})
+		res, err := itClient.Find(ctx, itLayout, []FindRequest{mine},
+			WithSort(SortRule{Field: fieldNumber, Order: SortAscending}),
+			WithLimit(2),
+			WithOffset(3),
+		)
 		if err != nil {
 			t.Fatalf("Find: %v", err)
 		}
@@ -1181,11 +1162,9 @@ func TestIntegrationFindQuery(t *testing.T) {
 
 	t.Run("Omit", func(t *testing.T) {
 		// Include the whole set, then omit NumberField 1.
-		res, err := itClient.Find(ctx, itLayout, Query{
-			Requests: []FindRequest{
-				mine,
-				{Criteria: map[string]string{fieldText: "==" + marker, fieldNumber: "1"}, Omit: true},
-			},
+		res, err := itClient.Find(ctx, itLayout, []FindRequest{
+			mine,
+			{Criteria: map[string]string{fieldText: "==" + marker, fieldNumber: "1"}, Omit: true},
 		})
 		if err != nil {
 			t.Fatalf("Find: %v", err)
@@ -1202,11 +1181,9 @@ func TestIntegrationFindQuery(t *testing.T) {
 
 	t.Run("MultipleRequestsOR", func(t *testing.T) {
 		// Separate requests are alternatives: NumberField 1 OR 4.
-		res, err := itClient.Find(ctx, itLayout, Query{
-			Requests: []FindRequest{
-				{Criteria: map[string]string{fieldText: "==" + marker, fieldNumber: "1"}},
-				{Criteria: map[string]string{fieldText: "==" + marker, fieldNumber: "4"}},
-			},
+		res, err := itClient.Find(ctx, itLayout, []FindRequest{
+			{Criteria: map[string]string{fieldText: "==" + marker, fieldNumber: "1"}},
+			{Criteria: map[string]string{fieldText: "==" + marker, fieldNumber: "4"}},
 		})
 		if err != nil {
 			t.Fatalf("Find: %v", err)
@@ -1219,7 +1196,7 @@ func TestIntegrationFindQuery(t *testing.T) {
 	})
 
 	t.Run("DataInfo", func(t *testing.T) {
-		res, err := itClient.Find(ctx, itLayout, Query{Requests: []FindRequest{mine}})
+		res, err := itClient.Find(ctx, itLayout, []FindRequest{mine})
 		if err != nil {
 			t.Fatalf("Find: %v", err)
 		}
@@ -1268,7 +1245,7 @@ func TestIntegrationReauthOnInvalidToken(t *testing.T) {
 	requireLayout(t)
 	ctx := context.Background()
 	// A query that matches nothing keeps the request cheap and side-effect free.
-	emptyQuery := Query{Requests: []FindRequest{{Criteria: map[string]string{fieldText: "==go-filemaker-it-never-matches"}}}}
+	emptyQuery := []FindRequest{{Criteria: map[string]string{fieldText: "==go-filemaker-it-never-matches"}}}
 
 	// Control: no reauth option, so a dead token surfaces as ErrInvalidToken.
 	// This also confirms the out-of-band logout genuinely invalidated the token.
