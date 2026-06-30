@@ -442,3 +442,48 @@ func TestWithDateFormatWiring(t *testing.T) {
 		t.Errorf("default dateFormat = %v, want nil (unset)", d.dateFormat)
 	}
 }
+
+// TestURLBuildersEscapeSegments guards that the request-path builders percent-
+// escape the database, layout, id, and field segments, so names with
+// URL-reserved characters (spaces, '#', '/') address the right resource instead
+// of corrupting the path. It is the hermetic counterpart to
+// TestIntegrationSpecialLayoutNames.
+func TestURLBuildersEscapeSegments(t *testing.T) {
+	c := &Client{host: "https://h", database: "My DB"}
+	const base = "https://h/fmi/data/v1/databases/My%20DB"
+
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"baseURL", c.baseURL(), base},
+		{"layoutURL", c.layoutURL("Sales #1"), base + "/layouts/Sales%20%231"},
+		{"findURL", c.findURL("Sales #1"), base + "/layouts/Sales%20%231/_find"},
+		{"recordsURL", c.recordsURL("Sales #1"), base + "/layouts/Sales%20%231/records"},
+		{"recordURL", c.recordURL("A/B", "7"), base + "/layouts/A%2FB/records/7"},
+		{"containerURL", c.containerURL("Lay #2", "7", "My Field"), base + "/layouts/Lay%20%232/records/7/containers/My%20Field"},
+		{"globalsURL", c.globalsURL(), base + "/globals"},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+// With reauth disabled, a 952 from the host should surface as an error that
+// callers can branch on with errors.Is rather than inspecting numeric codes.
+func TestInvalidTokenSentinelThroughDo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{},"messages":[{"code":"952","message":"Invalid FileMaker Data API token"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv) // reauthOnInvalidToken defaults to false
+	var rb responseBody
+	err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb)
+	if !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("got %v, want errors.Is ErrInvalidToken", err)
+	}
+}

@@ -1059,35 +1059,6 @@ func TestDuplicateNoRecordID(t *testing.T) {
 	}
 }
 
-// TestURLBuildersEscapeSegments guards that the request-path builders percent-
-// escape the database, layout, id, and field segments, so names with
-// URL-reserved characters (spaces, '#', '/') address the right resource instead
-// of corrupting the path. It is the hermetic counterpart to
-// TestIntegrationSpecialLayoutNames.
-func TestURLBuildersEscapeSegments(t *testing.T) {
-	c := &Client{host: "https://h", database: "My DB"}
-	const base = "https://h/fmi/data/v1/databases/My%20DB"
-
-	cases := []struct {
-		name string
-		got  string
-		want string
-	}{
-		{"baseURL", c.baseURL(), base},
-		{"layoutURL", c.layoutURL("Sales #1"), base + "/layouts/Sales%20%231"},
-		{"findURL", c.findURL("Sales #1"), base + "/layouts/Sales%20%231/_find"},
-		{"recordsURL", c.recordsURL("Sales #1"), base + "/layouts/Sales%20%231/records"},
-		{"recordURL", c.recordURL("A/B", "7"), base + "/layouts/A%2FB/records/7"},
-		{"containerURL", c.containerURL("Lay #2", "7", "My Field"), base + "/layouts/Lay%20%232/records/7/containers/My%20Field"},
-		{"globalsURL", c.globalsURL(), base + "/globals"},
-	}
-	for _, tc := range cases {
-		if tc.got != tc.want {
-			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
-		}
-	}
-}
-
 func TestSetGlobalFields(t *testing.T) {
 	var mu sync.Mutex
 	var gotMethod, gotPath, gotBody string
@@ -1150,5 +1121,50 @@ func TestSetGlobalFieldsNilBecomesEmptyObject(t *testing.T) {
 	}
 	if gotBody != `{"globalFields":{}}` {
 		t.Errorf("body = %q, want {\"globalFields\":{}}", gotBody)
+	}
+}
+
+// TestMarshalRecordBodyDateFormat checks that the body carries a dateformats
+// parameter and reformats Date/Timestamp values only when a format is set, and
+// is unchanged (no parameter, US values) when unset.
+func TestMarshalRecordBodyDateFormat(t *testing.T) {
+	fields := FieldData{
+		"DOB":     Date(time.Date(1990, 6, 23, 0, 0, 0, 0, time.UTC)),
+		"Created": Timestamp(time.Date(2026, 6, 23, 14, 5, 0, 0, time.UTC)),
+	}
+	us, iso := DateFormatUS, DateFormatISO
+	cases := []struct {
+		name   string
+		format *DateFormat
+		want   string
+	}{
+		{"unset", nil, `{"fieldData":{"Created":"06/23/2026 14:05:00","DOB":"06/23/1990"}}`},
+		{"US", &us, `{"dateformats":0,"fieldData":{"Created":"06/23/2026 14:05:00","DOB":"06/23/1990"}}`},
+		{"ISO", &iso, `{"dateformats":2,"fieldData":{"Created":"2026-06-23 14:05:00","DOB":"1990-06-23"}}`},
+	}
+	for _, c := range cases {
+		body, err := marshalRecordBody(fields, recordConfig{}, c.format)
+		if err != nil {
+			t.Fatalf("%s: marshalRecordBody: %v", c.name, err)
+		}
+		if string(body) != c.want {
+			t.Errorf("%s:\n got: %s\nwant: %s", c.name, body, c.want)
+		}
+	}
+}
+
+func TestFieldDataWithTypedValues(t *testing.T) {
+	body, err := marshalRecordBody(FieldData{
+		"Active":  Bool(true),
+		"DOB":     Date(time.Date(1990, 6, 23, 0, 0, 0, 0, time.UTC)),
+		"Created": Timestamp(time.Date(2026, 6, 23, 14, 5, 0, 0, time.UTC)),
+		"Name":    "Mark",
+	}, recordConfig{}, nil)
+	if err != nil {
+		t.Fatalf("marshalRecordBody: %v", err)
+	}
+	want := `{"fieldData":{"Active":1,"Created":"06/23/2026 14:05:00","DOB":"06/23/1990","Name":"Mark"}}`
+	if string(body) != want {
+		t.Errorf("got:  %s\nwant: %s", body, want)
 	}
 }
