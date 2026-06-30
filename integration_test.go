@@ -1689,3 +1689,69 @@ func TestIntegrationWithDateFormatISO(t *testing.T) {
 		t.Errorf("TimestampField after ISO edit = %v (err %v), want %v", got, err, newTS)
 	}
 }
+
+// TestIntegrationRunScript exercises RunScript against a real host. It relies on
+// the same scriptEcho and scriptFail fixtures as TestIntegrationScriptResults
+// (see docs/integration-testing.md): EchoParam must return its parameter via
+// Exit Script and TriggerError must end with a non-zero error. The missing-script
+// subtest needs no fixture.
+func TestIntegrationRunScript(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	t.Run("EchoParam", func(t *testing.T) {
+		const param = "hello-run-script"
+		resp, err := itClient.RunScript(ctx, itLayout, scriptEcho, param)
+		if err != nil {
+			t.Fatalf("RunScript: %v", err)
+		}
+		if !resp.Script.OK() {
+			t.Errorf("script error = %q, want \"0\" (is %s defined and accessible? see docs/integration-testing.md)", resp.Script.Error, scriptEcho)
+		}
+		if resp.Script.Result != param {
+			t.Errorf("script result = %q, want %q (does %s do Exit Script [Get(ScriptParameter)]?)", resp.Script.Result, param, scriptEcho)
+		}
+	})
+
+	t.Run("NoParam", func(t *testing.T) {
+		resp, err := itClient.RunScript(ctx, itLayout, scriptEcho, "")
+		if err != nil {
+			t.Fatalf("RunScript with no param: %v", err)
+		}
+		if !resp.Script.Ran() {
+			t.Error("Script.Ran() = false, want true")
+		}
+	})
+
+	t.Run("ScriptError", func(t *testing.T) {
+		// A script that runs but ends with an error must not cause a request
+		// failure. RunScript returns nil and the error is in Script.Error.
+		resp, err := itClient.RunScript(ctx, itLayout, scriptFail, "")
+		if err != nil {
+			t.Fatalf("RunScript(%s): %v", scriptFail, err)
+		}
+		if !resp.Script.Ran() {
+			t.Errorf("Script.Ran() = false, want true (is %s defined and accessible? see docs/integration-testing.md)", scriptFail)
+		}
+		if resp.Script.OK() {
+			t.Errorf("Script.OK() = true, want false (does %s deliberately end with an error?)", scriptFail)
+		}
+	})
+
+	t.Run("MissingScript", func(t *testing.T) {
+		// A script that does not exist is a request-level failure: FileMaker
+		// error 104 ("script is missing") in the primary message.
+		_, err := itClient.RunScript(ctx, itLayout, "go-filemaker-no-such-script", "")
+		if err == nil {
+			t.Fatal("want error, got nil")
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("error = %v (%T), want *APIError", err, err)
+		}
+		const codeScriptMissing = 104
+		if apiErr.Code() != codeScriptMissing {
+			t.Errorf("error code = %d (%v), want %d (script is missing)", apiErr.Code(), apiErr, codeScriptMissing)
+		}
+	})
+}

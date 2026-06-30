@@ -217,6 +217,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationGet` | `GetByID` and `Get` fetch a single record; field data round-trips correctly |
 | `TestIntegrationGetRange` | `GetRange` with `WithLimit`/`WithSort`; returned record count and `DataInfo` are correct |
 | `TestIntegrationWithDateFormatISO` | `WithDateFormat(DateFormatISO)` writes ISO + sends `dateformats=2` |
+| `TestIntegrationRunScript` | `RunScript` dedicated endpoint: echo param round-trip, script error without request failure, missing script → `*APIError` code 104 (needs the `EchoParam` and `TriggerError` fixtures) |
 
 ## Date formats (`WithDateFormat`)
 

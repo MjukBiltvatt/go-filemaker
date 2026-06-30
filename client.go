@@ -470,6 +470,11 @@ func (c *Client) globalsURL() string {
 	return c.baseURL() + "/globals"
 }
 
+// scriptURL is the endpoint for running a named script in a layout's context.
+func (c *Client) scriptURL(layout, name string) string {
+	return c.layoutURL(layout) + "/script/" + url.PathEscape(name)
+}
+
 // containerURL is the upload endpoint for a record's container field.
 func (c *Client) containerURL(layout, id, field string) string {
 	return c.recordURL(layout, id) + "/containers/" + url.PathEscape(field)
