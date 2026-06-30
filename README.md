@@ -6,7 +6,7 @@ A goroutine-safe Go client for the [FileMaker Data API](https://help.claris.com/
 - **Goroutine-safe** — share one client across goroutines; session tokens are managed internally.
 - **Declarative finds** — write queries as plain struct literals, no method chaining.
 
-> **v4 is a breaking redesign.** Migrating from v3? See the migration guide _(coming in the next docs step)_.
+> **v4 is a breaking redesign.** Migrating from v3? See the [migration guide](docs/migration-v3-to-v4.md).
 
 ## Install
 
@@ -15,7 +15,7 @@ go get github.com/MjukBiltvatt/go-filemaker/v4
 ```
 
 ```go
-import filemaker "github.com/MjukBiltvatt/go-filemaker/v4"
+import "github.com/MjukBiltvatt/go-filemaker/v4"
 ```
 
 The import path ends in `/v4`; the package name is `filemaker`.
