@@ -48,7 +48,7 @@ func main() {
 		[]filemaker.FindRequest{
 			{Criteria: filemaker.Criteria{"Lastname": "==Johnson", "Age": ">18"}},
 		},
-		filemaker.WithSort(filemaker.SortRule{Field: "Lastname", Order: filemaker.SortAscending}),
+		filemaker.WithSort(filemaker.Asc("Lastname"), filemaker.Desc("Age")),
 		filemaker.WithLimit(10),
 	)
 	if err != nil {

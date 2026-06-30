@@ -30,7 +30,7 @@
 //
 //	res, err := c.Find(ctx, "People",
 //	    []filemaker.FindRequest{{Criteria: filemaker.Criteria{"Lastname": "==Johnson"}}},
-//	    filemaker.WithSort(filemaker.SortRule{Field: "Firstname", Order: filemaker.SortAscending}),
+//	    filemaker.WithSort(filemaker.Asc("Firstname")),
 //	    filemaker.WithLimit(10),
 //	)
 //	for _, rec := range res.Records {

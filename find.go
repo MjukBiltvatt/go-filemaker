@@ -49,6 +49,12 @@ type SortRule struct {
 	Order SortOrder `json:"sortOrder"`
 }
 
+// Asc returns a SortRule that sorts by field in ascending order.
+func Asc(field string) SortRule { return SortRule{Field: field, Order: SortAscending} }
+
+// Desc returns a SortRule that sorts by field in descending order.
+func Desc(field string) SortRule { return SortRule{Field: field, Order: SortDescending} }
+
 // FindResponse is the result of a Find. Records is empty (non-nil) when no
 // records match. DataInfo carries the host's record counts. Scripts holds the
 // outcomes of any scripts run with the request (see WithScript).
