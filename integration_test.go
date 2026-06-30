@@ -152,6 +152,14 @@ const (
 	// "ran and errored" outcome — distinct from a missing script (a request
 	// error) and from no script at all.
 	scriptFail = "TriggerError"
+
+	// itLayout is the primary test layout (see docs/integration-testing.md).
+	itLayout = "ParentTable"
+
+	// itResponseLayout is a minimal layout exposing only TextField, used by
+	// TestIntegrationWithResponseLayout to confirm WithResponseLayout shapes the
+	// response (see docs/integration-testing.md).
+	itResponseLayout = "ParentTableResponse"
 )
 
 // itClient is the single shared session for the whole integration suite, built
@@ -160,7 +168,6 @@ const (
 // suite is unconfigured, which makes requireServer skip.
 var (
 	itClient *Client
-	itLayout string
 
 	// Credentials captured in TestMain so sibling clients with extra options
 	// (e.g. WithLocation) can be built mid-test via buildITClient.
@@ -173,7 +180,6 @@ func TestMain(m *testing.M) {
 	itDatabase = os.Getenv("FM_DATABASE")
 	itUsername = os.Getenv("FM_USERNAME")
 	itPassword = os.Getenv("FM_PASSWORD")
-	itLayout = os.Getenv("FM_LAYOUT")
 	itAllowInsecure = os.Getenv("FM_ALLOW_INSECURE") == "1"
 	itDebug = os.Getenv("FM_DEBUG") == "1"
 
@@ -247,16 +253,7 @@ func buildITClient(t *testing.T, extra ...Option) *Client {
 func requireServer(t *testing.T) {
 	t.Helper()
 	if itClient == nil {
-		t.Skip("integration server not configured; set FM_HOST, FM_DATABASE, FM_USERNAME, FM_PASSWORD, FM_LAYOUT")
-	}
-}
-
-// requireLayout skips the calling test unless a test layout is configured.
-func requireLayout(t *testing.T) {
-	t.Helper()
-	requireServer(t)
-	if itLayout == "" {
-		t.Skip("FM_LAYOUT not set; skipping layout-scoped test")
+		t.Skip("integration server not configured; set FM_HOST, FM_DATABASE, FM_USERNAME, FM_PASSWORD")
 	}
 }
 
@@ -374,7 +371,7 @@ func TestIntegrationLayouts(t *testing.T) {
 // check that the host rejects an empty write. No extra fixture is needed — the
 // existing test layout supplies everything.
 func TestIntegrationLayoutMetadata(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 
 	meta, err := itClient.LayoutMetadata(context.Background(), itLayout)
 	if err != nil {
@@ -485,7 +482,7 @@ func findLayout(layouts []Layout, name string) bool {
 // update a patch, re-find, then delete. It self-cleans via t.Cleanup so a failed
 // assertion mid-test still removes the record.
 func TestIntegrationCRUD(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	// A unique marker so the find matches exactly this record even if the
@@ -608,7 +605,7 @@ func wallClock(t time.Time) string {
 // wall-clock value. If the host is configured non-US, a failure here is a real
 // library/host incompatibility, not a flaky test.
 func TestIntegrationDateTime(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	// Fixed, zone-free values; compared on wall-clock components below.
@@ -662,7 +659,7 @@ func TestIntegrationDateTime(t *testing.T) {
 // stores timestamps zone-free, so the location is applied on read-back, not on
 // the stored value. Runs only when FM_LOCATION names a valid IANA zone.
 func TestIntegrationDateTimeLocation(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	name := os.Getenv("FM_LOCATION")
 	if name == "" {
 		t.Skip("FM_LOCATION not set; skipping location round-trip")
@@ -722,7 +719,7 @@ func TestIntegrationDateTimeLocation(t *testing.T) {
 // *APIError. The library exposes no sentinel for 509, so this also exercises the
 // documented "unpack APIError and switch on Code()" pattern.
 func TestIntegrationRequiredField(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	// Deliberately omit fieldRequired. The host must refuse to store the record.
@@ -751,7 +748,7 @@ func TestIntegrationRequiredField(t *testing.T) {
 // an empty (non-nil) result with a nil error, not an ErrNoRecords surfaced to
 // the caller.
 func TestIntegrationFindNoMatch(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 
 	res, err := itClient.Find(context.Background(), itLayout, []FindRequest{{Criteria: map[string]string{
 		fieldText: "==go-filemaker-it-no-such-record-zzz",
@@ -770,7 +767,7 @@ func TestIntegrationFindNoMatch(t *testing.T) {
 // TestIntegrationContainer round-trips bytes through the layout's container
 // field: upload, find the record back, download, and compare.
 func TestIntegrationContainer(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	created, err := itClient.Create(ctx, itLayout, FieldData{
@@ -843,7 +840,7 @@ func portalRows(t *testing.T, rec Record) map[string]string {
 // the deleteRelated field-data directive. The edit and delete still go through
 // Update, since they address related records that already exist.
 func TestIntegrationPortal(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-portal-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -923,7 +920,7 @@ func TestIntegrationPortal(t *testing.T) {
 // underscore, unlike the get-range endpoint), so only the host confirms the keys
 // are honored. It asserts row counts, which are independent of portal row order.
 func TestIntegrationPortalPaging(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	// Seed more child rows than the portal's configured height so the default cap
@@ -985,7 +982,7 @@ func TestIntegrationPortalPaging(t *testing.T) {
 // advances the host's mod ID, and re-using the now-stale mod ID is rejected with
 // code 306 (ErrRecordModified) without applying the write.
 func TestIntegrationUpdateWithModID(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-modid-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -1040,7 +1037,7 @@ func TestIntegrationUpdateWithModID(t *testing.T) {
 // against a stale version and is rejected (306). The conflict case doubles as
 // proof that a Record's ModID does not move when the host's does.
 func TestIntegrationUpdateIfUnchanged(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-ifunchanged-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -1099,7 +1096,7 @@ func TestIntegrationUpdateIfUnchanged(t *testing.T) {
 // FileMaker code 104 ("script is missing"). A final subtest confirms scripts run
 // on Find too, with the outcome in FindResponse.Scripts.
 func TestIntegrationScriptResults(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-script-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -1202,7 +1199,7 @@ func recNumbers(recs []Record) []int {
 // the DataInfo counts. It seeds four records sharing a run-unique marker in
 // TextField (NumberField 1..4), queries within that set, and cleans them up.
 func TestIntegrationFindQuery(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-query-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -1335,7 +1332,7 @@ func TestIntegrationFindQuery(t *testing.T) {
 // (TextSecondary) — coverage TestIntegrationFindQuery cannot give, since its rows
 // have distinct NumberField values and so never exercise a tiebreaker.
 func TestIntegrationFindMultiSort(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-multisort-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -1425,7 +1422,7 @@ func invalidateSession(t *testing.T, c *Client) string {
 // option the next request surfaces ErrInvalidToken (host code 952); with it, the
 // client re-authenticates and retries transparently, rotating to a fresh token.
 func TestIntegrationReauthOnInvalidToken(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 	// A query that matches nothing keeps the request cheap and side-effect free.
 	emptyQuery := []FindRequest{{Criteria: map[string]string{fieldText: "==go-filemaker-it-never-matches"}}}
@@ -1470,7 +1467,7 @@ func TestIntegrationReauthOnInvalidToken(t *testing.T) {
 // an elapsed duration exceeding 24h written via the Duration wrapper and read
 // back with Duration().
 func TestIntegrationTimeOfDay(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-tod-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -1513,7 +1510,7 @@ func TestIntegrationTimeOfDay(t *testing.T) {
 // confirming the field data round-trips correctly and that the record-based
 // form sources its layout and ID from the record.
 func TestIntegrationGet(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-get-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -1561,7 +1558,7 @@ func TestIntegrationGet(t *testing.T) {
 // confirming that pagination (_offset/_limit) and sort (_sort) are honored and
 // that the returned records carry correct field data.
 func TestIntegrationGetRange(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-getrange-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -1626,7 +1623,7 @@ func TestIntegrationGetRange(t *testing.T) {
 // and reads it back through a record to confirm the host applied it. Relies on
 // the ParentTable::GlobalField fixture (see docs/integration-testing.md).
 func TestIntegrationSetGlobalFields(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	const value = "go-filemaker-it-global"
@@ -1669,7 +1666,7 @@ func TestIntegrationSetGlobalFields(t *testing.T) {
 // stored value is then confirmed unchanged by reading it back through the
 // default (US) client.
 func TestIntegrationWithDateFormatISO(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	c := buildITClient(t, WithDateFormat(DateFormatISO))
@@ -1730,7 +1727,7 @@ func TestIntegrationWithDateFormatISO(t *testing.T) {
 // Exit Script and TriggerError must end with a non-zero error. The missing-script
 // subtest needs no fixture.
 func TestIntegrationRunScript(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	t.Run("EchoParam", func(t *testing.T) {
@@ -1791,7 +1788,7 @@ func TestIntegrationRunScript(t *testing.T) {
 }
 
 func TestIntegrationDuplicate(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-dup-" + time.Now().UTC().Format("20060102T150405.000000000")
@@ -1845,7 +1842,7 @@ func TestIntegrationDuplicate(t *testing.T) {
 // option (entrymode=user, the default), the host rejects a create that omits
 // SoftRequiredField. With entrymode=script, the same create succeeds.
 func TestIntegrationWithEntryModeScript(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	// entrymode=user (default): host enforces "Only during data entry" Not-Empty.
@@ -1890,7 +1887,7 @@ func TestIntegrationWithEntryModeScript(t *testing.T) {
 // cannot be modified"); with prohibitmode=script, the write is accepted and the
 // explicitly supplied value is stored instead of the auto-enter value.
 func TestIntegrationWithProhibitModeScript(t *testing.T) {
-	requireLayout(t)
+	requireServer(t)
 	ctx := context.Background()
 
 	// prohibitmode=user (default): trying to supply a value for a prohibited field
@@ -1936,4 +1933,63 @@ func TestIntegrationWithProhibitModeScript(t *testing.T) {
 	if got := res.Record.String(fieldAutoEnter); got != "manual" {
 		t.Errorf("prohibitmode=script: %s = %q, want \"manual\" (prohibition should be bypassed)", fieldAutoEnter, got)
 	}
+}
+
+// TestIntegrationWithResponseLayout confirms that WithResponseLayout causes the
+// host to shape the response field data using a different layout. It creates a
+// record with both TextField and NumberField set, then retrieves it via Find and
+// GetByID with WithResponseLayout(itResponseLayout). itResponseLayout exposes only
+// TextField, so NumberField must be absent from the response (the host returns an
+// empty string for it).
+func TestIntegrationWithResponseLayout(t *testing.T) {
+	requireServer(t)
+	ctx := context.Background()
+
+	marker := "go-filemaker-it-rl-" + time.Now().UTC().Format("20060102T150405.000000000")
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldText:         marker,
+		fieldNumber:       42,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	check := func(t *testing.T, rec Record) {
+		t.Helper()
+		if got := rec.String(fieldText); got != marker {
+			t.Errorf("%s = %q, want %q", fieldText, got, marker)
+		}
+		// NumberField is not on itResponseLayout; the host omits it entirely.
+		if rec.Has(fieldNumber) {
+			t.Errorf("%s is present in the response, want absent (field not on %s; "+
+				"is it excluded from the layout? see docs/integration-testing.md)", fieldNumber, itResponseLayout)
+		}
+	}
+
+	found, err := itClient.Find(ctx, itLayout,
+		[]FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}},
+		WithResponseLayout(itResponseLayout),
+	)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if len(found.Records) != 1 {
+		t.Fatalf("Find returned %d records, want 1", len(found.Records))
+	}
+	t.Run("Find", func(t *testing.T) { check(t, found.Records[0]) })
+
+	res, err := itClient.GetByID(ctx, itLayout, created.RecordID,
+		WithResponseLayout(itResponseLayout),
+	)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	t.Run("GetByID", func(t *testing.T) { check(t, res.Record) })
 }
