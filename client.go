@@ -442,6 +442,34 @@ func (c *Client) baseURL() string {
 	return fmt.Sprintf("%s/databases/%s", c.apiURL(), url.PathEscape(c.database))
 }
 
+// layoutURL is the endpoint root for a single layout, with the layout name
+// percent-escaped into the path. Every layout-scoped endpoint (records, find,
+// containers, and the layout-metadata call in metadata.go) builds on it, so the
+// escaping lives in exactly one place.
+func (c *Client) layoutURL(layout string) string {
+	return c.baseURL() + "/layouts/" + url.PathEscape(layout)
+}
+
+// recordsURL is the collection endpoint for a layout (used to create records).
+func (c *Client) recordsURL(layout string) string {
+	return c.layoutURL(layout) + "/records"
+}
+
+// recordURL is the endpoint for a single record by ID.
+func (c *Client) recordURL(layout, id string) string {
+	return c.recordsURL(layout) + "/" + url.PathEscape(id)
+}
+
+// findURL is the find endpoint for a layout.
+func (c *Client) findURL(layout string) string {
+	return c.layoutURL(layout) + "/_find"
+}
+
+// containerURL is the upload endpoint for a record's container field.
+func (c *Client) containerURL(layout, id, field string) string {
+	return c.recordURL(layout, id) + "/containers/" + url.PathEscape(field)
+}
+
 // normalizeHost defaults the scheme to https when none is present, then
 // validates it: plaintext http is allowed only when allowInsecureHTTP is set,
 // and any scheme other than http or https is rejected outright.
