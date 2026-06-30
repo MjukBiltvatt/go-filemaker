@@ -210,9 +210,12 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationFindNoMatch` | Empty result is a nil error, not `ErrNoRecords` |
 | `TestIntegrationContainer` | Container upload + download round-trip |
 | `TestIntegrationPortal` | Related-record add / edit / delete via portals |
+| `TestIntegrationPortalPaging` | Portal row cap: default find returns at most the portal's configured row count; `WithPortalLimit` overrides it (needs the portal configured to 3 rows) |
 | `TestIntegrationUpdateWithModID` | Optimistic lock by mod ID; conflict → 306 |
 | `TestIntegrationUpdateIfUnchanged` | Record-relative optimistic lock; conflict → 306 |
+| `TestIntegrationScriptResults` | `WithScript` on Update and Find: echo-param round-trip, script error without request failure, missing script → `*APIError` code 104 (needs the `EchoParam` and `TriggerError` fixtures) |
 | `TestIntegrationFindQuery` | Sort, limit, offset, omit, OR across requests, `DataInfo` |
+| `TestIntegrationFindMultiSort` | Multiple sort fields applied in order; result sequence is deterministic |
 | `TestIntegrationReauthOnInvalidToken` | Expired-session recovery via `WithReauthOnInvalidToken` |
 | `TestIntegrationTimeOfDay` | Time field round-trip: `Time`/`Duration` wrappers and `Time()`/`Duration()` getters |
 | `TestIntegrationSetGlobalFields` | `SetGlobalFields` sets a global field value; host accepts the write (needs the `GlobalField` fixture) |
