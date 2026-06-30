@@ -314,6 +314,22 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 	return data, nil
 }
 
+// SetGlobalFields sets the values of global fields in the database. Fields must
+// use fully qualified names (Table::FieldName); values follow the same rules as
+// regular field data (string for text/date/timestamp/time, float64 for number).
+// Global fields persist for the duration of the session.
+func (c *Client) SetGlobalFields(ctx context.Context, fields FieldData) error {
+	if fields == nil {
+		fields = FieldData{}
+	}
+	body, err := json.Marshal(map[string]any{"globalFields": fields})
+	if err != nil {
+		return fmt.Errorf("filemaker: failed to marshal global fields: %w", err)
+	}
+	var rb responseBody
+	return c.do(ctx, http.MethodPatch, c.globalsURL(), body, &rb)
+}
+
 // marshalRecordBody wraps fields in the {"fieldData": ...} envelope the host
 // expects, drawing the optional parameters (portal data, a modId for optimistic
 // locking, and any script directives) from cfg and omitting each when unset. A

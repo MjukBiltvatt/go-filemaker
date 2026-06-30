@@ -1171,10 +1171,76 @@ func TestURLBuildersEscapeSegments(t *testing.T) {
 		{"recordsURL", c.recordsURL("Sales #1"), base + "/layouts/Sales%20%231/records"},
 		{"recordURL", c.recordURL("A/B", "7"), base + "/layouts/A%2FB/records/7"},
 		{"containerURL", c.containerURL("Lay #2", "7", "My Field"), base + "/layouts/Lay%20%232/records/7/containers/My%20Field"},
+		{"globalsURL", c.globalsURL(), base + "/globals"},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
 		}
+	}
+}
+
+func TestSetGlobalFields(t *testing.T) {
+	var mu sync.Mutex
+	var gotMethod, gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotMethod, gotPath, gotBody = r.Method, r.URL.Path, string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	err := c.SetGlobalFields(context.Background(), FieldData{
+		"Contacts::gCompany": "FileMaker",
+		"Contacts::gCode":    "95054",
+	})
+	if err != nil {
+		t.Fatalf("SetGlobalFields: %v", err)
+	}
+
+	mu.Lock()
+	method, path, body := gotMethod, gotPath, gotBody
+	mu.Unlock()
+	if method != http.MethodPatch {
+		t.Errorf("method = %q, want PATCH", method)
+	}
+	if !strings.HasSuffix(path, "/globals") {
+		t.Errorf("path = %q, want suffix /globals", path)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("unmarshal body %q: %v", body, err)
+	}
+	gf, ok := got["globalFields"].(map[string]any)
+	if !ok {
+		t.Fatalf("globalFields missing or wrong type in body %q", body)
+	}
+	if gf["Contacts::gCompany"] != "FileMaker" {
+		t.Errorf("gCompany = %v, want FileMaker", gf["Contacts::gCompany"])
+	}
+	if gf["Contacts::gCode"] != "95054" {
+		t.Errorf("gCode = %v, want 95054", gf["Contacts::gCode"])
+	}
+}
+
+func TestSetGlobalFieldsNilBecomesEmptyObject(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	if err := c.SetGlobalFields(context.Background(), nil); err != nil {
+		t.Fatalf("SetGlobalFields(nil): %v", err)
+	}
+	if gotBody != `{"globalFields":{}}` {
+		t.Errorf("body = %q, want {\"globalFields\":{}}", gotBody)
 	}
 }

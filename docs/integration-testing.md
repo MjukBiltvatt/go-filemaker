@@ -39,6 +39,7 @@ Two tables in a one-to-many relationship.
 | `TimeField` | Time | Time-of-day round-trip (clock value and >24h duration) |
 | `ContainerField` | Container | Upload/download round-trip |
 | `RequiredField` | Text | **Validation:** Not Empty, **"Validate always"** (not "only during data entry"), and **"Allow user to override during data entry" OFF** |
+| `GlobalField` | Text | **Storage:** Global (Options → Storage → "Use global storage"). Used by `TestIntegrationSetGlobalFields` |
 | `Id` | Number _or_ Text | Relationship match key — Number with auto-enter **serial**, or Text with an auto-enter UUID; must be the **same type** as `ChildTable::ParentId`. Never touched by the tests |
 
 **`ChildTable`** — the related table shown in the portal. Fields:
@@ -63,9 +64,10 @@ must be enabled on the **`ChildTable`** side of the relationship dialog:
 
 A layout named **`ParentTable`**, based on the `ParentTable` occurrence:
 
-- Place the eight non-`Id` `ParentTable` fields on it (the Data API only sees
+- Place all nine non-`Id` `ParentTable` fields on it (the Data API only sees
   fields that are on the layout): `TextField`, `NumberField`, `TextSecondary`,
-  `DateField`, `TimestampField`, `TimeField`, `ContainerField`, `RequiredField`.
+  `DateField`, `TimestampField`, `TimeField`, `ContainerField`, `RequiredField`,
+  `GlobalField`.
 - Add a **portal** showing `ChildTable`, with `ChildText` in it. Leave the
   portal object name unset (or set it to `ChildTable`) so the Data API keys the
   returned portal data by the table-occurrence name. Set it to show **exactly 3
@@ -211,6 +213,9 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationFindQuery` | Sort, limit, offset, omit, OR across requests, `DataInfo` |
 | `TestIntegrationReauthOnInvalidToken` | Expired-session recovery via `WithReauthOnInvalidToken` |
 | `TestIntegrationTimeOfDay` | Time field round-trip: `Time`/`Duration` wrappers and `Time()`/`Duration()` getters |
+| `TestIntegrationSetGlobalFields` | `SetGlobalFields` sets a global field value; host accepts the write (needs the `GlobalField` fixture) |
+| `TestIntegrationGet` | `GetByID` and `Get` fetch a single record; field data round-trips correctly |
+| `TestIntegrationGetRange` | `GetRange` with `WithLimit`/`WithSort`; returned record count and `DataInfo` are correct |
 | `TestIntegrationWithDateFormatISO` | `WithDateFormat(DateFormatISO)` writes ISO + sends `dateformats=2` |
 
 ## Date formats (`WithDateFormat`)

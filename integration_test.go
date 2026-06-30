@@ -111,6 +111,7 @@ const (
 	fieldTime          = "TimeField"
 	fieldRequired      = "RequiredField"
 	fieldContainer     = "ContainerField"
+	fieldGlobal        = "GlobalField"
 
 	// Portal (related-record) addressing. portalName is the ChildTable table
 	// occurrence the layout's portal shows; the host keys portal data by it.
@@ -1586,6 +1587,45 @@ func TestIntegrationGetRange(t *testing.T) {
 	}
 	if res.DataInfo.ReturnedCount != 1 {
 		t.Errorf("GetRange: DataInfo.ReturnedCount = %d, want 1", res.DataInfo.ReturnedCount)
+	}
+}
+
+// TestIntegrationSetGlobalFields sets a global field value against a real host
+// and reads it back through a record to confirm the host applied it. Relies on
+// the ParentTable::GlobalField fixture (see docs/integration-testing.md).
+func TestIntegrationSetGlobalFields(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	const value = "go-filemaker-it-global"
+	if err := itClient.SetGlobalFields(ctx, FieldData{
+		"ParentTable::GlobalField": value,
+	}); err != nil {
+		t.Fatalf("SetGlobalFields: %v", err)
+	}
+
+	// Create a throwaway record so there is something to fetch, then read
+	// GlobalField back from it — global fields are returned in fieldData
+	// alongside regular fields when the field is on the layout.
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldRequired: "present",
+	})
+	if err != nil {
+		t.Fatalf("Create (global field read-back): %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	got, err := itClient.GetByID(ctx, itLayout, created.RecordID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Record.String(fieldGlobal) != value {
+		t.Errorf("%s = %q, want %q (is GlobalField on the layout? see docs/integration-testing.md)",
+			fieldGlobal, got.Record.String(fieldGlobal), value)
 	}
 }
 

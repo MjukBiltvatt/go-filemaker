@@ -465,6 +465,11 @@ func (c *Client) findURL(layout string) string {
 	return c.layoutURL(layout) + "/_find"
 }
 
+// globalsURL is the database-scoped endpoint for setting global field values.
+func (c *Client) globalsURL() string {
+	return c.baseURL() + "/globals"
+}
+
 // containerURL is the upload endpoint for a record's container field.
 func (c *Client) containerURL(layout, id, field string) string {
 	return c.recordURL(layout, id) + "/containers/" + url.PathEscape(field)
