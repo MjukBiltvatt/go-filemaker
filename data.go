@@ -41,36 +41,6 @@ type DuplicateResponse struct {
 	Scripts  ScriptOutcomes
 }
 
-// ScriptOutcome is what one script phase produced: the value the script returned
-// via Exit Script, and a FileMaker error code ("0" on success). Both are empty
-// when no script ran for that phase.
-//
-// Use Ran/OK rather than inspecting Result: the host returns an Error code
-// whenever a script runs and omits it otherwise, so Error is the reliable signal
-// of whether a script ran. An empty Result is ambiguous on its own (a script may
-// return an empty value).
-type ScriptOutcome struct {
-	Result string
-	Error  string
-}
-
-// Ran reports whether a script ran for this phase. The host returns an Error
-// code ("0" on success) whenever a script runs and omits it otherwise, so an
-// empty Error means no script ran.
-func (o ScriptOutcome) Ran() bool { return o.Error != "" }
-
-// OK reports whether a script ran and completed without error.
-func (o ScriptOutcome) OK() bool { return o.Error == "0" }
-
-// ScriptOutcomes groups the outcomes of the scripts run with a request, one per
-// phase, matching the WithScript / WithPrerequestScript / WithPresortScript
-// options.
-type ScriptOutcomes struct {
-	Script     ScriptOutcome // WithScript — runs after the action
-	Prerequest ScriptOutcome // WithPrerequestScript
-	Presort    ScriptOutcome // WithPresortScript
-}
-
 // Create inserts a new record with the given field data and returns the host's
 // acknowledgement (record ID and mod ID). Pass WithPortalData to add related
 // records, or WithScript and friends to run scripts, in the same request; script
