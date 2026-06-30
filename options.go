@@ -30,6 +30,9 @@ type UpdateOption interface{ applyUpdate(*recordConfig) }
 // DeleteOption configures a Delete or DeleteByID.
 type DeleteOption interface{ applyDelete(*recordConfig) }
 
+// DuplicateOption configures a Duplicate or DuplicateByID.
+type DuplicateOption interface{ applyDuplicate(*recordConfig) }
+
 // FindOption configures a Find.
 type FindOption interface{ applyFind(*recordConfig) }
 
@@ -60,11 +63,13 @@ type ConcurrencyOption interface {
 
 // RecordOption configures any record-context endpoint that can run scripts with
 // the request. It is accepted by Create, Update (and UpdateByID), Delete (and
-// DeleteByID), Find, Get (and GetByID), and GetRange.
+// DeleteByID), Duplicate (and DuplicateByID), Find, Get (and GetByID), and
+// GetRange.
 type RecordOption interface {
 	CreateOption
 	UpdateOption
 	DeleteOption
+	DuplicateOption
 	FindOption
 	GetOption
 	GetRangeOption
@@ -217,13 +222,14 @@ func (c recordConfig) queryParams() url.Values {
 // returned as — not by the methods this concrete type happens to carry.
 type option func(*recordConfig)
 
-func (o option) applyCreate(c *recordConfig)   { o(c) }
-func (o option) applyUpdate(c *recordConfig)   { o(c) }
-func (o option) applyDelete(c *recordConfig)   { o(c) }
-func (o option) applyFind(c *recordConfig)     { o(c) }
-func (o option) applyGet(c *recordConfig)      { o(c) }
-func (o option) applyGetRange(c *recordConfig) { o(c) }
-func (o option) applyUpload(c *recordConfig)   { o(c) }
+func (o option) applyCreate(c *recordConfig)    { o(c) }
+func (o option) applyUpdate(c *recordConfig)    { o(c) }
+func (o option) applyDelete(c *recordConfig)    { o(c) }
+func (o option) applyDuplicate(c *recordConfig) { o(c) }
+func (o option) applyFind(c *recordConfig)      { o(c) }
+func (o option) applyGet(c *recordConfig)       { o(c) }
+func (o option) applyGetRange(c *recordConfig)  { o(c) }
+func (o option) applyUpload(c *recordConfig)    { o(c) }
 
 // WithModID makes the write conditional (optimistic concurrency) against a
 // specific mod ID: the host rejects it with ErrRecordModified if the record's
@@ -419,6 +425,18 @@ func resolveCreateConfig(opts []CreateOption) (recordConfig, error) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt.applyCreate(&cfg)
+		}
+	}
+	return cfg, cfg.err
+}
+
+// resolveDuplicateConfig applies the duplicate options. Deferred option errors
+// surface here.
+func resolveDuplicateConfig(opts []DuplicateOption) (recordConfig, error) {
+	var cfg recordConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyDuplicate(&cfg)
 		}
 	}
 	return cfg, cfg.err

@@ -218,6 +218,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationGetRange` | `GetRange` with `WithLimit`/`WithSort`; returned record count and `DataInfo` are correct |
 | `TestIntegrationWithDateFormatISO` | `WithDateFormat(DateFormatISO)` writes ISO + sends `dateformats=2` |
 | `TestIntegrationRunScript` | `RunScript` dedicated endpoint: echo param round-trip, script error without request failure, missing script → `*APIError` code 104 (needs the `EchoParam` and `TriggerError` fixtures) |
+| `TestIntegrationDuplicate` | `DuplicateByID` duplicates a record; the copy receives a new record ID and carries the original's field values |
 
 ## Date formats (`WithDateFormat`)
 

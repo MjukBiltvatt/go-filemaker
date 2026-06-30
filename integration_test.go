@@ -1755,3 +1755,52 @@ func TestIntegrationRunScript(t *testing.T) {
 		}
 	})
 }
+
+func TestIntegrationDuplicate(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	marker := "go-filemaker-it-dup-" + time.Now().UTC().Format("20060102T150405.000000000")
+
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldText:     marker,
+		fieldNumber:   99,
+		fieldRequired: "present",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	duped, err := itClient.DuplicateByID(ctx, itLayout, created.RecordID)
+	if err != nil {
+		t.Fatalf("DuplicateByID: %v", err)
+	}
+	if duped.RecordID == "" {
+		t.Fatal("DuplicateByID returned empty RecordID")
+	}
+	if duped.RecordID == created.RecordID {
+		t.Errorf("DuplicateByID returned the same RecordID %q; want a new ID", created.RecordID)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, duped.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(duplicate %s): %v", duped.RecordID, err)
+		}
+	})
+
+	// The duplicate must carry the same field values as the original.
+	fetched, err := itClient.GetByID(ctx, itLayout, duped.RecordID)
+	if err != nil {
+		t.Fatalf("GetByID(duplicate): %v", err)
+	}
+	if got := fetched.Record.String(fieldText); got != marker {
+		t.Errorf("duplicate %s = %q, want %q", fieldText, got, marker)
+	}
+	if got := fetched.Record.Int(fieldNumber); got != 99 {
+		t.Errorf("duplicate %s = %d, want 99", fieldNumber, got)
+	}
+}

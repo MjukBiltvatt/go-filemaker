@@ -33,6 +33,14 @@ type DeleteResponse struct {
 	Scripts ScriptOutcomes
 }
 
+// DuplicateResponse is the host's acknowledgement of a Duplicate. It carries
+// the new record's ID and mod ID, and any script outcomes when scripts were run.
+type DuplicateResponse struct {
+	RecordID string
+	ModID    string
+	Scripts  ScriptOutcomes
+}
+
 // ScriptOutcome is what one script phase produced: the value the script returned
 // via Exit Script, and a FileMaker error code ("0" on success). Both are empty
 // when no script ran for that phase.
@@ -190,6 +198,45 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...Dele
 	return DeleteResponse{Scripts: rb.scriptOutcomes()}, nil
 }
 
+// Duplicate creates a copy of the record identified by rec and returns the new
+// record's ID and mod ID. Pass WithScript and friends to run scripts with the
+// request; their outcomes are returned in the DuplicateResponse.
+func (c *Client) Duplicate(ctx context.Context, rec Record, opts ...DuplicateOption) (DuplicateResponse, error) {
+	if rec.id == "" {
+		return DuplicateResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	}
+	return c.DuplicateByID(ctx, rec.layout, rec.id, opts...)
+}
+
+// DuplicateByID creates a copy of an existing record addressed by layout and
+// id and returns the new record's ID and mod ID. Pass WithScript and friends to
+// run scripts with the request; their outcomes are returned in the
+// DuplicateResponse.
+func (c *Client) DuplicateByID(ctx context.Context, layout, id string, opts ...DuplicateOption) (DuplicateResponse, error) {
+	switch {
+	case layout == "":
+		return DuplicateResponse{}, errors.New("filemaker: no layout specified")
+	case id == "":
+		return DuplicateResponse{}, errors.New("filemaker: no record id specified")
+	}
+
+	cfg, err := resolveDuplicateConfig(opts)
+	if err != nil {
+		return DuplicateResponse{}, err
+	}
+
+	body, err := marshalDuplicateBody(cfg)
+	if err != nil {
+		return DuplicateResponse{}, err
+	}
+
+	var rb responseBody
+	if err := c.do(ctx, http.MethodPost, c.recordURL(layout, id), body, &rb); err != nil {
+		return DuplicateResponse{}, err
+	}
+	return DuplicateResponse{RecordID: rb.Response.RecordID, ModID: rb.Response.ModID, Scripts: rb.scriptOutcomes()}, nil
+}
+
 // UploadToContainer uploads data to a container field of the record identified
 // by rec. The record must already exist (created or returned by a find). Pass
 // IfUnchanged (or WithModID) for optimistic concurrency against the record's
@@ -328,6 +375,21 @@ func (c *Client) SetGlobalFields(ctx context.Context, fields FieldData) error {
 	}
 	var rb responseBody
 	return c.do(ctx, http.MethodPatch, c.globalsURL(), body, &rb)
+}
+
+// marshalDuplicateBody builds the optional request body for Duplicate: only
+// the script directives (when set), with no fieldData envelope. An empty body
+// ({}) is always sent so the host receives a valid JSON payload.
+func marshalDuplicateBody(cfg recordConfig) ([]byte, error) {
+	body := map[string]any{}
+	for _, kv := range cfg.scriptParams() {
+		body[kv[0]] = kv[1]
+	}
+	out, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("filemaker: failed to marshal duplicate body: %w", err)
+	}
+	return out, nil
 }
 
 // marshalRecordBody wraps fields in the {"fieldData": ...} envelope the host

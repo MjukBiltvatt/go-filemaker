@@ -1151,6 +1151,129 @@ func TestCreateWithoutDateFormatOmitsParam(t *testing.T) {
 	}
 }
 
+func TestDuplicateByID(t *testing.T) {
+	var mu sync.Mutex
+	var gotMethod, gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotMethod, gotPath, gotBody = r.Method, r.URL.Path, string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"recordId":"12","modId":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	resp, err := c.DuplicateByID(context.Background(), "People", "9")
+	if err != nil {
+		t.Fatalf("DuplicateByID: %v", err)
+	}
+	if resp.RecordID != "12" || resp.ModID != "0" {
+		t.Errorf("resp = %+v", resp)
+	}
+
+	mu.Lock()
+	method, path, body := gotMethod, gotPath, gotBody
+	mu.Unlock()
+	if method != http.MethodPost {
+		t.Errorf("method = %q, want POST", method)
+	}
+	if !strings.HasSuffix(path, "/layouts/People/records/9") {
+		t.Errorf("path = %q", path)
+	}
+	if body != `{}` {
+		t.Errorf("body = %q, want {} for a script-less duplicate", body)
+	}
+}
+
+func TestDuplicateByRecord(t *testing.T) {
+	var mu sync.Mutex
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotPath = r.URL.Path
+		mu.Unlock()
+		writeJSON(w, `{"response":{"recordId":"13","modId":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	rec := Record{layout: "People", id: "9"}
+	if _, err := c.Duplicate(context.Background(), rec); err != nil {
+		t.Fatalf("Duplicate: %v", err)
+	}
+
+	mu.Lock()
+	path := gotPath
+	mu.Unlock()
+	if !strings.HasSuffix(path, "/layouts/People/records/9") {
+		t.Errorf("path = %q, want it addressed from the record", path)
+	}
+}
+
+func TestDuplicateWithScript(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"recordId":"14","modId":"0","scriptResult":"done","scriptError":"0"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	resp, err := c.DuplicateByID(context.Background(), "People", "9", WithScript("AfterDuplicate", "p1"))
+	if err != nil {
+		t.Fatalf("DuplicateByID: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("unmarshal body %q: %v", body, err)
+	}
+	if got["script"] != "AfterDuplicate" || got["script.param"] != "p1" {
+		t.Errorf("script keys = %v, want script=AfterDuplicate script.param=p1 (body %q)", got, body)
+	}
+	if _, ok := got["fieldData"]; ok {
+		t.Errorf("body = %q, want no fieldData key in a duplicate body", body)
+	}
+	if resp.Scripts.Script.Result != "done" || !resp.Scripts.Script.OK() {
+		t.Errorf("Scripts.Script = %+v, want {done 0}", resp.Scripts.Script)
+	}
+}
+
+func TestDuplicateNoID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("must not make a request for a record without an ID")
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	rec := Record{layout: "People"} // no ID
+	if _, err := c.Duplicate(context.Background(), rec); err == nil {
+		t.Error("Duplicate: expected error for record without ID")
+	}
+}
+
+func TestDuplicateNoLayout(t *testing.T) {
+	c := &Client{}
+	if _, err := c.DuplicateByID(context.Background(), "", "9"); err == nil {
+		t.Error("DuplicateByID: expected error for empty layout")
+	}
+}
+
+func TestDuplicateNoRecordID(t *testing.T) {
+	c := &Client{}
+	if _, err := c.DuplicateByID(context.Background(), "People", ""); err == nil {
+		t.Error("DuplicateByID: expected error for empty record id")
+	}
+}
+
 // TestURLBuildersEscapeSegments guards that the request-path builders percent-
 // escape the database, layout, id, and field segments, so names with
 // URL-reserved characters (spaces, '#', '/') address the right resource instead
