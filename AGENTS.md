@@ -1,5 +1,11 @@
 # Agent guidance
 
+## Keeping the public docs in sync
+
+`README.md` and `doc.go` document the exported API at a **coarse grain**. When you add, remove, or rename an exported *operation* (a `*Client` method) or *client option* (`With…` passed to `New`), update the matching table in `README.md` — the **"What it does"** capability map or the **Client options** table — and reconcile `doc.go` if the change touches the overview narrative (lifecycle, reading/writing model, concurrency, errors).
+
+This is intentionally not a row-per-symbol rule: per-field accessors, per-request options, value wrappers, and individual types live in godoc only and never appear in the README, so most changes need no edit here.
+
 ## Keeping `docs/integration-testing.md` in sync
 
 `docs/integration-testing.md` is the authoritative guide for running the integration suite against a real FileMaker Server. It must stay in sync with `integration_test.go`. Apply the rules below whenever you add, remove, or rename integration tests or their fixture requirements.
