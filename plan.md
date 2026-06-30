@@ -522,19 +522,6 @@ for _, rec := range found.Records {
 
 ---
 
-## Deferred (revisit later)
-
-- [ ] **Configurable time formats (`WithTimeFormats`).** `TimeInE` currently tries a
-  fixed list of layouts until one parses, which silently assumes US `MM/DD`
-  ordering and cannot disambiguate `MM/DD` vs `DD/MM` (both parse). The
-  principled fix is to treat the accepted layout(s) as client config (like
-  `WithLocation`), defaulting to the current list, carried onto records. Held
-  until the phase-8 smoke test shows whether the Data API actually emits
-  non-US/variable date formats — if it normalizes to a fixed format, the simple
-  list stays and we just document the assumption.
-
----
-
 ## Settled decisions
 
 1. **Editing model: data-in/data-out.** `Create`/`Update` take a `FieldData`
