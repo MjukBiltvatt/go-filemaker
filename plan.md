@@ -511,7 +511,7 @@ for _, rec := range found.Records {
    `APIError`/`Message` types, the messages length-guard, and threading through
    `do()` already landed in phase 2; the value-accessor sentinels
    (`ErrNotNumber`/`ErrNotString`/`ErrUnknownFormat`) already exist.
-- [ ] **7. Docs.** Rewrite README for the v4 API, add migration guide, update the
+- [x] **7. Docs.** Rewrite README for the v4 API, add migration guide, update the
    README install/import paths to `/v4` (module path itself already bumped).
 - [ ] **8. Verify.** `go vet ./...`, `go test -race ./...`, and a manual smoke
    test against a real FileMaker server (creds available locally). Confirm the
