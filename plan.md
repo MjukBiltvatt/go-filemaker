@@ -532,14 +532,6 @@ for _, rec := range found.Records {
   until the phase-8 smoke test shows whether the Data API actually emits
   non-US/variable date formats — if it normalizes to a fixed format, the simple
   list stays and we just document the assumption.
-- [ ] **Runtime-toggleable `autoReauth` (`SetAutoReauth`).** Options are init-only by
-  design (immutable config → lock-free reads). `autoReauth` is the one with a
-  plausible runtime case (flip off to *detect* an expired token). If needed,
-  make the field an `atomic.Bool` with a `SetAutoReauth(bool)` setter —
-  lock-free, no involvement of the main `RWMutex`. Held pending a concrete use
-  case; trivial to add later without breaking changes. (`WithLocation` and
-  `WithTimeout` stay init-only: the file's zone is stable with a `TimeIn`
-  override, and per-call timeouts already work via `context` deadlines.)
 
 ---
 
