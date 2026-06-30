@@ -68,6 +68,56 @@ func TestFind(t *testing.T) {
 	}
 }
 
+func TestFindWithPortalData(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{"data":[{"recordId":"1","modId":"0","fieldData":{},"portalData":{
+			"Orders":[
+				{"recordId":"10","Orders::Item":"Widget","Orders::Qty":3},
+				{"recordId":"11","Orders::Item":"Gadget","Orders::Qty":1}
+			],
+			"Notes":[
+				{"recordId":"20","Notes::Body":"first note"}
+			]
+		}}]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	resp, err := testClient(srv).Find(context.Background(), "People", []FindRequest{{Criteria: map[string]string{"Name": "Mark"}}})
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if len(resp.Records) != 1 {
+		t.Fatalf("records = %d, want 1", len(resp.Records))
+	}
+
+	portals := resp.Records[0].Portals()
+
+	orders := portals["Orders"]
+	if len(orders) != 2 {
+		t.Fatalf("Orders rows = %d, want 2", len(orders))
+	}
+	if got := orders[0]["recordId"]; got != "10" {
+		t.Errorf("Orders[0] recordId = %v, want 10", got)
+	}
+	if got := orders[0]["Orders::Item"]; got != "Widget" {
+		t.Errorf("Orders[0] Item = %v, want Widget", got)
+	}
+	if got := orders[0]["Orders::Qty"]; got != float64(3) {
+		t.Errorf("Orders[0] Qty = %v, want 3", got)
+	}
+	if got := orders[1]["Orders::Item"]; got != "Gadget" {
+		t.Errorf("Orders[1] Item = %v, want Gadget", got)
+	}
+
+	notes := portals["Notes"]
+	if len(notes) != 1 {
+		t.Fatalf("Notes rows = %d, want 1", len(notes))
+	}
+	if got := notes[0]["Notes::Body"]; got != "first note" {
+		t.Errorf("Notes[0] Body = %v, want \"first note\"", got)
+	}
+}
+
 func TestFindWithReadManyOptions(t *testing.T) {
 	var mu sync.Mutex
 	var gotBody string
