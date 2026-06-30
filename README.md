@@ -201,4 +201,4 @@ A `*Client` is safe for concurrent use by multiple goroutines. A `Record` it ret
 
 ## License
 
-_TODO: add a LICENSE file and state the license here._
+[MIT](LICENSE) © Mjuk Biltvätt Sverige AB
