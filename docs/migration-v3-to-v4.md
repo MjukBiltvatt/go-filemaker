@@ -45,7 +45,7 @@ The package name is `filemaker` in both versions.
 | --- | --- |
 | `fm, err := filemaker.New(host, db, user, pass)` | same call, but **no network yet** — login is lazy |
 | `defer fm.Destroy()` | `defer c.Logout(ctx)` |
-| `fm.Find(layout, NewFindCommand(NewFindRequest(NewFindCriterion("F", "v")).Omit()).Limit(10).Sort("F", filemaker.SortAscending))` | `c.Find(ctx, layout, []filemaker.FindRequest{{Criteria: filemaker.Criteria{"F": "v"}, Omit: true}}, filemaker.WithLimit(10), filemaker.WithSort(filemaker.SortRule{Field: "F", Order: filemaker.SortAscending}))` |
+| `fm.Find(layout, NewFindCommand(NewFindRequest(NewFindCriterion("F", "v")).Omit()).Limit(10).Sort("F", filemaker.SortAscending))` | `c.Find(ctx, layout, []filemaker.FindRequest{{Criteria: filemaker.Criteria{"F": "v"}, Omit: true}}, filemaker.WithLimit(10), filemaker.WithSort(filemaker.Asc("F")))` |
 | `rec := fm.NewRecord(layout); rec.Set("F", "v"); rec.Commit()` | `c.Create(ctx, layout, filemaker.FieldData{"F": "v"})` |
 | `rec.Set("F", "v"); rec.Commit()` (existing record) | `c.Update(ctx, rec, filemaker.FieldData{"F": "v"})` |
 | `rec.Delete()` | `c.Delete(ctx, rec)` |
@@ -104,7 +104,7 @@ res, err := c.Find(ctx, "People",
         {Criteria: filemaker.Criteria{"Lastname": "==Johnson"}, Omit: true},
     },
     filemaker.WithLimit(10),
-    filemaker.WithSort(filemaker.SortRule{Field: "Firstname", Order: filemaker.SortAscending}),
+    filemaker.WithSort(filemaker.Asc("Firstname")),
 )
 records := res.Records
 ```
@@ -113,8 +113,8 @@ records := res.Records
   semantics as v3, expressed as map keys and slice elements.
 - `.Omit()` → the `Omit: true` field on the request.
 - `.Limit(n)` → `WithLimit(n)`, `.Offset(n)` → `WithOffset(n)`, `.Sort(f, o)` →
-  `WithSort(SortRule{Field: f, Order: o})`. `SortAscending` / `SortDescending`
-  keep their names.
+  `WithSort(Asc(f))` / `WithSort(Desc(f))`. The underlying `SortRule` struct and
+  `SortAscending` / `SortDescending` constants are still exported for dynamic use.
 - `Find` now returns a `FindResponse` (with `Records` and a `DataInfo` of host
   counts), not a bare `[]Record`. Use `res.Records`.
 
