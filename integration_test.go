@@ -1478,6 +1478,53 @@ func TestIntegrationTimeOfDay(t *testing.T) {
 	}
 }
 
+// TestIntegrationGet fetches a single record by ID using GetByID and Get,
+// confirming the field data round-trips correctly and that the record-based
+// form sources its layout and ID from the record.
+func TestIntegrationGet(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	marker := "go-filemaker-it-get-" + time.Now().UTC().Format("20060102T150405.000000000")
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldText:     marker,
+		fieldNumber:   99,
+		fieldRequired: "present",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	// GetByID: fetch directly by record ID.
+	got, err := itClient.GetByID(ctx, itLayout, created.RecordID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Record.ID() != created.RecordID {
+		t.Errorf("ID = %q, want %q", got.Record.ID(), created.RecordID)
+	}
+	if got.Record.String(fieldText) != marker {
+		t.Errorf("%s = %q, want %q", fieldText, got.Record.String(fieldText), marker)
+	}
+	if got.Record.Int(fieldNumber) != 99 {
+		t.Errorf("%s = %d, want 99", fieldNumber, got.Record.Int(fieldNumber))
+	}
+
+	// Get: same fetch through the record-based form.
+	got2, err := itClient.Get(ctx, got.Record)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got2.Record.ID() != created.RecordID {
+		t.Errorf("Get ID = %q, want %q", got2.Record.ID(), created.RecordID)
+	}
+}
+
 // TestIntegrationWithDateFormatISO exercises WithDateFormat against a real host.
 // A sibling client configured for ISO writes the date in ISO 8601 and sends
 // dateformats=2; the create succeeding is itself the proof that the parameter

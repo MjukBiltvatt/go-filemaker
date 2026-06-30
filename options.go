@@ -33,6 +33,9 @@ type DeleteOption interface{ applyDelete(*recordConfig) }
 // FindOption configures a Find.
 type FindOption interface{ applyFind(*recordConfig) }
 
+// GetOption configures a Get or GetByID.
+type GetOption interface{ applyGet(*recordConfig) }
+
 // UploadOption configures an UploadToContainer or UploadToContainerByID.
 type UploadOption interface{ applyUpload(*recordConfig) }
 
@@ -54,12 +57,13 @@ type ConcurrencyOption interface {
 
 // RecordOption configures any record-context endpoint that can run scripts with
 // the request. It is accepted by Create, Update (and UpdateByID), Delete (and
-// DeleteByID), and Find.
+// DeleteByID), Find, and Get (and GetByID).
 type RecordOption interface {
 	CreateOption
 	UpdateOption
 	DeleteOption
 	FindOption
+	GetOption
 }
 
 // ReadManyOption configures a read that returns multiple records — sorting and
@@ -70,9 +74,10 @@ type ReadManyOption interface {
 
 // ReadOption configures how a read returns records: which portals to include,
 // how to page them, and the layout to return data in. It is accepted by Find
-// (and, in future, the get-single and get-range endpoints).
+// and Get (and GetByID).
 type ReadOption interface {
 	FindOption
+	GetOption
 }
 
 // EntryMode selects whether the host applies a field's rules to a write the way
@@ -210,6 +215,7 @@ func (o option) applyCreate(c *recordConfig) { o(c) }
 func (o option) applyUpdate(c *recordConfig) { o(c) }
 func (o option) applyDelete(c *recordConfig) { o(c) }
 func (o option) applyFind(c *recordConfig)   { o(c) }
+func (o option) applyGet(c *recordConfig)    { o(c) }
 func (o option) applyUpload(c *recordConfig) { o(c) }
 
 // WithModID makes the write conditional (optimistic concurrency) against a
@@ -430,6 +436,17 @@ func resolveFindConfig(opts []FindOption) (recordConfig, error) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt.applyFind(&cfg)
+		}
+	}
+	return cfg, cfg.err
+}
+
+// resolveGetConfig applies the get options. Deferred option errors surface here.
+func resolveGetConfig(opts []GetOption) (recordConfig, error) {
+	var cfg recordConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyGet(&cfg)
 		}
 	}
 	return cfg, cfg.err
