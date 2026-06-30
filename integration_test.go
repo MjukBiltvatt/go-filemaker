@@ -49,10 +49,19 @@
 //	TimestampField  timestamp.
 //	TimeField       time (time-of-day).
 //	ContainerField  container.
-//	RequiredField   text, validated Not Empty, "Validate always" (not just during
-//	                data entry) and not user-overridable, so the host enforces it
-//	                on the Data API. Every write test populates it; the validation
-//	                test omits it on purpose to assert the host rejects the record.
+//	RequiredField      text, validated Not Empty, "Validate always" (not just during
+//	                   data entry) and not user-overridable, so the host enforces it
+//	                   on the Data API. Every write test populates it; the validation
+//	                   test omits it on purpose to assert the host rejects the record.
+//	SoftRequiredField  text, validated Not Empty, "Only during data entry" (not
+//	                   "Validate always"), and user-overridable. The host enforces it
+//	                   when entrymode=user (the default) but skips it when
+//	                   entrymode=script. Every write test populates it; the entry-mode
+//	                   test omits it on purpose.
+//	AutoEnterField     text, auto-enter calculated value "auto", with "Prohibit
+//	                   modification of value during data entry" checked. The host
+//	                   overwrites any supplied value when prohibitmode=user (the
+//	                   default) but honours the supplied value when prohibitmode=script.
 //
 // The portal test additionally needs a second table, ChildTable, in a
 // one-to-many relationship with the layout's table (ParentTable):
@@ -110,6 +119,8 @@ const (
 	fieldTimestamp     = "TimestampField"
 	fieldTime          = "TimeField"
 	fieldRequired      = "RequiredField"
+	fieldSoftRequired  = "SoftRequiredField"
+	fieldAutoEnter     = "AutoEnterField"
 	fieldContainer     = "ContainerField"
 	fieldGlobal        = "GlobalField"
 
@@ -390,6 +401,8 @@ func TestIntegrationLayoutMetadata(t *testing.T) {
 		fieldTime:          "time",
 		fieldContainer:     "container",
 		fieldRequired:      "text",
+		fieldSoftRequired:  "text",
+		fieldAutoEnter:     "text",
 	}
 	for name, result := range wantResult {
 		f, ok := fields[name]
@@ -402,17 +415,21 @@ func TestIntegrationLayoutMetadata(t *testing.T) {
 		}
 	}
 
-	// RequiredField is the only field defined Not Empty; the write tests rely on
-	// every other field being freely omittable (e.g. TextSecondary is left out of
-	// an update). An unexpected Not-Empty field would break those tests in a more
-	// confusing place, so assert the validation is declared on RequiredField and
-	// nowhere else.
+	// RequiredField and SoftRequiredField are the only fields defined Not Empty.
+	// The write tests rely on every other field being freely omittable (e.g.
+	// TextSecondary is left out of an update). An unexpected Not-Empty field would
+	// break those tests in a more confusing place, so assert the validation is
+	// declared on exactly these two fields and nowhere else.
 	if rf, ok := fields[fieldRequired]; ok && !rf.NotEmpty {
 		t.Errorf("%s NotEmpty = false, want true — set it Not Empty, \"Validate always\" (see docs/integration-testing.md)", fieldRequired)
 	}
+	if sf, ok := fields[fieldSoftRequired]; ok && !sf.NotEmpty {
+		t.Errorf("%s NotEmpty = false, want true — set it Not Empty, \"Only during data entry\" (see docs/integration-testing.md)", fieldSoftRequired)
+	}
+	notEmptyAllowed := map[string]bool{fieldRequired: true, fieldSoftRequired: true}
 	for name, f := range fields {
-		if name != fieldRequired && f.NotEmpty {
-			t.Errorf("field %q is Not-Empty but only %s should be — the write tests omit other fields (see docs/integration-testing.md)", name, fieldRequired)
+		if f.NotEmpty && !notEmptyAllowed[name] {
+			t.Errorf("field %q is Not-Empty but only %s and %s should be — the write tests omit other fields (see docs/integration-testing.md)", name, fieldRequired, fieldSoftRequired)
 		}
 	}
 
@@ -481,6 +498,7 @@ func TestIntegrationCRUD(t *testing.T) {
 		fieldNumber:        7,
 		fieldTextSecondary: secondaryText,
 		fieldRequired:      "present",
+		fieldSoftRequired:  "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -553,8 +571,9 @@ func TestIntegrationSpecialLayoutNames(t *testing.T) {
 	marker := "go-filemaker-it-" + time.Now().UTC().Format("20060102T150405.000000000")
 
 	created, err := itClient.Create(ctx, layout, FieldData{
-		fieldText:     marker,
-		fieldRequired: "present",
+		fieldText:         marker,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create on %q: %v", layout, err)
@@ -598,10 +617,11 @@ func TestIntegrationDateTime(t *testing.T) {
 	marker := "go-filemaker-it-dt-" + time.Now().UTC().Format("20060102T150405.000000000")
 
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:      marker,
-		fieldDate:      Date(date),
-		fieldTimestamp: Timestamp(ts),
-		fieldRequired:  "present",
+		fieldText:         marker,
+		fieldDate:         Date(date),
+		fieldTimestamp:    Timestamp(ts),
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -660,9 +680,10 @@ func TestIntegrationDateTimeLocation(t *testing.T) {
 	marker := "go-filemaker-it-loc-" + time.Now().UTC().Format("20060102T150405.000000000")
 
 	created, err := c.Create(ctx, itLayout, FieldData{
-		fieldText:      marker,
-		fieldTimestamp: Timestamp(ts),
-		fieldRequired:  "present",
+		fieldText:         marker,
+		fieldTimestamp:    Timestamp(ts),
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -753,8 +774,9 @@ func TestIntegrationContainer(t *testing.T) {
 	ctx := context.Background()
 
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:     "go-filemaker-it-container",
-		fieldRequired: "present",
+		fieldText:         "go-filemaker-it-container",
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -828,8 +850,9 @@ func TestIntegrationPortal(t *testing.T) {
 	// Create the parent with two related rows in the same request; a row without
 	// a record ID is created.
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:     marker,
-		fieldRequired: "present",
+		fieldText:         marker,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	}, WithPortalData(PortalData{portalName: {
 		{fieldChildText: "row-1"},
 		{fieldChildText: "row-2"},
@@ -912,8 +935,9 @@ func TestIntegrationPortalPaging(t *testing.T) {
 	}
 	marker := "go-filemaker-it-portalpage-" + time.Now().UTC().Format("20060102T150405.000000000")
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:     marker,
-		fieldRequired: "present",
+		fieldText:         marker,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	}, WithPortalData(PortalData{portalName: rows}))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -966,9 +990,10 @@ func TestIntegrationUpdateWithModID(t *testing.T) {
 
 	marker := "go-filemaker-it-modid-" + time.Now().UTC().Format("20060102T150405.000000000")
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:     marker,
-		fieldNumber:   1,
-		fieldRequired: "present",
+		fieldText:         marker,
+		fieldNumber:       1,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1020,9 +1045,10 @@ func TestIntegrationUpdateIfUnchanged(t *testing.T) {
 
 	marker := "go-filemaker-it-ifunchanged-" + time.Now().UTC().Format("20060102T150405.000000000")
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:     marker,
-		fieldNumber:   1,
-		fieldRequired: "present",
+		fieldText:         marker,
+		fieldNumber:       1,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1078,9 +1104,10 @@ func TestIntegrationScriptResults(t *testing.T) {
 
 	marker := "go-filemaker-it-script-" + time.Now().UTC().Format("20060102T150405.000000000")
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:     marker,
-		fieldNumber:   1,
-		fieldRequired: "present",
+		fieldText:         marker,
+		fieldNumber:       1,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1183,9 +1210,10 @@ func TestIntegrationFindQuery(t *testing.T) {
 	ids := make([]string, 0, n)
 	for i := 1; i <= n; i++ {
 		created, err := itClient.Create(ctx, itLayout, FieldData{
-			fieldText:     marker,
-			fieldNumber:   i,
-			fieldRequired: "present",
+			fieldText:         marker,
+			fieldNumber:       i,
+			fieldRequired:     "present",
+			fieldSoftRequired: "present",
 		})
 		if err != nil {
 			t.Fatalf("Create %d: %v", i, err)
@@ -1329,6 +1357,7 @@ func TestIntegrationFindMultiSort(t *testing.T) {
 			fieldNumber:        s.num,
 			fieldTextSecondary: s.sec,
 			fieldRequired:      "present",
+			fieldSoftRequired:  "present",
 		})
 		if err != nil {
 			t.Fatalf("Create(%d,%s): %v", s.num, s.sec, err)
@@ -1446,9 +1475,10 @@ func TestIntegrationTimeOfDay(t *testing.T) {
 
 	marker := "go-filemaker-it-tod-" + time.Now().UTC().Format("20060102T150405.000000000")
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:     marker,
-		fieldTime:     Time(time.Date(2025, 6, 23, 15, 4, 5, 0, time.UTC)),
-		fieldRequired: "present",
+		fieldText:         marker,
+		fieldTime:         Time(time.Date(2025, 6, 23, 15, 4, 5, 0, time.UTC)),
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1488,9 +1518,10 @@ func TestIntegrationGet(t *testing.T) {
 
 	marker := "go-filemaker-it-get-" + time.Now().UTC().Format("20060102T150405.000000000")
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:     marker,
-		fieldNumber:   99,
-		fieldRequired: "present",
+		fieldText:         marker,
+		fieldNumber:       99,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1538,9 +1569,10 @@ func TestIntegrationGetRange(t *testing.T) {
 	ids := make([]string, 0, n)
 	for i := 1; i <= n; i++ {
 		created, err := itClient.Create(ctx, itLayout, FieldData{
-			fieldText:     marker,
-			fieldNumber:   i,
-			fieldRequired: "present",
+			fieldText:         marker,
+			fieldNumber:       i,
+			fieldRequired:     "present",
+			fieldSoftRequired: "present",
 		})
 		if err != nil {
 			t.Fatalf("Create %d: %v", i, err)
@@ -1608,7 +1640,8 @@ func TestIntegrationSetGlobalFields(t *testing.T) {
 	// GlobalField back from it — global fields are returned in fieldData
 	// alongside regular fields when the field is on the layout.
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldRequired: "present",
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create (global field read-back): %v", err)
@@ -1646,10 +1679,11 @@ func TestIntegrationWithDateFormatISO(t *testing.T) {
 	ts := time.Date(2025, 6, 23, 15, 4, 5, 0, time.UTC)
 
 	created, err := c.Create(ctx, itLayout, FieldData{
-		fieldText:      marker,
-		fieldDate:      Date(date),
-		fieldTimestamp: Timestamp(ts),
-		fieldRequired:  "present",
+		fieldText:         marker,
+		fieldDate:         Date(date),
+		fieldTimestamp:    Timestamp(ts),
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create with WithDateFormat(ISO): %v", err)
@@ -1763,9 +1797,10 @@ func TestIntegrationDuplicate(t *testing.T) {
 	marker := "go-filemaker-it-dup-" + time.Now().UTC().Format("20060102T150405.000000000")
 
 	created, err := itClient.Create(ctx, itLayout, FieldData{
-		fieldText:     marker,
-		fieldNumber:   99,
-		fieldRequired: "present",
+		fieldText:         marker,
+		fieldNumber:       99,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1802,5 +1837,103 @@ func TestIntegrationDuplicate(t *testing.T) {
 	}
 	if got := fetched.Record.Int(fieldNumber); got != 99 {
 		t.Errorf("duplicate %s = %d, want 99", fieldNumber, got)
+	}
+}
+
+// TestIntegrationWithEntryModeScript confirms that WithEntryMode(EntryModeScript)
+// causes the host to skip "Only during data entry" field validation. Without the
+// option (entrymode=user, the default), the host rejects a create that omits
+// SoftRequiredField. With entrymode=script, the same create succeeds.
+func TestIntegrationWithEntryModeScript(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	// entrymode=user (default): host enforces "Only during data entry" Not-Empty.
+	// fieldSoftRequired is deliberately omitted.
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldRequired: "present",
+	})
+	if err == nil {
+		_, _ = itClient.DeleteByID(context.Background(), itLayout, created.RecordID)
+		t.Fatal("Create without SoftRequiredField succeeded with entrymode=user; " +
+			"want validation error (is SoftRequiredField set Not Empty, \"Only during data entry\"? " +
+			"see docs/integration-testing.md)")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("Create error = %v (%T); want *APIError", err, err)
+	}
+	const codeFieldRequired = 509 // FileMaker "Field requires a value"
+	if apiErr.Code() != codeFieldRequired {
+		t.Errorf("validation error code = %d (%v); want %d", apiErr.Code(), apiErr, codeFieldRequired)
+	}
+
+	// entrymode=script: host skips "Only during data entry" validation; same
+	// omission is now accepted.
+	created, err = itClient.Create(ctx, itLayout, FieldData{
+		fieldRequired: "present",
+	}, WithEntryMode(EntryModeScript))
+	if err != nil {
+		t.Fatalf("Create with WithEntryMode(EntryModeScript): %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+}
+
+// TestIntegrationWithProhibitModeScript confirms that WithProhibitMode(EntryModeScript)
+// allows a write to supply a value for a field whose "Prohibit modification of value
+// during data entry" option is checked. Without the option (prohibitmode=user, the
+// default), the host rejects any attempt to write such a field with error 201 ("Field
+// cannot be modified"); with prohibitmode=script, the write is accepted and the
+// explicitly supplied value is stored instead of the auto-enter value.
+func TestIntegrationWithProhibitModeScript(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	// prohibitmode=user (default): trying to supply a value for a prohibited field
+	// is rejected outright with error 201.
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
+		fieldAutoEnter:    "manual",
+	})
+	if err == nil {
+		_, _ = itClient.DeleteByID(context.Background(), itLayout, created.RecordID)
+		t.Fatal("Create with AutoEnterField set and prohibitmode=user succeeded; " +
+			"want error 201 (is AutoEnterField configured with \"Prohibit modification " +
+			"of value during data entry\" checked? see docs/integration-testing.md)")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("Create error = %v (%T); want *APIError", err, err)
+	}
+	const codeFieldCannotBeModified = 201 // FileMaker "Field cannot be modified"
+	if apiErr.Code() != codeFieldCannotBeModified {
+		t.Errorf("prohibitmode=user error code = %d (%v); want %d", apiErr.Code(), apiErr, codeFieldCannotBeModified)
+	}
+
+	// prohibitmode=script: prohibition is bypassed; the supplied value is stored.
+	created2, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
+		fieldAutoEnter:    "manual",
+	}, WithProhibitMode(EntryModeScript))
+	if err != nil {
+		t.Fatalf("Create with WithProhibitMode(EntryModeScript): %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created2.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created2.RecordID, err)
+		}
+	})
+	res, err := itClient.GetByID(ctx, itLayout, created2.RecordID)
+	if err != nil {
+		t.Fatalf("GetByID (prohibitmode=script): %v", err)
+	}
+	if got := res.Record.String(fieldAutoEnter); got != "manual" {
+		t.Errorf("prohibitmode=script: %s = %q, want \"manual\" (prohibition should be bypassed)", fieldAutoEnter, got)
 	}
 }

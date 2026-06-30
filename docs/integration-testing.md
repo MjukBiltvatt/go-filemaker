@@ -39,6 +39,8 @@ Two tables in a one-to-many relationship.
 | `TimeField` | Time | Time-of-day round-trip (clock value and >24h duration) |
 | `ContainerField` | Container | Upload/download round-trip |
 | `RequiredField` | Text | **Validation:** Not Empty, **"Validate always"** (not "only during data entry"), and **"Allow user to override during data entry" OFF** |
+| `SoftRequiredField` | Text | **Validation:** Not Empty, **"Only during data entry"** (not "Validate always"), and **"Allow user to override during data entry" ON**. Used by `TestIntegrationWithEntryModeScript` |
+| `AutoEnterField` | Text | **Auto-Enter:** Calculated value `"auto"`. **"Prohibit modification of value during data entry" ON**. Used by `TestIntegrationWithProhibitModeScript` |
 | `GlobalField` | Text | **Storage:** Global (Options → Storage → "Use global storage"). Used by `TestIntegrationSetGlobalFields` |
 | `Id` | Number _or_ Text | Relationship match key — Number with auto-enter **serial**, or Text with an auto-enter UUID; must be the **same type** as `ChildTable::ParentId`. Never touched by the tests |
 
@@ -64,10 +66,10 @@ must be enabled on the **`ChildTable`** side of the relationship dialog:
 
 A layout named **`ParentTable`**, based on the `ParentTable` occurrence:
 
-- Place all nine non-`Id` `ParentTable` fields on it (the Data API only sees
+- Place all eleven non-`Id` `ParentTable` fields on it (the Data API only sees
   fields that are on the layout): `TextField`, `NumberField`, `TextSecondary`,
   `DateField`, `TimestampField`, `TimeField`, `ContainerField`, `RequiredField`,
-  `GlobalField`.
+  `SoftRequiredField`, `AutoEnterField`, `GlobalField`.
 - Add a **portal** showing `ChildTable`, with `ChildText` in it. Leave the
   portal object name unset (or set it to `ChildTable`) so the Data API keys the
   returned portal data by the table-occurrence name. Set it to show **exactly 3
@@ -199,7 +201,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationDatabases` | Database listing (Basic-auth path) |
 | `TestIntegrationScripts` | Script catalog listing; recursive folder hierarchy (needs the script fixture) |
 | `TestIntegrationLayouts` | Layout catalog listing; recursive folder hierarchy; `FM_LAYOUT` present (needs the layout folder fixture) |
-| `TestIntegrationLayoutMetadata` | Single-layout metadata for `FM_LAYOUT`: doubles as an environment check — every documented field present with the right result type, only `RequiredField` Not-Empty, `ChildTable` portal exposes `ChildText` (no extra fixture) |
+| `TestIntegrationLayoutMetadata` | Single-layout metadata for `FM_LAYOUT`: doubles as an environment check — every documented field present with the right result type, only `RequiredField` and `SoftRequiredField` Not-Empty, `ChildTable` portal exposes `ChildText` (no extra fixture) |
 | `TestIntegrationSpecialLayoutNames` | URL-reserved characters in a layout name are escaped into the path (needs the `Sales #1` layout) |
 | `TestIntegrationCRUD` | Create → find → update (patch) → delete; number coercion |
 | `TestIntegrationDateTime` | Date/timestamp wrappers and read-back parsing |
@@ -219,6 +221,8 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationWithDateFormatISO` | `WithDateFormat(DateFormatISO)` writes ISO + sends `dateformats=2` |
 | `TestIntegrationRunScript` | `RunScript` dedicated endpoint: echo param round-trip, script error without request failure, missing script → `*APIError` code 104 (needs the `EchoParam` and `TriggerError` fixtures) |
 | `TestIntegrationDuplicate` | `DuplicateByID` duplicates a record; the copy receives a new record ID and carries the original's field values |
+| `TestIntegrationWithEntryModeScript` | `WithEntryMode(EntryModeScript)` bypasses "Only during data entry" validation — host rejects the write without it (code 509), accepts with it |
+| `TestIntegrationWithProhibitModeScript` | `WithProhibitMode(EntryModeScript)` bypasses a "Prohibit modification" field — host rejects the write without it (code 201), accepts with it and stores the supplied value |
 
 ## Date formats (`WithDateFormat`)
 
@@ -249,15 +253,23 @@ In rough order of how often they bite:
 2. **`RequiredField` set to "only during data entry"** — the Data API bypasses
    that, so the validation test fails its "create should have been rejected"
    path instead of seeing code 509.
-3. **A field exists in the table but isn't on the `ParentTable` layout** — the
+3. **`SoftRequiredField` set to "Validate always"** — it then behaves like
+   `RequiredField` and cannot be bypassed by `entrymode=script`, so
+   `TestIntegrationWithEntryModeScript` fails its "create with EntryModeScript
+   should have succeeded" path.
+4. **`AutoEnterField` missing "Prohibit modification of value during data entry"** —
+   the host accepts a write that supplies a value even without `prohibitmode=script`,
+   so `TestIntegrationWithProhibitModeScript` fails its "create without
+   ProhibitModeScript should have been rejected" path instead of seeing code 201.
+5. **A field exists in the table but isn't on the `ParentTable` layout** — the
    Data API won't see it, so it won't round-trip.
-4. **The portal object has a custom name** — portal data comes back under that
+6. **The portal object has a custom name** — portal data comes back under that
    name instead of `ChildTable`, so the portal test can't find its rows.
-5. **Host configured with a non-US date format** — surfaced by
+7. **Host configured with a non-US date format** — surfaced by
    `TestIntegrationDateTime` (by design; it confirms the wrappers' format against
    the live host).
-6. **No script fixture (or an empty folder)** — `TestIntegrationScripts` fails
+8. **No script fixture (or an empty folder)** — `TestIntegrationScripts` fails
    asking for a top-level script and a folder that *contains* a script; an empty
    folder doesn't exercise the nested decode and won't satisfy it.
-7. **No layout folder fixture (or an empty one)** — `TestIntegrationLayouts`
+9. **No layout folder fixture (or an empty one)** — `TestIntegrationLayouts`
    fails asking for a folder that *contains* a layout, for the same reason.
