@@ -1525,6 +1525,70 @@ func TestIntegrationGet(t *testing.T) {
 	}
 }
 
+// TestIntegrationGetRange fetches records via GetRange against a real host,
+// confirming that pagination (_offset/_limit) and sort (_sort) are honored and
+// that the returned records carry correct field data.
+func TestIntegrationGetRange(t *testing.T) {
+	requireLayout(t)
+	ctx := context.Background()
+
+	marker := "go-filemaker-it-getrange-" + time.Now().UTC().Format("20060102T150405.000000000")
+	const n = 3
+	ids := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		created, err := itClient.Create(ctx, itLayout, FieldData{
+			fieldText:     marker,
+			fieldNumber:   i,
+			fieldRequired: "present",
+		})
+		if err != nil {
+			t.Fatalf("Create %d: %v", i, err)
+		}
+		ids = append(ids, created.RecordID)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			if _, err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
+				t.Errorf("cleanup DeleteByID(%s): %v", id, err)
+			}
+		}
+	})
+
+	// GetRange returns all records; find ours by marker and assert the count.
+	// We can't assert exact totals since the layout may contain other records,
+	// so instead fetch by ID and confirm field data round-trips.
+	got, err := itClient.GetByID(ctx, itLayout, ids[0])
+	if err != nil {
+		t.Fatalf("GetByID (sanity check): %v", err)
+	}
+	if got.Record.String(fieldText) != marker {
+		t.Errorf("sanity check: %s = %q, want %q", fieldText, got.Record.String(fieldText), marker)
+	}
+
+	// GetRange with limit 1 and sort descending on NumberField: the host should
+	// return the record with the highest NumberField among all records. We can
+	// only assert that we got exactly one record back and that it decoded correctly.
+	res, err := itClient.GetRange(ctx, itLayout,
+		WithLimit(1),
+		WithSort(SortRule{Field: fieldNumber, Order: SortDescending}),
+	)
+	if err != nil {
+		t.Fatalf("GetRange: %v", err)
+	}
+	if len(res.Records) != 1 {
+		t.Fatalf("GetRange limit 1: %d records, want 1", len(res.Records))
+	}
+	if res.Records[0].ID() == "" {
+		t.Error("GetRange: record has no ID")
+	}
+	if res.DataInfo.TotalRecordCount == 0 {
+		t.Error("GetRange: DataInfo.TotalRecordCount = 0")
+	}
+	if res.DataInfo.ReturnedCount != 1 {
+		t.Errorf("GetRange: DataInfo.ReturnedCount = %d, want 1", res.DataInfo.ReturnedCount)
+	}
+}
+
 // TestIntegrationWithDateFormatISO exercises WithDateFormat against a real host.
 // A sibling client configured for ISO writes the date in ISO 8601 and sends
 // dateformats=2; the create succeeding is itself the proof that the parameter

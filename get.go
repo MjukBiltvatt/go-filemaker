@@ -95,3 +95,96 @@ func (c recordConfig) getQueryParams() url.Values {
 	}
 	return v
 }
+
+// GetRangeResponse is the result of a GetRange. Records is empty (non-nil) when
+// the layout contains no records. DataInfo carries the host's record counts.
+// Scripts holds the outcomes of any scripts run with the request.
+type GetRangeResponse struct {
+	Records  []Record
+	DataInfo DataInfo
+	Scripts  ScriptOutcomes
+}
+
+// GetRange returns records from the layout in insertion order, shaped by the
+// options. Without WithLimit the host returns at most 100 records; pass
+// WithLimit (and WithOffset to page) to retrieve more. Pass WithSort to order
+// the result, WithPortals and friends to control related records, or WithScript
+// and friends to run scripts with the request; script outcomes are returned in
+// the GetRangeResponse.
+//
+// Unlike Find, GetRange does not filter: it always returns the full record set
+// (subject to limit and offset), making it the right tool for reading all
+// records from a small layout or paginating without a find expression.
+func (c *Client) GetRange(ctx context.Context, layout string, opts ...GetRangeOption) (GetRangeResponse, error) {
+	if layout == "" {
+		return GetRangeResponse{}, errors.New("filemaker: no layout specified")
+	}
+
+	cfg, err := resolveGetRangeConfig(opts)
+	if err != nil {
+		return GetRangeResponse{}, err
+	}
+
+	u := c.recordsURL(layout)
+	if q := cfg.getRangeQueryParams(); len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+
+	var rb responseBody
+	// ErrNoRecords means the layout has no records; treat it as an empty result
+	// (non-nil slice) rather than surfacing the error, mirroring Find's behavior.
+	if err := c.do(ctx, http.MethodGet, u, nil, &rb); err != nil && !errors.Is(err, ErrNoRecords) {
+		return GetRangeResponse{}, err
+	}
+
+	records := make([]Record, len(rb.Response.Data))
+	for i, w := range rb.Response.Data {
+		records[i] = Record{
+			id:         w.ID,
+			modID:      w.ModID,
+			layout:     layout,
+			fieldData:  w.FieldData,
+			portalData: w.PortalData,
+			loc:        c.location,
+		}
+	}
+	return GetRangeResponse{Records: records, DataInfo: rb.Response.DataInfo, Scripts: rb.scriptOutcomes()}, nil
+}
+
+// getRangeQueryParams encodes the options as URL query parameters for the GET
+// records endpoint. Top-level pagination and sort use underscore-prefixed keys
+// (_offset, _limit, _sort); portal filtering and paging share the same keys as
+// the get-single endpoint (portal, _offset.<name>, _limit.<name>). Sort is
+// JSON-encoded as an array, matching the wire format the host expects.
+func (c recordConfig) getRangeQueryParams() url.Values {
+	v := url.Values{}
+	if c.offset > 0 {
+		v.Set("_offset", strconv.Itoa(c.offset))
+	}
+	if c.limit > 0 {
+		v.Set("_limit", strconv.Itoa(c.limit))
+	}
+	if len(c.sort) > 0 {
+		b, _ := json.Marshal(c.sort)
+		v.Set("_sort", string(b))
+	}
+	if len(c.portals) > 0 {
+		b, _ := json.Marshal(c.portals)
+		v.Set("portal", string(b))
+	}
+	for name, pr := range c.portalRanges {
+		if pr.offset > 0 {
+			v.Set("_offset."+name, strconv.Itoa(pr.offset))
+		}
+		if pr.limit > 0 {
+			v.Set("_limit."+name, strconv.Itoa(pr.limit))
+		}
+	}
+	if c.responseLayout != "" {
+		v.Set("layout.response", c.responseLayout)
+	}
+	for _, kv := range c.scriptParams() {
+		v.Set(kv[0], kv[1])
+	}
+	return v
+}

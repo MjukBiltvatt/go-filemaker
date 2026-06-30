@@ -36,6 +36,9 @@ type FindOption interface{ applyFind(*recordConfig) }
 // GetOption configures a Get or GetByID.
 type GetOption interface{ applyGet(*recordConfig) }
 
+// GetRangeOption configures a GetRange.
+type GetRangeOption interface{ applyGetRange(*recordConfig) }
+
 // UploadOption configures an UploadToContainer or UploadToContainerByID.
 type UploadOption interface{ applyUpload(*recordConfig) }
 
@@ -57,27 +60,30 @@ type ConcurrencyOption interface {
 
 // RecordOption configures any record-context endpoint that can run scripts with
 // the request. It is accepted by Create, Update (and UpdateByID), Delete (and
-// DeleteByID), Find, and Get (and GetByID).
+// DeleteByID), Find, Get (and GetByID), and GetRange.
 type RecordOption interface {
 	CreateOption
 	UpdateOption
 	DeleteOption
 	FindOption
 	GetOption
+	GetRangeOption
 }
 
 // ReadManyOption configures a read that returns multiple records — sorting and
-// paging. It is accepted by Find (and, in future, the get-range endpoint).
+// paging. It is accepted by Find and GetRange.
 type ReadManyOption interface {
 	FindOption
+	GetRangeOption
 }
 
 // ReadOption configures how a read returns records: which portals to include,
-// how to page them, and the layout to return data in. It is accepted by Find
-// and Get (and GetByID).
+// how to page them, and the layout to return data in. It is accepted by Find,
+// Get (and GetByID), and GetRange.
 type ReadOption interface {
 	FindOption
 	GetOption
+	GetRangeOption
 }
 
 // EntryMode selects whether the host applies a field's rules to a write the way
@@ -211,12 +217,13 @@ func (c recordConfig) queryParams() url.Values {
 // returned as — not by the methods this concrete type happens to carry.
 type option func(*recordConfig)
 
-func (o option) applyCreate(c *recordConfig) { o(c) }
-func (o option) applyUpdate(c *recordConfig) { o(c) }
-func (o option) applyDelete(c *recordConfig) { o(c) }
-func (o option) applyFind(c *recordConfig)   { o(c) }
-func (o option) applyGet(c *recordConfig)    { o(c) }
-func (o option) applyUpload(c *recordConfig) { o(c) }
+func (o option) applyCreate(c *recordConfig)   { o(c) }
+func (o option) applyUpdate(c *recordConfig)   { o(c) }
+func (o option) applyDelete(c *recordConfig)   { o(c) }
+func (o option) applyFind(c *recordConfig)     { o(c) }
+func (o option) applyGet(c *recordConfig)      { o(c) }
+func (o option) applyGetRange(c *recordConfig) { o(c) }
+func (o option) applyUpload(c *recordConfig)   { o(c) }
 
 // WithModID makes the write conditional (optimistic concurrency) against a
 // specific mod ID: the host rejects it with ErrRecordModified if the record's
@@ -447,6 +454,18 @@ func resolveGetConfig(opts []GetOption) (recordConfig, error) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt.applyGet(&cfg)
+		}
+	}
+	return cfg, cfg.err
+}
+
+// resolveGetRangeConfig applies the get-range options. Deferred option errors
+// surface here.
+func resolveGetRangeConfig(opts []GetRangeOption) (recordConfig, error) {
+	var cfg recordConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyGetRange(&cfg)
 		}
 	}
 	return cfg, cfg.err
