@@ -854,9 +854,29 @@ func TestDownloadFromContainerByURLForeignHost(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// Each URL is crafted to look like the session host to a naive prefix
+	// match. The bearer token must never reach any of them, so the refusal has
+	// to come from the host check — an incidental dial or auth failure would
+	// leave the token exposed on a host that did resolve.
+	cases := []struct {
+		raw  string
+		desc string
+	}{
+		{raw: "https://evil.example.com/steal", desc: "unrelated host"},
+		{raw: srv.URL + "@attacker.example/steal", desc: "userinfo hides the real host"},
+		{raw: srv.URL + "0/steal", desc: "port extended by a digit"},
+		{raw: srv.URL + ".attacker.example/steal", desc: "host extended with a suffix"},
+	}
 	c := testClient(srv)
-	if _, err := c.DownloadFromContainerByURL(context.Background(), "https://evil.example.com/steal"); err == nil {
-		t.Fatal("expected error for foreign-host container URL")
+	for _, tc := range cases {
+		_, err := c.DownloadFromContainerByURL(context.Background(), tc.raw)
+		if err == nil {
+			t.Errorf("DownloadFromContainerByURL(%q): expected error (%s)", tc.raw, tc.desc)
+			continue
+		}
+		if !strings.Contains(err.Error(), "foreign host") {
+			t.Errorf("DownloadFromContainerByURL(%q) = %v, want a foreign-host refusal (%s)", tc.raw, err, tc.desc)
+		}
 	}
 }
 

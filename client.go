@@ -257,6 +257,36 @@ func normalizeHost(host string, allowInsecureHTTP bool) (string, error) {
 	return host, nil
 }
 
+// sameOrigin reports whether raw addresses the same origin as base: identical
+// scheme and host, compared case-insensitively, with an explicit default port
+// treated as equivalent to none. A URL carrying userinfo is never same-origin —
+// "https://host@evil.example" addresses evil.example, and the leading
+// credentials exist only to mislead whoever reads it.
+func sameOrigin(base, raw string) bool {
+	b, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil {
+		return false
+	}
+	// url.Parse lowercases the scheme but leaves the host as written.
+	return u.Scheme == b.Scheme && strings.EqualFold(originHost(u), originHost(b))
+}
+
+// originHost returns u's host with the port omitted when it is the default for
+// the scheme, so "https://h:443" and "https://h" compare equal.
+func originHost(u *url.URL) string {
+	port := u.Port()
+	if port == "" ||
+		(u.Scheme == "https" && port == "443") ||
+		(u.Scheme == "http" && port == "80") {
+		return u.Hostname()
+	}
+	return u.Hostname() + ":" + port
+}
+
 // LastActivity returns the time of the last successful request made with the
 // client. It is the zero time until the first request succeeds: a freshly built
 // client has performed no activity yet (authentication is lazy). Check

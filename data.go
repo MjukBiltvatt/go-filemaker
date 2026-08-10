@@ -9,7 +9,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -294,7 +293,7 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 	if containerURL == "" {
 		return nil, errors.New("filemaker: empty container url")
 	}
-	if !strings.HasPrefix(containerURL, c.host) {
+	if !sameOrigin(c.host, containerURL) {
 		return nil, fmt.Errorf("filemaker: refusing to fetch container from foreign host: %s", containerURL)
 	}
 

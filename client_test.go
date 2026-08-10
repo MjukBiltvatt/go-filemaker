@@ -66,6 +66,32 @@ func TestNormalizeHost(t *testing.T) {
 	}
 }
 
+func TestSameOrigin(t *testing.T) {
+	const base = "https://fms.example.com"
+	cases := []struct {
+		raw  string
+		want bool
+		desc string
+	}{
+		{raw: "https://fms.example.com/Streaming_SSL/x.pdf?RCType=E", want: true, desc: "container URL on the session host"},
+		{raw: "https://fms.example.com:443/Streaming_SSL/x.pdf", want: true, desc: "explicit default port"},
+		{raw: "https://FMS.Example.com/Streaming_SSL/x.pdf", want: true, desc: "host case differs (DNS is case-insensitive)"},
+		{raw: "https://fms.example.com.attacker.com/steal", want: false, desc: "host extended with a suffix"},
+		{raw: "https://fms.example.com@attacker.com/steal", want: false, desc: "userinfo hides the real host"},
+		{raw: "https://fms.example.com.attacker.com:8443/steal", want: false, desc: "suffix-extended host on another port"},
+		{raw: "https://fms.example.completely-evil.io/steal", want: false, desc: "suffix continues the last label"},
+		{raw: "http://fms.example.com/Streaming_SSL/x.pdf", want: false, desc: "scheme downgraded to plaintext"},
+		{raw: "https://evil.example.com/steal", want: false, desc: "unrelated host"},
+		{raw: "/Streaming_SSL/x.pdf", want: false, desc: "relative URL has no host to compare"},
+		{raw: "://not a url", want: false, desc: "unparseable URL"},
+	}
+	for _, c := range cases {
+		if got := sameOrigin(base, c.raw); got != c.want {
+			t.Errorf("sameOrigin(%q, %q) = %v, want %v (%s)", base, c.raw, got, c.want, c.desc)
+		}
+	}
+}
+
 func TestNew(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
