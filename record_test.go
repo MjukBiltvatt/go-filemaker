@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -344,6 +345,59 @@ func TestRecordDecodeErrors(t *testing.T) {
 	n := 5
 	if err := r.Decode(&n); err == nil {
 		t.Error("Decode(*int) = nil, want error")
+	}
+}
+
+// TestRecordDecodeUnsupportedFieldTypes checks that an `fm` tag on a field
+// Decode cannot populate is reported rather than silently skipped, that every
+// offending field is named in one error, and that the fields that can decode are
+// still populated.
+func TestRecordDecodeUnsupportedFieldTypes(t *testing.T) {
+	var value struct {
+		Supported string       `fm:"string"`
+		Uint      uint         `fm:"int"`
+		Slice     []string     `fm:"string"`
+		Nested    addressGroup `fm:"string"`
+		Untagged  uint         // no fm tag: not an error
+	}
+
+	err := testRecord().Decode(&value)
+	if err == nil {
+		t.Fatal("Decode(unsupported field types) = nil, want error")
+	}
+	for _, name := range []string{"Uint", "Slice", "Nested"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error does not name field %s: %v", name, err)
+		}
+	}
+	if strings.Contains(err.Error(), "Untagged") {
+		t.Errorf("error names untagged field Untagged: %v", err)
+	}
+	// The nested-struct case is the v3 Map recursion trap, so it carries a hint.
+	if !strings.Contains(err.Error(), "not recursive") {
+		t.Errorf("error lacks the nested-struct hint: %v", err)
+	}
+	if value.Supported != "string" {
+		t.Errorf("Supported = %q, want %q: decodable fields must still be set", value.Supported, "string")
+	}
+}
+
+// TestRecordDecodeDefinedType documents that a defined type over a supported
+// type does not decode (the type switch matches concrete types) and is reported
+// rather than left silently at its zero value.
+func TestRecordDecodeDefinedType(t *testing.T) {
+	type status string
+
+	var value struct {
+		Status status `fm:"string"`
+	}
+
+	err := testRecord().Decode(&value)
+	if err == nil {
+		t.Fatal("Decode(defined type) = nil, want error")
+	}
+	if strings.Contains(err.Error(), "not recursive") {
+		t.Errorf("non-struct field carries the nested-struct hint: %v", err)
 	}
 }
 

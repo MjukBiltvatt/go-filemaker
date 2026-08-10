@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -342,8 +343,13 @@ func parseFMDuration(s string) (time.Duration, error) {
 // the value parses to a non-zero time, and to nil otherwise (clearing any value
 // from a previous Decode).
 //
-// An error is returned only for structural misuse — obj not being a non-nil
-// pointer to a struct.
+// An error is returned only for structural misuse: obj is not a non-nil pointer
+// to a struct, or an `fm`-tagged field has a type outside the supported list
+// below. The second case depends on the struct definition alone, not on the
+// record's data, so it surfaces on the first decode rather than for some records
+// only; every offending field is reported, and the fields that do decode are
+// still populated. Note that a defined type over a supported type (type Status
+// string) is not itself supported.
 //
 // Supported field types: string, int, int8, int16, int32, int64, float32,
 // float64, bool, time.Duration, time.Time, *time.Time.
@@ -358,6 +364,7 @@ func (r Record) Decode(obj any) error {
 	}
 
 	vType := v.Type()
+	var errs []error
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
 		if !field.CanSet() {
@@ -393,7 +400,22 @@ func (r Record) Decode(obj any) error {
 			} else {
 				field.Set(reflect.Zero(field.Type()))
 			}
+		default:
+			errs = append(errs, unsupportedFieldError(vType.Field(i), tag))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// unsupportedFieldError reports an `fm`-tagged struct field that Decode cannot
+// populate. The fault is in the struct definition rather than the record — it is
+// the same for every record — so it is reported rather than skipped.
+func unsupportedFieldError(sf reflect.StructField, tag string) error {
+	hint := ""
+	if k := sf.Type.Kind(); k == reflect.Struct ||
+		(k == reflect.Pointer && sf.Type.Elem().Kind() == reflect.Struct) {
+		hint = "; Decode is not recursive — call Decode on the nested struct itself"
+	}
+	return fmt.Errorf("filemaker: decode: field %s has unsupported type %s for tag %q%s",
+		sf.Name, sf.Type, tag, hint)
 }

@@ -240,8 +240,9 @@ func (r Record) Portals() map[string][]map[string]any  // deep copy of portal ro
 - **`Decode` (was `Map`).** Renamed — "decode generic map → typed struct" is the
   conventional name (cf. `mapstructure.Decode`), and `Map` reads as a transform
   in Go. `Decode(obj any) error` follows the `json.Unmarshal` model: it errors
-  only on structural misuse (not a non-nil pointer to a struct) and is lenient
-  per field (missing/empty → zero value). It uses the record's location for time
+  only on structural misuse (`obj` is not a non-nil pointer to a struct, or a
+  tagged field has an unsupported type) and is lenient per field
+  (missing/empty → zero value). It uses the record's location for time
   fields. **Not recursive** (behavior change from v3): records are flat, so it
   maps only `fm`-tagged fields of the struct passed in; untagged and `fm:"-"`
   fields are left untouched, and nested structs are decoded by calling `Decode`

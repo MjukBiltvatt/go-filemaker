@@ -232,6 +232,10 @@ err := rec.Decode(&customer)
 err = rec.Decode(&customer.Address) // decode the nested struct yourself
 ```
 
+Leave the nested field untagged, as above. Putting an `fm` tag on it now returns
+an error naming the field — v4 will not populate it, and says so rather than
+leaving it silently at its zero value.
+
 The time zone that was the second argument to `Map` is now a client-level setting
 (`WithLocation`, default UTC), stamped onto every record. Override per call with
 `rec.TimeIn(field, loc)`.
@@ -241,6 +245,15 @@ The time zone that was the second argument to `Map` is now a client-level settin
 - **Login timing.** A bad host/credential failed at `New` in v3; in v4 it
   surfaces on the first operation (or on an explicit `Authenticate(ctx)`).
 - **`Decode` is flat**, not recursive (see above).
+- **`Decode` rejects `fm` tags it cannot honour.** v3's `Map` returned nothing and
+  skipped any field type it did not handle. v4 returns an error naming every
+  `fm`-tagged field whose type is unsupported — an unsigned or slice field, a
+  nested struct, or a defined type over a supported one (`type Status string` is
+  not `string`). The check is on the struct definition, so it surfaces on the
+  first decode; fields that do decode are still populated. Untagged and `fm:"-"`
+  fields are unaffected. Supported types: `string`, `int`, `int8`, `int16`,
+  `int32`, `int64`, `float32`, `float64`, `bool`, `time.Duration`, `time.Time`,
+  `*time.Time`.
 - **`Find` returns `FindResponse`**, not `[]Record`. Reach for `res.Records`.
 - **Default find limit.** v3 imposed a default limit of 100 client-side; v4 sends
   no limit unless you set `WithLimit`, so the server's own default (also 100)
