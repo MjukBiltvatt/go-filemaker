@@ -135,7 +135,7 @@ fixture. Grant the test account access to both fixtures (or use **Full Access**)
 ### Layouts
 
 `TestIntegrationLayouts` reads the database's layout catalog. The `ParentTable`
-layout (the `FM_LAYOUT` you already created above) supplies the top-level entry,
+layout you already created above supplies the top-level entry,
 and the test confirms it shows up in the catalog. To exercise the recursive
 `folderLayoutNames` decode, the file also needs **at least one layout folder that
 contains a layout** — in **Manage → Layouts**, create a folder and put any layout
@@ -213,8 +213,8 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationScripts` | Script catalog listing; recursive folder hierarchy (needs the script fixture) |
 | `TestIntegrationLayouts` | Layout catalog listing; recursive folder hierarchy; `ParentTable` present (needs the layout folder fixture) |
 | `TestIntegrationLayoutMetadata` | Single-layout metadata for `ParentTable`: doubles as an environment check — every documented field present with the right result type, only `RequiredField` and `SoftRequiredField` Not-Empty, `ChildTable` portal exposes `ChildText` (no extra fixture) |
-| `TestIntegrationSpecialLayoutNames` | URL-reserved characters in a layout name are escaped into the path (needs the `Sales #1` layout) |
 | `TestIntegrationCRUD` | Create → find → update (patch) → delete; number coercion |
+| `TestIntegrationSpecialLayoutNames` | URL-reserved characters in a layout name are escaped into the path (needs the `Sales #1` layout) |
 | `TestIntegrationDateTime` | Date/timestamp wrappers and read-back parsing |
 | `TestIntegrationDateTimeLocation` | `WithLocation` zone applied on read (needs `FM_LOCATION`) |
 | `TestIntegrationRequiredField` | Server-side Not-Empty validation (code 509) |
@@ -229,9 +229,9 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationFindMultiSort` | Multiple sort fields applied in order; result sequence is deterministic |
 | `TestIntegrationReauthOnInvalidToken` | Expired-session recovery via `WithReauthOnInvalidToken` |
 | `TestIntegrationTimeOfDay` | Time field round-trip: `Time`/`Duration` wrappers and `Time()`/`Duration()` getters |
-| `TestIntegrationSetGlobalFields` | `SetGlobalFields` sets a global field value; host accepts the write (needs the `GlobalField` fixture) |
 | `TestIntegrationGet` | `GetByID` and `Get` fetch a single record; field data round-trips correctly |
 | `TestIntegrationGetRange` | `GetRange` with `WithLimit`/`WithSort`; returned record count and `DataInfo` are correct |
+| `TestIntegrationSetGlobalFields` | `SetGlobalFields` sets a global field value; host accepts the write (needs the `GlobalField` fixture) |
 | `TestIntegrationWithDateFormatISO` | `WithDateFormat(DateFormatISO)` writes ISO + sends `dateformats=2` |
 | `TestIntegrationRunScript` | `RunScript` dedicated endpoint: echo param round-trip, script error without request failure, missing script → `*APIError` code 104 (needs the `EchoParam` and `TriggerError` fixtures) |
 | `TestIntegrationDuplicate` | `DuplicateByID` duplicates a record; the copy receives a new record ID and carries the original's field values |

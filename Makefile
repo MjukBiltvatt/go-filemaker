@@ -3,7 +3,7 @@
 # `make test`        - hermetic unit tests (httptest mocks); no server needed.
 # `make integration` - integration tests against a real FileMaker Server.
 #                      Reads credentials from .env (FM_HOST, FM_DATABASE,
-#                      FM_USERNAME, FM_PASSWORD, FM_LAYOUT). See integration_test.go.
+#                      FM_USERNAME, FM_PASSWORD). See integration_test.go.
 #
 #                      Narrow to specific tests with RUN (a -run regexp):
 #                        make integration RUN=TestIntegrationDateTime

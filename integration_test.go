@@ -20,7 +20,6 @@
 //	FM_DATABASE   database name
 //	FM_USERNAME   account name
 //	FM_PASSWORD   account password
-//	FM_LAYOUT     a dedicated, disposable test layout (see schema below)
 //
 // Optional:
 //
@@ -37,9 +36,10 @@
 //
 // # Expected test layout
 //
-// Point FM_LAYOUT at a throwaway layout — never production data — on a table
-// named ParentTable, exposing at least these fields, all editable via the Data
-// API:
+// The layout names are fixed, not configurable: the suite looks for a layout
+// named ParentTable (the itLayout constant). Make it a throwaway layout — never
+// production data — on a table also named ParentTable, exposing at least these
+// fields, all editable via the Data API:
 //
 //	TextField       text; also the unique lookup key the tests find records by.
 //	NumberField     number.
@@ -75,7 +75,7 @@
 //     portal row links it automatically) and "Delete related records in this
 //     table when a record is deleted in the other table" (so deleting a parent
 //     cascades, keeping teardown clean).
-//   - A portal on FM_LAYOUT showing ChildTable with ChildText. Leave the portal
+//   - A portal on ParentTable showing ChildTable with ChildText. Leave the portal
 //     object name unset (or equal to ChildTable) so the Data API keys the
 //     returned portal data by the table-occurrence name. Configure it to show
 //     exactly portalRowHeight (3) rows: TestIntegrationPortalPaging relies on the
@@ -93,7 +93,7 @@
 //     script folder that contains a script (the nested script is what exercises
 //     the recursive folderScriptNames decode).
 //   - Layouts: at least one layout folder that contains a layout (exercising the
-//     recursive folderLayoutNames decode). The configured FM_LAYOUT supplies the
+//     recursive folderLayoutNames decode). The ParentTable layout supplies the
 //     top-level layout, and the test also confirms it appears in the catalog.
 //
 // The names do not matter; only the shape does.
@@ -326,7 +326,7 @@ func TestIntegrationScripts(t *testing.T) {
 // hierarchy round-trips. Like scripts, layouts are design-time objects, so the
 // test relies on a fixture (see docs/integration-testing.md): at least one
 // folder that itself contains a layout, which exercises the recursive
-// folderLayoutNames decode. It also confirms the configured FM_LAYOUT appears
+// folderLayoutNames decode. It also confirms the ParentTable layout appears
 // somewhere in the catalog — a real-data check the scripts test cannot make.
 func TestIntegrationLayouts(t *testing.T) {
 	requireServer(t)
@@ -357,7 +357,7 @@ func TestIntegrationLayouts(t *testing.T) {
 	}
 }
 
-// TestIntegrationLayoutMetadata fetches the metadata for FM_LAYOUT and verifies
+// TestIntegrationLayoutMetadata fetches the metadata for ParentTable and verifies
 // it against the schema documented in docs/integration-testing.md. Because the
 // endpoint reports the whole layout in one call, this doubles as a check that
 // the test environment is set up correctly: every documented field must be
