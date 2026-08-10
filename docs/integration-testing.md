@@ -132,7 +132,7 @@ results, so it needs **two specifically named, runnable fixture scripts**:
 The missing-script half of that test runs a name that does not exist and needs no
 fixture. Grant the test account access to both fixtures (or use **Full Access**).
 
-### Layouts
+### Layout folder fixture
 
 `TestIntegrationLayouts` reads the database's layout catalog. The `ParentTable`
 layout you already created above supplies the top-level entry,
