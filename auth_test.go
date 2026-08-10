@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestAuthenticate(t *testing.T) {
@@ -152,6 +153,69 @@ func TestLogout(t *testing.T) {
 	}
 	if c.token != "" {
 		t.Errorf("token = %q, want cleared", c.token)
+	}
+}
+
+// TestLogoutKeepsConcurrentRefreshToken pins the ordering that makes Logout's
+// write unsafe: a re-authentication that completes while the logout DELETE is
+// still in flight must survive. Logout invalidates the token concurrent
+// operations are still using, so it provokes the 952 that drives the reactive
+// refresh — discarding that fresh token would leave a live session stranded on
+// the host with nothing left to log it out.
+//
+// The handshake is explicit rather than timing-based: the DELETE handler parks
+// until released, which is the only way to hold Logout between its token read
+// and its write. Every wait is bounded so a regression fails the test instead of
+// hanging it.
+func TestLogoutKeepsConcurrentRefreshToken(t *testing.T) {
+	deleteReceived := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodDelete:
+			close(deleteReceived)
+			<-releaseDelete
+			writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+		case http.MethodPost:
+			writeJSON(w, `{"response":{"token":"fresh"},"messages":[{"code":"0","message":"OK"}]}`)
+		default:
+			t.Errorf("unexpected %s request", r.Method)
+		}
+	}))
+	defer srv.Close()
+
+	c := testClient(srv) // seeded with token "tok"
+
+	logoutDone := make(chan error, 1)
+	go func() { logoutDone <- c.Logout(context.Background()) }()
+
+	select {
+	case <-deleteReceived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the logout DELETE")
+	}
+
+	// Logout is now parked past its token read. Stand in for the reactive
+	// refresh an in-flight operation would perform after its 952.
+	if err := c.authenticate(context.Background(), "tok"); err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+
+	close(releaseDelete)
+	select {
+	case err := <-logoutDone:
+		if err != nil {
+			t.Fatalf("Logout: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Logout to return")
+	}
+
+	c.mu.RLock()
+	got := c.token
+	c.mu.RUnlock()
+	if got != "fresh" {
+		t.Errorf("token = %q, want %q: Logout discarded a token installed while its DELETE was in flight", got, "fresh")
 	}
 }
 

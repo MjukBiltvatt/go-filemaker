@@ -70,6 +70,11 @@
 // returns is owned by the caller; concurrent reads are safe, and because records
 // are immutable there is nothing to synchronize.
 //
+// Session teardown is the one place ordering matters. [Client.Logout] invalidates
+// the token other goroutines are still using, so operations racing it fail and —
+// with [WithReauthOnInvalidToken] — open a new session that outlives the logout.
+// Let in-flight work finish before logging out.
+//
 // # Errors
 //
 // A failed request returns an *[APIError] carrying the host's status messages;

@@ -46,6 +46,13 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 // host. The client remains usable afterward: a subsequent operation (or
 // Authenticate) establishes a fresh session. Logout is a no-op when no session
 // has been established yet.
+//
+// Logout is not a barrier against concurrent use. It ends the session it
+// observed, and an operation running alongside it re-authenticates like any
+// other — so a caller that needs the client to be left without a session must
+// stop issuing requests before logging out. A refresh that lands while the
+// logout is in flight is kept rather than discarded, since abandoning it would
+// strand a live session on the host.
 func (c *Client) Logout(ctx context.Context) error {
 	c.mu.RLock()
 	token := c.token
@@ -68,7 +75,15 @@ func (c *Client) Logout(ctx context.Context) error {
 	}
 
 	c.mu.Lock()
-	c.token = ""
+	// Clear only the token this call logged out, mirroring authenticate's
+	// compare-then-write. A concurrent refresh may have installed a newer token
+	// while the DELETE was in flight; overwriting it would strand that live
+	// session on the host with nothing left to log it out.
+	if c.token == token {
+		c.token = ""
+	}
+	// Stamped unconditionally: the host responded, which is what attempt treats
+	// as activity, and it belongs to whichever session is now current.
 	c.lastActivity = time.Now()
 	c.mu.Unlock()
 	return nil
