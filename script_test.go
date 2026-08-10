@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -121,6 +122,30 @@ func TestRunScriptScriptError(t *testing.T) {
 	}
 	if resp.Script.Error != "401" {
 		t.Errorf("Script.Error = %q, want %q", resp.Script.Error, "401")
+	}
+}
+
+func TestRunScriptMissingScript(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{},"messages":[{"code":"104","message":"Script is missing"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	resp, err := c.RunScript(context.Background(), "Sales", "NoSuchScript", "")
+	// A script that does not exist fails the request itself rather than reporting
+	// a per-phase scriptError, so it must surface as an *APIError carrying the
+	// host code — the counterpart to TestRunScriptScriptError.
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v (%T), want *APIError", err, err)
+	}
+	const codeScriptMissing = 104
+	if apiErr.Code() != codeScriptMissing {
+		t.Errorf("error code = %d (%v), want %d (script is missing)", apiErr.Code(), apiErr, codeScriptMissing)
+	}
+	if resp.Script.Ran() {
+		t.Errorf("Script.Ran() = true, want false (no outcome on a failed request; Error = %q)", resp.Script.Error)
 	}
 }
 
