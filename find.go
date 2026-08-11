@@ -64,7 +64,11 @@ type FindResponse struct {
 	Scripts  ScriptOutcomes
 }
 
-// DataInfo mirrors the "dataInfo" object the host returns with a find result.
+// DataInfo mirrors the "dataInfo" object the host returns with a find or
+// get-range result; see FindResponse and GetRangeResponse. TotalRecordCount is the
+// count for the whole table, FoundCount the size of the found set, and
+// ReturnedCount how many of those this response actually carries — the count
+// WithLimit and WithOffset shape.
 type DataInfo struct {
 	Database         string `json:"database"`
 	Layout           string `json:"layout"`
