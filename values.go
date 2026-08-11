@@ -26,7 +26,8 @@ import (
 // unchanged, so this file's output is the default (US) representation.
 
 // fmDate formats t as a FileMaker date in the given format (US MM/DD/YYYY or ISO
-// YYYY-MM-DD). The zero value dateFormatUnset is treated as US.
+// YYYY-MM-DD). Anything but DateFormatISO renders as US, so the zero value
+// needs no special case.
 func fmDate(t time.Time, f DateFormat) string {
 	if f == DateFormatISO {
 		return t.Format("2006-01-02")
