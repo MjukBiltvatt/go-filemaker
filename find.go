@@ -8,16 +8,6 @@ import (
 	"net/http"
 )
 
-// SortOrder is the direction of a SortRule.
-type SortOrder string
-
-const (
-	// SortAscending sorts the result in ascending order.
-	SortAscending SortOrder = "ascend"
-	// SortDescending sorts the result in descending order.
-	SortDescending SortOrder = "descend"
-)
-
 // Criteria maps each field name to a find value expressed in FileMaker find
 // syntax. The value is not a plain literal but a find expression, in which
 // operators are characters embedded in the value: "==Mark" (exact match),
@@ -41,19 +31,6 @@ type FindRequest struct {
 	Criteria Criteria
 	Omit     bool
 }
-
-// SortRule sorts the result by a field in the given order. It maps 1:1 to the
-// Data API sort object, so JSON tags carry the wire names directly.
-type SortRule struct {
-	Field string    `json:"fieldName"`
-	Order SortOrder `json:"sortOrder"`
-}
-
-// Asc returns a SortRule that sorts by field in ascending order.
-func Asc(field string) SortRule { return SortRule{Field: field, Order: SortAscending} }
-
-// Desc returns a SortRule that sorts by field in descending order.
-func Desc(field string) SortRule { return SortRule{Field: field, Order: SortDescending} }
 
 // FindResponse is the result of a Find. Records is empty (non-nil) when no
 // records match. DataInfo carries the host's record counts. Scripts holds the

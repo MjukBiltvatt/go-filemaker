@@ -100,6 +100,30 @@ const (
 	EntryModeScript EntryMode = "script"
 )
 
+// SortOrder is the direction of a SortRule.
+type SortOrder string
+
+const (
+	// SortAscending sorts the result in ascending order.
+	SortAscending SortOrder = "ascend"
+	// SortDescending sorts the result in descending order.
+	SortDescending SortOrder = "descend"
+)
+
+// SortRule sorts the result by a field in the given order. It is the value type
+// for WithSort, accepted by Find and GetRange. It maps 1:1 to the Data API sort
+// object, so JSON tags carry the wire names directly.
+type SortRule struct {
+	Field string    `json:"fieldName"`
+	Order SortOrder `json:"sortOrder"`
+}
+
+// Asc returns a SortRule that sorts by field in ascending order.
+func Asc(field string) SortRule { return SortRule{Field: field, Order: SortAscending} }
+
+// Desc returns a SortRule that sorts by field in descending order.
+func Desc(field string) SortRule { return SortRule{Field: field, Order: SortDescending} }
+
 // option is the single adapter behind every option constructor: a closure that
 // mutates the shared params. It implements every endpoint's apply method,
 // so a constructor's scope is governed entirely by the interface type it is
