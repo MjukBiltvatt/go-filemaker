@@ -504,8 +504,10 @@ for _, rec := range found.Records {
 - [x] **6. Errors — remaining.** Added `errors.Is`-friendly sentinels for the
    codes callers may branch on: `ErrNoRecords` (401) and `ErrInvalidToken` (952),
    alongside the existing `ErrRecordModified` (306). `*APIError` gained an `Is`
-   method mapping those host codes to the sentinels (matching any message in the
-   response), so `errors.Is(err, ErrInvalidToken)` works on a raw `*APIError`
+   method mapping those host codes to the sentinels (matching on the primary
+   message's code, the same one `Code` reports and the response check keys off,
+   so a secondary message never trips a sentinel), so
+   `errors.Is(err, ErrInvalidToken)` works on a raw `*APIError`
    without breaking the `errors.As(err, &apiErr)` path. Godoc on each sentinel
    documents its code and caveats (Find swallows 401; 952 is auto-handled under
    `WithReauthOnInvalidToken`). Covered by `errors_test.go`. The

@@ -29,9 +29,15 @@ func TestAPIErrorIs(t *testing.T) {
 	}
 }
 
-func TestAPIErrorIsMatchesAnyMessage(t *testing.T) {
+func TestAPIErrorIsIgnoresSecondaryMessage(t *testing.T) {
 	err := error(&APIError{Messages: []Message{{Code: 500, Text: "x"}, {Code: 952, Text: "y"}}})
-	if !errors.Is(err, ErrInvalidToken) {
-		t.Errorf("errors.Is should match a non-primary message carrying the code")
+	if errors.Is(err, ErrInvalidToken) {
+		t.Errorf("errors.Is should not match a code carried only by a secondary message")
+	}
+
+	// The primary still matches with an unrelated secondary message present.
+	err = error(&APIError{Messages: []Message{{Code: 401, Text: "x"}, {Code: 500, Text: "y"}}})
+	if !errors.Is(err, ErrNoRecords) {
+		t.Errorf("errors.Is should match the primary message regardless of secondaries")
 	}
 }

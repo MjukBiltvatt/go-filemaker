@@ -65,6 +65,13 @@ type Message struct {
 // APIError is returned when the FileMaker host reports a non-OK result. It
 // carries every message from the response (the API models messages as an
 // array, though a single message is the norm).
+//
+// The first message is the primary result of the call, and it alone decides the
+// error's meaning: it is what [APIError.Code] reports, what determines whether a
+// response counts as a failure at all, and what [APIError.Is] matches sentinels
+// against. Any further messages are carried for diagnostics only — never matched
+// — so an incidental 401 or 952 in a secondary message cannot make an unrelated
+// failure look like a no-records or expired-token one.
 type APIError struct {
 	Messages []Message
 }
@@ -92,17 +99,13 @@ func (e *APIError) Code() int {
 
 // Is reports whether the error matches a sentinel for a common host code, so
 // callers can branch with errors.Is(err, ErrInvalidToken) and the like without
-// unpacking *APIError or hard-coding numeric codes. It matches when any message
-// in the response carries the corresponding code.
+// unpacking *APIError or hard-coding numeric codes. It matches on the primary
+// code (see Code), the same message the response check treats as the result of
+// the call, so a sentinel never matches on an incidental secondary message.
 func (e *APIError) Is(target error) bool {
 	ce, ok := target.(*codeError)
 	if !ok {
 		return false
 	}
-	for _, m := range e.Messages {
-		if m.Code == ce.code {
-			return true
-		}
-	}
-	return false
+	return e.Code() == ce.code
 }
