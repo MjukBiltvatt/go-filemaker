@@ -185,7 +185,7 @@ func marshalFindBody(requests []FindRequest, p params) ([]byte, error) {
 			body["limit."+name] = pr.limit
 		}
 	}
-	for _, kv := range p.scriptParams() {
+	for _, kv := range p.scripts() {
 		body[kv[0]] = kv[1]
 	}
 

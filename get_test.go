@@ -181,7 +181,7 @@ func TestGetWithScript(t *testing.T) {
 	}
 }
 
-func TestGetQueryParams(t *testing.T) {
+func TestGetQuery(t *testing.T) {
 	tests := []struct {
 		name string
 		p    params
@@ -223,7 +223,7 @@ func TestGetQueryParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.p.getQueryParams()
+			got := tt.p.getQuery()
 			for key, wantVal := range tt.want {
 				if gotVal := got.Get(key); gotVal != wantVal {
 					t.Errorf("key %q = %q, want %q", key, gotVal, wantVal)
@@ -431,7 +431,7 @@ func TestGetRangeWithScript(t *testing.T) {
 	}
 }
 
-func TestGetRangeQueryParams(t *testing.T) {
+func TestGetRangeQuery(t *testing.T) {
 	tests := []struct {
 		name string
 		p    params
@@ -485,7 +485,7 @@ func TestGetRangeQueryParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.p.getRangeQueryParams()
+			got := tt.p.getRangeQuery()
 			for key, wantVal := range tt.want {
 				if gotVal := got.Get(key); gotVal != wantVal {
 					t.Errorf("key %q = %q, want %q", key, gotVal, wantVal)

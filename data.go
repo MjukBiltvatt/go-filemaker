@@ -156,7 +156,7 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...Dele
 	}
 
 	u := c.recordURL(layout, id)
-	if q := p.queryParams(); len(q) > 0 {
+	if q := p.query(); len(q) > 0 {
 		u += "?" + q.Encode()
 	}
 
@@ -265,7 +265,7 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 	}
 
 	u := c.containerURL(layout, id, field)
-	if q := p.queryParams(); len(q) > 0 {
+	if q := p.query(); len(q) > 0 {
 		u += "?" + q.Encode()
 	}
 
@@ -370,7 +370,7 @@ func (c *Client) SetGlobalFields(ctx context.Context, fields FieldData) error {
 // ({}) is always sent so the host receives a valid JSON payload.
 func marshalDuplicateBody(p params) ([]byte, error) {
 	body := map[string]any{}
-	for _, kv := range p.scriptParams() {
+	for _, kv := range p.scripts() {
 		body[kv[0]] = kv[1]
 	}
 	out, err := json.Marshal(body)
@@ -393,7 +393,7 @@ func marshalDuplicateBody(p params) ([]byte, error) {
 //
 // The body is assembled as a map so the script directives (whose keys carry dots,
 // e.g. "script.param") share one source of truth with the Delete query string:
-// both read params.scriptParams.
+// both read params.scripts.
 func marshalRecordBody(fields FieldData, p params, format *DateFormat) ([]byte, error) {
 	if fields == nil {
 		fields = FieldData{}
@@ -418,7 +418,7 @@ func marshalRecordBody(fields FieldData, p params, format *DateFormat) ([]byte, 
 	if opts := p.entryOptions(); len(opts) > 0 {
 		body["options"] = opts
 	}
-	for _, kv := range p.scriptParams() {
+	for _, kv := range p.scripts() {
 		body[kv[0]] = kv[1]
 	}
 	if dateFormats != nil {

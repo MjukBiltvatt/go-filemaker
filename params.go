@@ -67,11 +67,11 @@ func (p *params) updatePortalRange(name string, fn func(*portalRange)) {
 	p.portalRanges[name] = pr
 }
 
-// scriptParams returns the script-directive wire key/value pairs the params
-// carry, in a stable order, with empty phases (and empty parameters) omitted. The
-// keys are identical for the JSON body (Create/Update) and the URL query string
-// (Delete), so both serializers draw from here.
-func (p params) scriptParams() [][2]string {
+// scripts returns the script-directive wire key/value pairs the params carry, in
+// a stable order, with empty phases (and empty parameters) omitted. The keys are
+// identical for the JSON body (Create/Update) and the URL query string (Delete),
+// so both serializers draw from here.
+func (p params) scripts() [][2]string {
 	var out [][2]string
 	add := func(key string, s scriptCall) {
 		if s.name == "" {
@@ -102,17 +102,17 @@ func (p params) entryOptions() map[string]string {
 	return opts
 }
 
-// queryParams returns the parameters that ride in the URL query string rather
-// than a request body — used by the bodyless endpoints: the script directives
-// (Delete) and a mod ID (UploadToContainer). The names match their body keys.
-// Delete never sets a mod ID and Upload never sets scripts, so each endpoint only
-// emits what applies to it.
-func (p params) queryParams() url.Values {
+// query returns the parameters that ride in the URL query string rather than a
+// request body — used by the bodyless endpoints: the script directives (Delete)
+// and a mod ID (UploadToContainer). The names match their body keys. Delete never
+// sets a mod ID and Upload never sets scripts, so each endpoint only emits what
+// applies to it.
+func (p params) query() url.Values {
 	v := url.Values{}
 	if p.modID != "" {
 		v.Set("modId", p.modID)
 	}
-	for _, kv := range p.scriptParams() {
+	for _, kv := range p.scripts() {
 		v.Set(kv[0], kv[1])
 	}
 	return v
