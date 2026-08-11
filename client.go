@@ -130,14 +130,18 @@ func WithInsecureHTTP() Option {
 
 // WithDebug enables verbose logging of every HTTP request and response the
 // client makes — request line, headers, and body, then the response status,
-// headers, and body — written to w. Authorization headers are redacted so the
-// Basic-auth credentials and the session token never reach the log. Pass nil to
-// write to os.Stderr.
+// headers, and body — written to w. Pass nil to write to os.Stderr.
+//
+// Treat the output as a secret. Authorization headers are masked, so the
+// Basic-auth credentials never reach the log, but everything else is printed
+// verbatim: record data, and the session token, which appears both in the login
+// response body and in the logout request URI. That token stays valid until it
+// is logged out or the session sits idle, so a log captured mid-session carries
+// the same database access the client has.
 //
 // Logging is installed at the transport layer, so it captures all of the
 // client's traffic, including container downloads. It is intended for
-// development and prints request and response bodies in full; do not enable it
-// where those bodies (record data) must not be logged.
+// development only.
 func WithDebug(w io.Writer) Option {
 	return func(c *config) {
 		c.debug = true

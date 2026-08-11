@@ -40,6 +40,10 @@ func TestWithDebugLogsAndRedacts(t *testing.T) {
 	}
 	// The request body ({}) and the response body (the token envelope) prove
 	// bodies are dumped and, for the request, preserved for the round-trip.
+	//
+	// The session token is deliberately NOT redacted here: WithDebug's doc
+	// comment states that it reaches the log and that the log must be handled as
+	// a secret. Redacting it means amending that promise too.
 	if !strings.Contains(out, `"token":"tok"`) {
 		t.Error("log missing response body")
 	}
