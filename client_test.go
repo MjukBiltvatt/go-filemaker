@@ -469,6 +469,21 @@ func TestWithDateFormatWiring(t *testing.T) {
 	}
 }
 
+// TestWithDateFormatRejectsUnsupported guards that New refuses a format the
+// client cannot write, rather than telling the host one format ("dateformats"
+// parameter) while writing another (the wrappers fall back to US).
+func TestWithDateFormatRejectsUnsupported(t *testing.T) {
+	for _, format := range []DateFormat{1, 3, -1} {
+		c, err := New("https://example.com", "db", "user", "pass", WithDateFormat(format))
+		if err == nil {
+			t.Errorf("New with DateFormat(%d) = nil error, want error", format)
+		}
+		if c != nil {
+			t.Errorf("New with DateFormat(%d) returned a client, want nil", format)
+		}
+	}
+}
+
 // TestURLBuildersEscapeSegments guards that the request-path builders percent-
 // escape the database, layout, id, and field segments, so names with
 // URL-reserved characters (spaces, '#', '/') address the right resource instead

@@ -63,7 +63,9 @@ type config struct {
 // DateFormat selects how the client writes date and timestamp values and which
 // "dateformats" parameter it sends on create/edit. Its values are the integers
 // the Data API uses for that parameter, so they match the Claris documentation
-// directly; only the two below are supported.
+// directly; only the two below are supported, and New rejects any other value.
+// In particular the API's third value, 1 (the file's own locale), is not offered:
+// the client cannot know that locale, so it could not write matching strings.
 //
 // The option is opt-in (see WithDateFormat): a client built without it sends no
 // parameter, so the host interprets values in its own default format (US), and
@@ -165,7 +167,7 @@ func WithLocation(loc *time.Location) Option {
 // parameter and the host falls back to its default format (US), which works
 // against any server; setting this — to DateFormatISO for ISO 8601, or
 // explicitly to DateFormatUS — sends the parameter and so requires FileMaker
-// Server 2023 or later.
+// Server 2023 or later. Any value other than those two is an error from New.
 //
 // It affects writes only. Reads continue to parse whatever the host returns (the
 // record accessors accept both US and ISO), so the stored value is unchanged by
@@ -200,6 +202,10 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 		if opt != nil {
 			opt(&cfg)
 		}
+	}
+
+	if cfg.dateFormat != nil && *cfg.dateFormat != DateFormatUS && *cfg.dateFormat != DateFormatISO {
+		return nil, fmt.Errorf("filemaker: unsupported date format %d; use DateFormatUS or DateFormatISO", *cfg.dateFormat)
 	}
 
 	normalizedHost, err := normalizeHost(host, cfg.allowInsecureHTTP)
