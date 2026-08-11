@@ -1617,6 +1617,15 @@ func TestIntegrationGetRange(t *testing.T) {
 	if res.DataInfo.ReturnedCount != 1 {
 		t.Errorf("GetRange: DataInfo.ReturnedCount = %d, want 1", res.DataInfo.ReturnedCount)
 	}
+	// GetRange applies no find criteria, so the found set is the whole table.
+	// Asserted relationally because the absolute count is unknowable here (see
+	// above), and it is the one DataInfo field Find's DataInfo subtest pins that
+	// this test otherwise leaves unchecked. If the host disagrees, that is worth
+	// knowing — and worth saying in DataInfo's doc comment.
+	if res.DataInfo.FoundCount != res.DataInfo.TotalRecordCount {
+		t.Errorf("GetRange: DataInfo.FoundCount = %d, TotalRecordCount = %d; want equal for an unfiltered read",
+			res.DataInfo.FoundCount, res.DataInfo.TotalRecordCount)
+	}
 }
 
 // TestIntegrationSetGlobalFields sets a global field value against a real host
