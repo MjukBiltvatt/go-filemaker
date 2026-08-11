@@ -156,7 +156,8 @@ func (p *params) resolveConditional(rec *Record, byIDForm string) error {
 
 // resolveUpdateParams applies the options and resolves the mod ID. A conditional
 // update with no explicit version sources it from rec (nil for the id-addressed
-// path, which cannot honor IfUnchanged). Deferred option errors surface here.
+// path, which cannot honor IfUnchanged). Deferred option errors surface here, and
+// take precedence over a mod ID that cannot be resolved.
 func resolveUpdateParams(opts []UpdateOption, rec *Record) (params, error) {
 	p, err := resolveOptions(opts, UpdateOption.applyUpdate)
 	if err != nil {
