@@ -1,681 +1,381 @@
 package filemaker
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"mime"
-	"mime/multipart"
-	"net/http"
 	"reflect"
-	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// Record interface for some magic with methods
+// FieldData holds a record's fields keyed by field name. When read back from the
+// host, FileMaker number fields decode as float64 and text, date and timestamp
+// fields as string.
+type FieldData map[string]any
+
+// PortalData holds portal (related) records keyed by portal name, each value a
+// slice of rows. It is both what Record.Portals returns and what the
+// WithPortalData update option accepts, so portal data read from a record can be
+// edited and written back unchanged.
+//
+// Within a row, field values are keyed by their fully qualified name
+// ("TableOccurrence::FieldName"). When writing, a row that carries a record ID
+// (a plain "recordId" key, optionally with a plain "modId" for optimistic
+// locking) edits that existing related record; a row without one is added as a
+// new related record. The record ID is not table-occurrence qualified like the
+// field values are — "TableOccurrence::recordId" is read as a field and rejected
+// (code 102). See the Claris Data API guide's "Edit record" page for the wire
+// format.
+type PortalData map[string][]map[string]any
+
+// Record is a single record returned by a read operation (Find). It is a plain,
+// immutable value: it holds no reference back to the Client and has no methods
+// that touch the host. All of its state is unexported and exposed through
+// read-only accessors — ID, ModID, Layout, and the field/portal accessors
+// (String, Int, …, Decode, Fields, Portals) — so a returned record cannot be
+// mutated. Writes are performed by passing field data to the Client's
+// Create/Update methods.
 type Record struct {
-	ID            string
-	Layout        string
-	StagedChanges map[string]interface{}
-	FieldData     map[string]interface{}
-	Session       *Session
+	id     string
+	modID  string
+	layout string
+
+	fieldData  map[string]any
+	portalData map[string][]map[string]any
+
+	// loc is the time zone used to interpret date/timestamp fields. It is set
+	// by the client from its WithLocation option; nil means UTC.
+	loc *time.Location
 }
 
-// newRecord returns a new instance of an existing record
-func newRecord(layout string, data interface{}, session Session) Record {
-	return Record{
-		ID:            data.(map[string]interface{})["recordId"].(string),
-		Layout:        layout,
-		StagedChanges: make(map[string]interface{}),
-		FieldData:     data.(map[string]interface{})["fieldData"].(map[string]interface{}),
-		Session:       &session,
-	}
+// ID returns the record's internal FileMaker record ID, assigned by the host.
+func (r Record) ID() string { return r.id }
+
+// ModID returns the record's modification ID, which the host changes on every
+// edit. It is the basis for optimistic concurrency (see the Update IfUnchanged
+// option).
+func (r Record) ModID() string { return r.modID }
+
+// Layout returns the layout the record was read through. It is the default
+// target for the record-based writes (Update, Delete, UploadToContainer).
+func (r Record) Layout() string { return r.layout }
+
+// Fields returns a copy of the record's raw field values, keyed by field name.
+// FileMaker number fields are float64; text, date and timestamp fields are
+// string. The result is a copy — mutating it does not affect the record — and
+// is nil when the record carries no field data. Use the typed accessors
+// (String, Int, …) for individual fields.
+func (r Record) Fields() FieldData {
+	return cloneFields(r.fieldData)
 }
 
-// Set sets the value of a specified field in the given record
-func (r *Record) Set(fieldName string, value interface{}) {
-	switch value.(type) {
-	case int:
-		value = float64(value.(int))
-	case int8:
-		value = float64(value.(int8))
-	case int16:
-		value = float64(value.(int16))
-	case int32:
-		value = float64(value.(int32))
-	case int64:
-		value = float64(value.(int64))
-	case float32:
-		value = float64(value.(float32))
-	case bool:
-		if value.(bool) {
-			value = float64(1)
-		} else {
-			value = float64(0)
-		}
-	}
-
-	r.StagedChanges[fieldName] = value
+// Portals returns a copy of the record's portal data, keyed by portal name,
+// each value a slice of rows. The result is a deep copy — mutating it (including
+// its rows) does not affect the record — and is nil when the record carries no
+// portal data.
+func (r Record) Portals() PortalData {
+	return clonePortalData(r.portalData)
 }
 
-// Get gets the value of a field in the given record and returns it as an `interface{}`
-func (r *Record) Get(fieldName string) interface{} {
-	if val, ok := r.StagedChanges[fieldName]; ok {
-		return val
-	}
-
-	return r.FieldData[fieldName]
-}
-
-// Reset discards all uncommited changes made to the record
-func (r *Record) Reset() {
-	r.StagedChanges = make(map[string]interface{})
-}
-
-// Commit commits the changes made to the record using the same session the record was retrieved/created with
-func (r *Record) Commit() error {
-	if len(r.StagedChanges) == 0 {
+// cloneFields returns a copy of a field map. Field values are immutable scalars
+// (float64/string), so a shallow copy is both faithful and fully independent. A
+// nil source yields nil (preserving the distinction from an empty map).
+func cloneFields(src map[string]any) map[string]any {
+	if src == nil {
 		return nil
 	}
-
-	if r.ID == "" {
-		return r.Create()
+	dst := make(map[string]any, len(src))
+	for k, v := range src {
+		dst[k] = v
 	}
-
-	var jsonData = struct {
-		FieldData map[string]interface{} `json:"fieldData"`
-	}{
-		r.StagedChanges,
-	}
-
-	//Create the request json body
-	var requestBody, err = json.Marshal(jsonData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request body: %v", err.Error())
-	}
-
-	//Build and send request to the host
-	req, err := http.NewRequest(
-		"PATCH",
-		r.Session.recordsURL(r.Layout, r.ID),
-		bytes.NewBuffer(requestBody),
-	)
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err := r.Session.HttpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send PATCH request: %v", err.Error())
-	}
-
-	//Read the body
-	resBodyBytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err.Error())
-	}
-
-	//Unmarshal json body
-	var jsonRes ResponseBody
-	err = json.Unmarshal(resBodyBytes, &jsonRes)
-	if err != nil {
-		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
-	}
-
-	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf(
-			"failed at host: %v (%v)",
-			jsonRes.Messages[0].Message,
-			jsonRes.Messages[0].Code,
-		)
-	}
-
-	for fieldName, value := range r.StagedChanges {
-		r.FieldData[fieldName] = value
-	}
-
-	return nil
+	return dst
 }
 
-// CommitToContainer commits the specified bytes buffer to the specified container field in the record.
-func (r *Record) CommitToContainer(fieldName, filename string, dataBuf bytes.Buffer) error {
-	if r.ID == "" {
-		return errors.New("Record needs to be created first")
+// clonePortalData returns a deep copy of portal data: the outer map, each row
+// slice and each row map are rebuilt so mutating the result cannot reach the
+// record. The leaf values are immutable scalars and are shared. Nil maps and
+// slices are preserved as nil so the copy equals the original.
+func clonePortalData(src map[string][]map[string]any) PortalData {
+	if src == nil {
+		return nil
 	}
-
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	fw, err := writer.CreateFormFile("upload", filename)
-	if err != nil {
-		return errors.New("failed to write to field 'upload'")
+	dst := make(PortalData, len(src))
+	for name, rows := range src {
+		if rows == nil {
+			dst[name] = nil
+			continue
+		}
+		rowsCopy := make([]map[string]any, len(rows))
+		for i, row := range rows {
+			rowsCopy[i] = cloneFields(row)
+		}
+		dst[name] = rowsCopy
 	}
-
-	//Build multipart/form-data header for request
-	if _, err := io.Copy(fw, &dataBuf); err != nil {
-		return err
-	}
-
-	if err := writer.Close(); err != nil {
-		return err
-	}
-
-	//Build and send request to the host
-	req, err := http.NewRequest(
-		"POST",
-		fmt.Sprintf(
-			"%s/containers/%s",
-			r.Session.recordsURL(r.Layout, r.ID),
-			fieldName,
-		),
-		body,
-	)
-	cd := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
-	req.Header.Set("Content-Disposition", cd)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err := r.Session.HttpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send POST request: %v", err.Error())
-	}
-
-	//Read the body
-	resBodyBytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err.Error())
-	}
-
-	// //Unmarshal json body
-	jsonRes := &ResponseBody{}
-	if err := json.Unmarshal(resBodyBytes, &jsonRes); err != nil {
-		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
-	}
-
-	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf(
-			"failed at host: %v (%v)",
-			jsonRes.Messages[0].Message,
-			jsonRes.Messages[0].Code,
-		)
-	}
-
-	return nil
+	return dst
 }
 
-// CommitFileToContainer commits the specified file to specified container field in the record
-func (r *Record) CommitFileToContainer(fieldName, filepath string) error {
-	//Record is empty and not created yet
-	if r.ID == "" {
-		return errors.New("record needs to be created first")
+// location resolves the record's configured time zone, defaulting to UTC.
+func (r Record) location() *time.Location {
+	if r.loc != nil {
+		return r.loc
 	}
-
-	b, err := ioutil.ReadFile(filepath)
-	if err != nil {
-		return fmt.Errorf("failed to read file: %v", err)
-	}
-	buf := bytes.NewBuffer(b)
-
-	pathSlice := strings.Split(filepath, "/")
-	filename := pathSlice[len(pathSlice)-1]
-
-	return r.CommitToContainer(fieldName, filename, *buf)
+	return time.UTC
 }
 
-// Create inserts the record into the database if it doesn't exist
-func (r *Record) Create() error {
-	var jsonData = struct {
-		FieldData map[string]interface{} `json:"fieldData"`
-	}{
-		r.StagedChanges,
-	}
-
-	//Create the request json body
-	var requestBody, err = json.Marshal(jsonData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request body: %v", err.Error())
-	}
-
-	//Build and send request to the host to create record
-	req, err := http.NewRequest(
-		"POST",
-		r.Session.recordsURL(r.Layout, ""),
-		bytes.NewBuffer(requestBody),
-	)
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err := r.Session.HttpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send POST request: %v", err.Error())
-	}
-
-	//Read the body
-	resBodyBytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err.Error())
-	}
-
-	//Unmarshal json body
-	var jsonRes ResponseBody
-	err = json.Unmarshal(resBodyBytes, &jsonRes)
-	if err != nil {
-		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
-	}
-
-	//Check for errors in the response
-	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf(
-			"failed at host: %v (%v)",
-			jsonRes.Messages[0].Message,
-			jsonRes.Messages[0].Code,
-		)
-	}
-
-	//Update local record field data with staged changes
-	for fieldName, value := range r.StagedChanges {
-		r.FieldData[fieldName] = value
-	}
-
-	//Set the ID returned by the API
-	r.ID = jsonRes.Response.RecordID
-
-	//Build and send request to the host to get the default field data for the created record
-	req, err = http.NewRequest(
-		"GET",
-		r.Session.recordsURL(r.Layout, r.ID),
-		bytes.NewBuffer([]byte{}),
-	)
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err = r.Session.HttpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send GET request: %v", err.Error())
-	}
-
-	//Read the body
-	resBodyBytes, err = io.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err.Error())
-	}
-
-	//Unmarshal json body
-	err = json.Unmarshal(resBodyBytes, &jsonRes)
-	if err != nil {
-		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
-	}
-
-	//Check for errors in the response
-	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf(
-			"failed at host: %v (%v)",
-			jsonRes.Messages[0].Message,
-			jsonRes.Messages[0].Code,
-		)
-	}
-
-	//Parse the field data for the record
-	for fieldname, val := range jsonRes.Response.Data[0].(map[string]interface{})["fieldData"].(map[string]interface{}) {
-		r.FieldData[fieldname] = val
-	}
-
-	return nil
+// Has reports whether the record contains the named field. It distinguishes an
+// absent field from one present with a zero value (which the typed getters
+// cannot).
+func (r Record) Has(fieldName string) bool {
+	_, ok := r.fieldData[fieldName]
+	return ok
 }
 
-// Delete deletes the record using the same session the record was retrieved with
-func (r *Record) Delete() error {
-	//Build and send request to the host
-	req, err := http.NewRequest(
-		"DELETE",
-		r.Session.recordsURL(r.Layout, r.ID),
-		bytes.NewBuffer([]byte{}),
-	)
-	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err := r.Session.HttpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send DELETE request: %v", err.Error())
-	}
-
-	//Read the body
-	resBodyBytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err.Error())
-	}
-
-	//Unmarshal json body
-	var jsonRes ResponseBody
-	err = json.Unmarshal(resBodyBytes, &jsonRes)
-	if err != nil {
-		return fmt.Errorf("failed to decode response body as json: %v", err.Error())
-	}
-
-	//Check response code
-	if jsonRes.Messages[0].Code != "0" {
-		return fmt.Errorf(
-			"failed at host: %v (%v)",
-			jsonRes.Messages[0].Message,
-			jsonRes.Messages[0].Code,
-		)
-	}
-
-	//Empty the local record instance
-	r.ID = ""
-	r.StagedChanges = map[string]interface{}{}
-	r.FieldData = map[string]interface{}{}
-
-	return nil
+// Get returns the raw value of a field, or nil if it is absent. FileMaker number
+// fields are float64; text, date and timestamp fields are string.
+func (r Record) Get(fieldName string) any {
+	return r.fieldData[fieldName]
 }
 
 // StringE behaves like String but returns ErrNotString if the value is not a string.
 func (r Record) StringE(fieldName string) (string, error) {
-	data := r.Get(fieldName)
-
-	if reflect.ValueOf(data).Kind() == reflect.String {
-		return data.(string), nil
+	if val, ok := r.Get(fieldName).(string); ok {
+		return val, nil
 	}
-
 	return "", ErrNotString
 }
 
-/*
-String gets the data in the specified field and returns it as a string.
-The FileMaker database field needs to be a text field. Ignores any errors.
-*/
+// String returns the field value as a string. The field needs to be a text
+// field. Errors are ignored; use StringE to detect them.
 func (r Record) String(fieldName string) string {
 	s, _ := r.StringE(fieldName)
 	return s
 }
 
+// StringSliceE behaves like StringSlice but returns ErrNotString if the value
+// is not a string.
+func (r Record) StringSliceE(fieldName string) ([]string, error) {
+	val, err := r.StringE(fieldName)
+	if err != nil {
+		return nil, err
+	}
+	if val == "" {
+		return nil, nil
+	}
+	// Normalize CRLF and lone CR to LF, then trim a single trailing line
+	// break so a terminating newline does not yield an empty final element.
+	val = strings.ReplaceAll(val, "\r\n", "\n")
+	val = strings.ReplaceAll(val, "\r", "\n")
+	val = strings.TrimSuffix(val, "\n")
+	return strings.Split(val, "\n"), nil
+}
+
+// StringSlice returns the field value split on line breaks, treating the text
+// field as a newline-separated list of values. Carriage returns, line feeds and
+// CRLF pairs are all accepted as line breaks. Blank lines between values are
+// preserved as empty strings, but a single trailing line break is treated as a
+// terminator and does not produce a trailing empty element. An empty field
+// yields a nil slice. The field needs to be a text field. Errors are ignored;
+// use StringSliceE to detect them.
+func (r Record) StringSlice(fieldName string) []string {
+	s, _ := r.StringSliceE(fieldName)
+	return s
+}
+
 // IntE behaves like Int but returns ErrNotNumber if the value is not a number.
 func (r Record) IntE(fieldName string) (int, error) {
-	data := r.Get(fieldName)
-
-	if val, ok := data.(float64); ok {
+	if val, ok := r.Get(fieldName).(float64); ok {
 		return int(val), nil
 	}
-
 	return 0, ErrNotNumber
 }
 
-/*
-Int gets the data in the specified field and returns it as an int.
-The FileMaker database field needs to be a number field.
-*/
-func (r *Record) Int(fieldName string) int {
+// Int returns the field value as an int. The field needs to be a number field.
+func (r Record) Int(fieldName string) int {
 	i, _ := r.IntE(fieldName)
-	return i
-}
-
-// Int8E behaves like Int8 but returns ErrNotNumber if the value is not a number.
-func (r Record) Int8E(fieldName string) (int8, error) {
-	data := r.Get(fieldName)
-
-	if val, ok := data.(float64); ok {
-		return int8(val), nil
-	}
-
-	return 0, ErrNotNumber
-}
-
-/*
-Int8 gets the data in the specified field and returns it as an int8.
-The FileMaker database field needs to be a number field.
-*/
-func (r *Record) Int8(fieldName string) int8 {
-	i, _ := r.Int8E(fieldName)
-	return i
-}
-
-// Int16E behaves like Int16 but returns ErrNotNumber if the value is not a number.
-func (r Record) Int16E(fieldName string) (int16, error) {
-	data := r.Get(fieldName)
-
-	if val, ok := data.(float64); ok {
-		return int16(val), nil
-	}
-
-	return 0, ErrNotNumber
-}
-
-/*
-Int16 gets the data in the specified field and returns it as an int16.
-The FileMaker database field needs to be a number field.
-*/
-func (r *Record) Int16(fieldName string) int16 {
-	i, _ := r.Int16E(fieldName)
-	return i
-}
-
-// Int32E behaves like Int32 but returns ErrNotNumber if the value is not a number.
-func (r Record) Int32E(fieldName string) (int32, error) {
-	data := r.Get(fieldName)
-
-	if val, ok := data.(float64); ok {
-		return int32(val), nil
-	}
-
-	return 0, ErrNotNumber
-}
-
-/*
-Int32 gets the data in the specified field and returns it as an int32.
-The FileMaker database field needs to be a number field.
-*/
-func (r *Record) Int32(fieldName string) int32 {
-	i, _ := r.Int32E(fieldName)
 	return i
 }
 
 // Int64E behaves like Int64 but returns ErrNotNumber if the value is not a number.
 func (r Record) Int64E(fieldName string) (int64, error) {
-	data := r.Get(fieldName)
-
-	if val, ok := data.(float64); ok {
+	if val, ok := r.Get(fieldName).(float64); ok {
 		return int64(val), nil
 	}
-
 	return 0, ErrNotNumber
 }
 
-/*
-Int64 gets the data in the specified field and returns it as an int64.
-The FileMaker database field needs to be a number field.
-*/
-func (r *Record) Int64(fieldName string) int64 {
+// Int64 returns the field value as an int64. The field needs to be a number field.
+func (r Record) Int64(fieldName string) int64 {
 	i, _ := r.Int64E(fieldName)
-	return i
-}
-
-// Float32E behaves like Float32 but returns ErrNotNumber if the value is not a number.
-func (r Record) Float32E(fieldName string) (float32, error) {
-	data := r.Get(fieldName)
-
-	if val, ok := data.(float64); ok {
-		return float32(val), nil
-	}
-
-	return 0, ErrNotNumber
-}
-
-/*
-Float32 gets the data in the specified field and returns it as an float32.
-The FileMaker database field needs to be a number field.
-*/
-func (r *Record) Float32(fieldName string) float32 {
-	i, _ := r.Float32E(fieldName)
 	return i
 }
 
 // Float64E behaves like Float64 but returns ErrNotNumber if the value is not a number.
 func (r Record) Float64E(fieldName string) (float64, error) {
-	data := r.Get(fieldName)
-
-	if val, ok := data.(float64); ok {
+	if val, ok := r.Get(fieldName).(float64); ok {
 		return val, nil
 	}
-
 	return 0, ErrNotNumber
 }
 
-/*
-Float64 gets the data in the specified field and returns it as an float64.
-The FileMaker database field needs to be a number field.
-*/
-func (r *Record) Float64(fieldName string) float64 {
-	i, _ := r.Float64E(fieldName)
-	return i
+// Float64 returns the field value as a float64. The field needs to be a number field.
+func (r Record) Float64(fieldName string) float64 {
+	f, _ := r.Float64E(fieldName)
+	return f
 }
 
-/*
-Bool gets the data in the specified field and parses it as a bool, with empty
-fields evaluating to `false` and non-empty text fields and number fields with
-a value greater than 0 evaluating to `true`.
-*/
-func (r *Record) Bool(fieldName string) bool {
-	data := r.Get(fieldName)
-
-	switch data.(type) {
+// Bool parses the field value as a bool: empty fields are false, non-empty text
+// fields and number fields greater than 0 are true.
+func (r Record) Bool(fieldName string) bool {
+	switch val := r.Get(fieldName).(type) {
 	case string:
-		return len(data.(string)) > 0
+		return len(val) > 0
 	case float64:
-		return data.(float64) > 0
+		return val > 0
 	}
-
 	return false
 }
 
-/*
-TimeE gets the data in the specified field and attempts to parse it as a `time.Time` object
-and returns any errors that occur.
-*/
-func (r Record) TimeE(fieldName string, loc *time.Location) (time.Time, error) {
+// timeFormats are the FileMaker date, timestamp and time-of-day layouts the Time
+// accessors recognize, ordered most-specific first so a timestamp is not
+// truncated to a date. Both US and ISO forms are accepted, including the
+// "T"-separated ISO timestamp the host emits for dateformats=2 reads, so the
+// accessors parse a value regardless of the format it was written in.
+var timeFormats = []string{
+	"01/02/2006 15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05",
+	"01/02/2006",
+	"2006-01-02",
+	"15:04:05",
+}
+
+// TimeInE parses the field value as a time.Time in the given location, returning
+// ErrUnknownFormat if it matches none of the supported date/timestamp/time
+// formats. A Time field holding 24 hours or more (an elapsed duration rather
+// than a clock time) is out of the wall-clock range and will not parse here; read
+// such a field with Duration instead.
+func (r Record) TimeInE(fieldName string, loc *time.Location) (time.Time, error) {
 	data := r.String(fieldName)
-
-	//Attempt to parse as timestamp in format MM/dd/yyyy HH:mm:ss
-	if match, err := regexp.MatchString(`^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$`, data); err != nil {
-		return time.Time{}, err
-	} else if match {
-		return time.ParseInLocation("01/02/2006 15:04:05", data, loc)
+	for _, layout := range timeFormats {
+		if t, err := time.ParseInLocation(layout, data, loc); err == nil {
+			return t, nil
+		}
 	}
-
-	//Attempt to parse as date in format MM/dd/yyyy
-	if match, err := regexp.MatchString(`^\d{2}\/\d{2}\/\d{4}$`, data); err != nil {
-		return time.Time{}, err
-	} else if match {
-		return time.ParseInLocation("01/02/2006", data, loc)
-	}
-
-	//Attempt to parse as timestamp in format yyyy-MM-dd HH:mm:ss
-	if match, err := regexp.MatchString(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`, data); err != nil {
-		return time.Time{}, err
-	} else if match {
-		return time.ParseInLocation("2006-01-02 15:04:05", data, loc)
-	}
-
-	//Attempt to parse as date in format yyyy-MM-dd
-	if match, err := regexp.MatchString(`^\d{4}-\d{2}-\d{2}$`, data); err != nil {
-		return time.Time{}, err
-	} else if match {
-		return time.ParseInLocation("2006-01-02", data, loc)
-	}
-
 	return time.Time{}, ErrUnknownFormat
 }
 
-// Time gets the data in the specified field and attempts to parse it as a `time.Time` object.
-func (r *Record) Time(fieldName string, loc *time.Location) time.Time {
-	t, _ := r.TimeE(fieldName, loc)
+// TimeIn parses the field value as a time.Time in the given location. Errors are
+// ignored; use TimeInE to detect them.
+func (r Record) TimeIn(fieldName string, loc *time.Location) time.Time {
+	t, _ := r.TimeInE(fieldName, loc)
 	return t
 }
 
-// GetContainerData gets the data in the specified container field as a byte slice.
-func (r *Record) GetContainerData(fieldName string) ([]byte, error) {
-	// Get the container data streaming URI
-	uri, err := r.StringE(fieldName)
-	if err != nil {
-		return nil, err
-	} else if !strings.HasPrefix(uri, r.Session.Host) {
-		return nil, fmt.Errorf("invalid or unsecure streaming URI: %v", uri)
-	}
-
-	// Create request to the location in the Location header
-	req, err := http.NewRequest(
-		"GET",
-		uri,
-		bytes.NewBuffer([]byte{}),
-	)
-	req.Header.Add("Authorization", "Bearer "+r.Session.Token)
-	res, err := r.Session.HttpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send GET request: %v", err.Error())
-	} else if res.StatusCode != http.StatusOK {
-		//TODO: Parse body?
-		return nil, fmt.Errorf("failed to get container data: %v", res.Status)
-	}
-
-	// Read the body
-	data, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %v", err.Error())
-	}
-	return data, nil
+// TimeE parses the field value using the record's configured location (set via
+// the client's WithLocation option; UTC by default).
+func (r Record) TimeE(fieldName string) (time.Time, error) {
+	return r.TimeInE(fieldName, r.location())
 }
 
-/*
-Map takes a struct and inserts the field data of the record
-in the struct fields with an `fm`-tag matching the record field name.
+// Time parses the field value using the record's configured location. Errors are
+// ignored; use TimeE to detect them.
+func (r Record) Time(fieldName string) time.Time {
+	return r.TimeIn(fieldName, r.location())
+}
 
-Example struct:
-`
+// DurationE parses the field value as a time.Duration, for a FileMaker Time
+// field returned as a clock string ([-]HH:MM:SS). Unlike Time it represents the
+// value as elapsed time, so it handles 24 hours or more and negative values. It
+// returns ErrUnknownFormat if the value is not such a string.
+func (r Record) DurationE(fieldName string) (time.Duration, error) {
+	return parseFMDuration(r.String(fieldName))
+}
 
-	type example struct {
-		Name string `fm:"Name"`
-		Age int `fm:"Age"`
+// Duration parses the field value as a time.Duration. Errors are ignored; use
+// DurationE to detect them.
+func (r Record) Duration(fieldName string) time.Duration {
+	d, _ := r.DurationE(fieldName)
+	return d
+}
+
+// parseFMDuration parses a FileMaker time clock string ([-]H[H…]:MM:SS) into a
+// time.Duration. Hours may exceed 24; minutes and seconds must be 0–59.
+func parseFMDuration(s string) (time.Duration, error) {
+	neg := false
+	if strings.HasPrefix(s, "-") {
+		neg, s = true, s[1:]
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) != 3 {
+		return 0, ErrUnknownFormat
+	}
+	h, errH := strconv.Atoi(parts[0])
+	m, errM := strconv.Atoi(parts[1])
+	sec, errS := strconv.Atoi(parts[2])
+	if errH != nil || errM != nil || errS != nil || h < 0 || m < 0 || m > 59 || sec < 0 || sec > 59 {
+		return 0, ErrUnknownFormat
+	}
+	d := time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(sec)*time.Second
+	if neg {
+		d = -d
+	}
+	return d, nil
+}
+
+// Decode populates obj's fields from the record, matching each struct field's
+// `fm` tag to a record field name. obj must be a non-nil pointer to a struct.
+//
+// Decode is NOT recursive. FileMaker records are flat, so Decode maps only the
+// fields of the struct passed to it; nested struct fields are left untouched. To
+// populate a nested struct, call Decode on it directly:
+//
+//	rec.Decode(&customer)
+//	rec.Decode(&customer.Address)
+//
+// (v3's Map decoded nested structs automatically; v4 does not — see the v4
+// migration notes.)
+//
+// Only fields with a non-empty `fm` tag are touched; untagged fields and fields
+// tagged `fm:"-"` are left as-is. Decoding is lenient per field: a missing or
+// empty field leaves the struct field at its zero value. time.Time fields use
+// the record's configured location; a *time.Time field is set to a pointer when
+// the value parses to a non-zero time, and to nil otherwise (clearing any value
+// from a previous Decode).
+//
+// An error is returned only for structural misuse: obj is not a non-nil pointer
+// to a struct, or an `fm`-tagged field has a type outside the supported list
+// below. The second case depends on the struct definition alone, not on the
+// record's data, so it surfaces on the first decode rather than for some records
+// only; every offending field is reported, and the fields that do decode are
+// still populated. Note that a defined type over a supported type (type Status
+// string) is not itself supported.
+//
+// Supported field types: string, int, int8, int16, int32, int64, float32,
+// float64, bool, time.Duration, time.Time, *time.Time.
+func (r Record) Decode(obj any) error {
+	v := reflect.ValueOf(obj)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return errors.New("filemaker: decode requires a non-nil pointer to a struct")
+	}
+	v = v.Elem()
+	if v.Kind() != reflect.Struct {
+		return errors.New("filemaker: decode requires a pointer to a struct")
 	}
 
-`
-
-- A pointer to the object must be passed (i.e `Record.Map(&obj)`).
-
-- Nested structs are not supported.
-
-Supported types:
-
-- string
-
-- int
-
-- int8
-
-- int16
-
-- int32
-
-- int64
-
-- float32
-
-- float64
-
-- bool
-
-- time.Time (date and timestamp fields)
-*/
-func (r *Record) Map(obj interface{}, timeLoc *time.Location) {
-	v := reflect.ValueOf(obj).Elem()
-
-	//Loop through all struct fields
+	vType := v.Type()
+	var errs []error
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
-
-		//Skip the field if it cannot be set
-		if !field.IsValid() || !field.CanSet() {
+		if !field.CanSet() {
 			continue
 		}
 
-		//Get the `fm` tag of the field
-		tag := v.Type().Field(i).Tag.Get("fm")
+		tag := vType.Field(i).Tag.Get("fm")
+		if tag == "" || tag == "-" {
+			continue
+		}
 
-		//Set the struct field value depending on the underlying type
 		switch field.Interface().(type) {
 		case string:
 			field.SetString(r.String(tag))
@@ -685,35 +385,37 @@ func (r *Record) Map(obj interface{}, timeLoc *time.Location) {
 			field.SetFloat(r.Float64(tag))
 		case bool:
 			field.SetBool(r.Bool(tag))
+		case time.Duration:
+			// A distinct named type (underlying int64), so it is matched here
+			// rather than by the integer case above.
+			field.Set(reflect.ValueOf(r.Duration(tag)))
 		case time.Time:
-			field.Set(reflect.ValueOf(r.Time(tag, timeLoc)))
-		}
-
-		if field.Type() != reflect.TypeOf(Record{}) {
-			if field.Kind() == reflect.Struct {
-				//Map nested struct
-				r.Map(field.Addr().Interface(), timeLoc)
-				continue
-			} else if field.Kind() == reflect.Pointer && field.Elem().Kind() == reflect.Struct {
-				//Map nested pointer to struct
-				r.Map(field.Interface(), timeLoc)
-				continue
-			} else if field.Kind() == reflect.Pointer &&
-				field.Type().Elem() == reflect.TypeOf(time.Time{}) {
-				//Field is a time.Time pointer
-				t := r.Time(tag, timeLoc)
-
-				//Only set field if time is not zero
-				if field.IsNil() && !t.IsZero() {
-					//Nil pointer
-					field.Set(reflect.ValueOf(&t))
-				} else if !t.IsZero() {
-					//Value pointer
-					field.Elem().Set(reflect.ValueOf(t))
-				}
-
-				continue
+			field.Set(reflect.ValueOf(r.Time(tag)))
+		case *time.Time:
+			// Assign unconditionally so the field reflects this record: a
+			// fresh pointer for a parseable value, nil otherwise (clearing any
+			// value left by a previous Decode).
+			if parsed := r.Time(tag); !parsed.IsZero() {
+				field.Set(reflect.ValueOf(&parsed))
+			} else {
+				field.Set(reflect.Zero(field.Type()))
 			}
+		default:
+			errs = append(errs, unsupportedFieldError(vType.Field(i), tag))
 		}
 	}
+	return errors.Join(errs...)
+}
+
+// unsupportedFieldError reports an `fm`-tagged struct field that Decode cannot
+// populate. The fault is in the struct definition rather than the record — it is
+// the same for every record — so it is reported rather than skipped.
+func unsupportedFieldError(sf reflect.StructField, tag string) error {
+	hint := ""
+	if k := sf.Type.Kind(); k == reflect.Struct ||
+		(k == reflect.Pointer && sf.Type.Elem().Kind() == reflect.Struct) {
+		hint = "; Decode is not recursive — call Decode on the nested struct itself"
+	}
+	return fmt.Errorf("filemaker: decode: field %s has unsupported type %s for tag %q%s",
+		sf.Name, sf.Type, tag, hint)
 }
