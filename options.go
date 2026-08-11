@@ -201,8 +201,9 @@ func WithProhibitMode(mode EntryMode) WriteOption {
 
 // WithScript runs a FileMaker script after the request's action completes,
 // passing param as its script parameter (pass "" for none). The script runs in
-// the layout's context. It is accepted by Create, Update, Delete, and Find; the
-// outcome is reported in the corresponding response's Scripts field.
+// the layout's context. It is accepted by every endpoint that takes a
+// RecordOption; the outcome is reported in the corresponding response's Scripts
+// field.
 //
 // The Data API runs at most one script per phase, so this sets a single script:
 // calling WithScript more than once keeps only the last. The three phases
@@ -217,8 +218,8 @@ func WithScript(name, param string) RecordOption {
 
 // WithPrerequestScript runs a script before the request is processed — the Data
 // API script.prerequest — passing param as its parameter (pass "" for none). It
-// is accepted by Create, Update, Delete, and Find. Like WithScript it sets a
-// single script; calling it again keeps only the last.
+// is accepted by every endpoint that takes a RecordOption. Like WithScript it
+// sets a single script; calling it again keeps only the last.
 func WithPrerequestScript(name, param string) RecordOption {
 	return option(func(c *recordConfig) {
 		c.prerequest = scriptCall{name, param}
@@ -229,32 +230,35 @@ func WithPrerequestScript(name, param string) RecordOption {
 // result is sorted — the Data API script.presort — passing param as its
 // parameter (pass "" for none). The presort phase is most meaningful on Find,
 // where it can shape the found set before sorting; the other endpoints accept it
-// regardless. It is accepted by Create, Update, Delete, and Find. Like WithScript
-// it sets a single script; calling it again keeps only the last.
+// regardless. It is accepted by every endpoint that takes a RecordOption. Like
+// WithScript it sets a single script; calling it again keeps only the last.
 func WithPresortScript(name, param string) RecordOption {
 	return option(func(c *recordConfig) {
 		c.presort = scriptCall{name, param}
 	})
 }
 
-// WithSort orders a find result by each rule in turn. Calling it again replaces
-// the previous rules; passing no rules leaves the result unsorted.
+// WithSort orders the records a read returns by each rule in turn. Accepted by
+// Find and GetRange. Calling it again replaces the previous rules; passing no
+// rules leaves the result unsorted.
 func WithSort(rules ...SortRule) ReadManyOption {
 	return option(func(c *recordConfig) {
 		c.sort = rules
 	})
 }
 
-// WithLimit caps the number of records a find returns (the host's default is
-// 100). A non-positive limit is treated as unset, leaving the host default.
+// WithLimit caps the number of records a read returns (the host's default is
+// 100). Accepted by Find and GetRange. A non-positive limit is treated as unset,
+// leaving the host default.
 func WithLimit(limit int) ReadManyOption {
 	return option(func(c *recordConfig) {
 		c.limit = limit
 	})
 }
 
-// WithOffset sets the 1-based index of the first record a find returns (the
-// host's default is 1). A non-positive offset is treated as unset.
+// WithOffset sets the 1-based index of the first record a read returns (the
+// host's default is 1). Accepted by Find and GetRange. A non-positive offset is
+// treated as unset.
 func WithOffset(offset int) ReadManyOption {
 	return option(func(c *recordConfig) {
 		c.offset = offset
