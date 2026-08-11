@@ -15,12 +15,16 @@ import (
 // than on the first operation. It is optional: every operation authenticates
 // lazily on first use when no session exists yet.
 //
-// Calling it always performs a fresh login and replaces the stored token. It
-// does not log out an existing session first: the previous token is abandoned,
-// not invalidated, and lingers on the host until it times out. Call Logout
-// before Authenticate if you need the old session torn down promptly.
-// Concurrent calls collapse to a single login, so a burst of callers does not
-// produce a burst of sessions.
+// Calling it performs a fresh login and replaces the stored token rather than
+// reusing the current session. It does not log out the existing session first:
+// the previous token is abandoned, not invalidated, and lingers on the host
+// until it times out. Call Logout before Authenticate if you need the old
+// session torn down promptly.
+//
+// Concurrent calls collapse into a single login: a caller that arrives while
+// another login is in flight adopts the token that login produces instead of
+// opening a session of its own, so a burst of callers does not produce a burst
+// of sessions.
 func (c *Client) Authenticate(ctx context.Context) error {
 	c.mu.RLock()
 	used := c.token
