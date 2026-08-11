@@ -209,7 +209,7 @@ func (c *Client) DuplicateByID(ctx context.Context, layout, id string, opts ...D
 // UploadToContainer uploads data to a container field of the record identified
 // by rec. The record must already exist (created or returned by a find). Pass
 // IfUnchanged (or WithModID) for optimistic concurrency against the record's
-// current mod ID.
+// current mod ID. As with UploadToContainerByID, data is buffered in memory.
 func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader, opts ...UploadOption) error {
 	if rec.id == "" {
 		return errors.New("filemaker: record has no ID; create or find it first")
@@ -232,6 +232,10 @@ func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filen
 // addressed by layout and id. For optimistic concurrency pass WithModID
 // (IfUnchanged needs a record); the container endpoint has no JSON body, so the
 // mod ID rides in the URL query string.
+//
+// data is read to completion and the encoded request body is held in memory so
+// it can be replayed if the session token expires mid-request and the client
+// reauthenticates. Peak memory therefore scales with the size of the upload.
 func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, filename string, data io.Reader, opts ...UploadOption) error {
 	switch {
 	case layout == "":
