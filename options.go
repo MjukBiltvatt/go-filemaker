@@ -7,7 +7,7 @@ import "errors"
 //
 // Each endpoint takes its options through a sealed interface (CreateOption,
 // UpdateOption, …). The interfaces are sealed: their apply methods are
-// unexported and take an unexported *recordConfig, so only this package can
+// unexported and take an unexported *params, so only this package can
 // produce values that satisfy them. That keeps each endpoint's set of valid
 // options closed, and lets the lattice grow — new endpoints, new options — with
 // only additive (non-breaking) changes.
@@ -18,28 +18,28 @@ import "errors"
 // for, while the compiler still rejects it everywhere it is not.
 
 // CreateOption configures a Create.
-type CreateOption interface{ applyCreate(*recordConfig) }
+type CreateOption interface{ applyCreate(*params) }
 
 // UpdateOption configures an Update or UpdateByID.
-type UpdateOption interface{ applyUpdate(*recordConfig) }
+type UpdateOption interface{ applyUpdate(*params) }
 
 // DeleteOption configures a Delete or DeleteByID.
-type DeleteOption interface{ applyDelete(*recordConfig) }
+type DeleteOption interface{ applyDelete(*params) }
 
 // DuplicateOption configures a Duplicate or DuplicateByID.
-type DuplicateOption interface{ applyDuplicate(*recordConfig) }
+type DuplicateOption interface{ applyDuplicate(*params) }
 
 // FindOption configures a Find.
-type FindOption interface{ applyFind(*recordConfig) }
+type FindOption interface{ applyFind(*params) }
 
 // GetOption configures a Get or GetByID.
-type GetOption interface{ applyGet(*recordConfig) }
+type GetOption interface{ applyGet(*params) }
 
 // GetRangeOption configures a GetRange.
-type GetRangeOption interface{ applyGetRange(*recordConfig) }
+type GetRangeOption interface{ applyGetRange(*params) }
 
 // UploadOption configures an UploadToContainer or UploadToContainerByID.
-type UploadOption interface{ applyUpload(*recordConfig) }
+type UploadOption interface{ applyUpload(*params) }
 
 // WriteOption configures any record write: it is accepted by both Create and
 // Update (and UpdateByID).
@@ -101,19 +101,19 @@ const (
 )
 
 // option is the single adapter behind every option constructor: a closure that
-// mutates the shared recordConfig. It implements every endpoint's apply method,
+// mutates the shared params. It implements every endpoint's apply method,
 // so a constructor's scope is governed entirely by the interface type it is
 // returned as — not by the methods this concrete type happens to carry.
-type option func(*recordConfig)
+type option func(*params)
 
-func (o option) applyCreate(c *recordConfig)    { o(c) }
-func (o option) applyUpdate(c *recordConfig)    { o(c) }
-func (o option) applyDelete(c *recordConfig)    { o(c) }
-func (o option) applyDuplicate(c *recordConfig) { o(c) }
-func (o option) applyFind(c *recordConfig)      { o(c) }
-func (o option) applyGet(c *recordConfig)       { o(c) }
-func (o option) applyGetRange(c *recordConfig)  { o(c) }
-func (o option) applyUpload(c *recordConfig)    { o(c) }
+func (o option) applyCreate(c *params)    { o(c) }
+func (o option) applyUpdate(c *params)    { o(c) }
+func (o option) applyDelete(c *params)    { o(c) }
+func (o option) applyDuplicate(c *params) { o(c) }
+func (o option) applyFind(c *params)      { o(c) }
+func (o option) applyGet(c *params)       { o(c) }
+func (o option) applyGetRange(c *params)  { o(c) }
+func (o option) applyUpload(c *params)    { o(c) }
 
 // WithModID makes the write conditional (optimistic concurrency) against a
 // specific mod ID: the host rejects it with ErrRecordModified if the record's
@@ -126,7 +126,7 @@ func (o option) applyUpload(c *recordConfig)    { o(c) }
 // (Combining it with IfUnchanged is a documented exception, not a duplicate: the
 // explicit version from WithModID is used regardless of order.)
 func WithModID(modID string) ConcurrencyOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		if modID == "" {
 			c.err = errors.New("filemaker: WithModID requires a non-empty mod ID")
 			return
@@ -148,7 +148,7 @@ func WithModID(modID string) ConcurrencyOption {
 // Combining it with WithModID is redundant — the explicit version from WithModID
 // is used, regardless of order.
 func IfUnchanged() ConcurrencyOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.conditional = true
 	})
 }
@@ -174,7 +174,7 @@ func IfUnchanged() ConcurrencyOption {
 // It sets a single portal-data object; calling WithPortalData again replaces it
 // rather than merging — pass all the portals and rows in one call.
 func WithPortalData(portals PortalData) WriteOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.portalData = portals
 	})
 }
@@ -184,7 +184,7 @@ func WithPortalData(portals PortalData) WriteOption {
 // validation requirements; EntryModeScript ignores them. Accepted by Create and
 // Update.
 func WithEntryMode(mode EntryMode) WriteOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.entryMode = mode
 	})
 }
@@ -194,7 +194,7 @@ func WithEntryMode(mode EntryMode) WriteOption {
 // field's auto-enter requirements; EntryModeScript ignores them. Accepted by
 // Create and Update.
 func WithProhibitMode(mode EntryMode) WriteOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.prohibitMode = mode
 	})
 }
@@ -211,7 +211,7 @@ func WithProhibitMode(mode EntryMode) WriteOption {
 // compose; to run several steps in one phase, chain them inside a single
 // FileMaker script.
 func WithScript(name, param string) RecordOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.script = scriptCall{name, param}
 	})
 }
@@ -221,7 +221,7 @@ func WithScript(name, param string) RecordOption {
 // is accepted by every endpoint that takes a RecordOption. Like WithScript it
 // sets a single script; calling it again keeps only the last.
 func WithPrerequestScript(name, param string) RecordOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.prerequest = scriptCall{name, param}
 	})
 }
@@ -233,7 +233,7 @@ func WithPrerequestScript(name, param string) RecordOption {
 // regardless. It is accepted by every endpoint that takes a RecordOption. Like
 // WithScript it sets a single script; calling it again keeps only the last.
 func WithPresortScript(name, param string) RecordOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.presort = scriptCall{name, param}
 	})
 }
@@ -242,7 +242,7 @@ func WithPresortScript(name, param string) RecordOption {
 // Find and GetRange. Calling it again replaces the previous rules; passing no
 // rules leaves the result unsorted.
 func WithSort(rules ...SortRule) ReadManyOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.sort = rules
 	})
 }
@@ -251,7 +251,7 @@ func WithSort(rules ...SortRule) ReadManyOption {
 // 100). Accepted by Find and GetRange. A non-positive limit is treated as unset,
 // leaving the host default.
 func WithLimit(limit int) ReadManyOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.limit = limit
 	})
 }
@@ -260,7 +260,7 @@ func WithLimit(limit int) ReadManyOption {
 // host's default is 1). Accepted by Find and GetRange. A non-positive offset is
 // treated as unset.
 func WithOffset(offset int) ReadManyOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.offset = offset
 	})
 }
@@ -269,7 +269,7 @@ func WithOffset(offset int) ReadManyOption {
 // than the one the read targets — the Data API layout.response. The two layouts
 // must share a base table. Calling it again keeps only the last.
 func WithResponseLayout(layout string) ReadOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.responseLayout = layout
 	})
 }
@@ -280,7 +280,7 @@ func WithResponseLayout(layout string) ReadOption {
 // accompany it, not whether field data comes back. Omitting the option (or
 // passing no names) returns all portals. Calling it again replaces the set.
 func WithPortals(names ...string) ReadOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.portals = names
 	})
 }
@@ -292,7 +292,7 @@ func WithPortals(names ...string) ReadOption {
 // non-positive limit is treated as unset. Calling it again for the same portal
 // keeps only the last.
 func WithPortalLimit(portal string, limit int) ReadOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.updatePortalRange(portal, func(pr *portalRange) { pr.limit = limit })
 	})
 }
@@ -301,7 +301,7 @@ func WithPortalLimit(portal string, limit int) ReadOption {
 // for the named portal (the host's default is 1). A non-positive offset is
 // treated as unset. Calling it again for the same portal keeps only the last.
 func WithPortalOffset(portal string, offset int) ReadOption {
-	return option(func(c *recordConfig) {
+	return option(func(c *params) {
 		c.updatePortalRange(portal, func(pr *portalRange) { pr.offset = offset })
 	})
 }

@@ -38,13 +38,13 @@ func (c *Client) GetByID(ctx context.Context, layout, id string, opts ...GetOpti
 		return GetResponse{}, errors.New("filemaker: no record id specified")
 	}
 
-	cfg, err := resolveGetConfig(opts)
+	p, err := resolveGetParams(opts)
 	if err != nil {
 		return GetResponse{}, err
 	}
 
 	u := c.recordURL(layout, id)
-	if q := cfg.getQueryParams(); len(q) > 0 {
+	if q := p.getQueryParams(); len(q) > 0 {
 		u += "?" + q.Encode()
 	}
 
@@ -73,13 +73,13 @@ func (c *Client) GetByID(ctx context.Context, layout, id string, opts ...GetOpti
 // the host expects for that query key); per-portal paging uses
 // _offset.<name>/_limit.<name> (with a leading underscore, unlike the Find body
 // keys which omit it).
-func (c recordConfig) getQueryParams() url.Values {
+func (p params) getQueryParams() url.Values {
 	v := url.Values{}
-	if len(c.portals) > 0 {
-		b, _ := json.Marshal(c.portals)
+	if len(p.portals) > 0 {
+		b, _ := json.Marshal(p.portals)
 		v.Set("portal", string(b))
 	}
-	for name, pr := range c.portalRanges {
+	for name, pr := range p.portalRanges {
 		if pr.offset > 0 {
 			v.Set("_offset."+name, strconv.Itoa(pr.offset))
 		}
@@ -87,10 +87,10 @@ func (c recordConfig) getQueryParams() url.Values {
 			v.Set("_limit."+name, strconv.Itoa(pr.limit))
 		}
 	}
-	if c.responseLayout != "" {
-		v.Set("layout.response", c.responseLayout)
+	if p.responseLayout != "" {
+		v.Set("layout.response", p.responseLayout)
 	}
-	for _, kv := range c.scriptParams() {
+	for _, kv := range p.scriptParams() {
 		v.Set(kv[0], kv[1])
 	}
 	return v
@@ -120,13 +120,13 @@ func (c *Client) GetRange(ctx context.Context, layout string, opts ...GetRangeOp
 		return GetRangeResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	cfg, err := resolveGetRangeConfig(opts)
+	p, err := resolveGetRangeParams(opts)
 	if err != nil {
 		return GetRangeResponse{}, err
 	}
 
 	u := c.recordsURL(layout)
-	if q := cfg.getRangeQueryParams(); len(q) > 0 {
+	if q := p.getRangeQueryParams(); len(q) > 0 {
 		u += "?" + q.Encode()
 	}
 
@@ -156,23 +156,23 @@ func (c *Client) GetRange(ctx context.Context, layout string, opts ...GetRangeOp
 // (_offset, _limit, _sort); portal filtering and paging share the same keys as
 // the get-single endpoint (portal, _offset.<name>, _limit.<name>). Sort is
 // JSON-encoded as an array, matching the wire format the host expects.
-func (c recordConfig) getRangeQueryParams() url.Values {
+func (p params) getRangeQueryParams() url.Values {
 	v := url.Values{}
-	if c.offset > 0 {
-		v.Set("_offset", strconv.Itoa(c.offset))
+	if p.offset > 0 {
+		v.Set("_offset", strconv.Itoa(p.offset))
 	}
-	if c.limit > 0 {
-		v.Set("_limit", strconv.Itoa(c.limit))
+	if p.limit > 0 {
+		v.Set("_limit", strconv.Itoa(p.limit))
 	}
-	if len(c.sort) > 0 {
-		b, _ := json.Marshal(c.sort)
+	if len(p.sort) > 0 {
+		b, _ := json.Marshal(p.sort)
 		v.Set("_sort", string(b))
 	}
-	if len(c.portals) > 0 {
-		b, _ := json.Marshal(c.portals)
+	if len(p.portals) > 0 {
+		b, _ := json.Marshal(p.portals)
 		v.Set("portal", string(b))
 	}
-	for name, pr := range c.portalRanges {
+	for name, pr := range p.portalRanges {
 		if pr.offset > 0 {
 			v.Set("_offset."+name, strconv.Itoa(pr.offset))
 		}
@@ -180,10 +180,10 @@ func (c recordConfig) getRangeQueryParams() url.Values {
 			v.Set("_limit."+name, strconv.Itoa(pr.limit))
 		}
 	}
-	if c.responseLayout != "" {
-		v.Set("layout.response", c.responseLayout)
+	if p.responseLayout != "" {
+		v.Set("layout.response", p.responseLayout)
 	}
-	for _, kv := range c.scriptParams() {
+	for _, kv := range p.scriptParams() {
 		v.Set(kv[0], kv[1])
 	}
 	return v

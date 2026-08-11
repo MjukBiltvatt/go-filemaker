@@ -526,7 +526,7 @@ func TestUpdateDoesNotMutateCallerOpts(t *testing.T) {
 	// If Update appends its resolved WithModID into the caller's array instead of a
 	// fresh one, it clobbers the sentinel at index 1.
 	var sentinelCalled bool
-	var sentinel UpdateOption = option(func(cfg *recordConfig) { sentinelCalled = true })
+	var sentinel UpdateOption = option(func(p *params) { sentinelCalled = true })
 	backing := []UpdateOption{IfUnchanged(), sentinel}
 	opts := backing[:1] // len 1, cap 2, shares backing with sentinel at [1]
 
@@ -535,8 +535,8 @@ func TestUpdateDoesNotMutateCallerOpts(t *testing.T) {
 	}
 
 	// backing[1] must still be the sentinel — invoke it and confirm it runs.
-	var cfg recordConfig
-	backing[1].applyUpdate(&cfg)
+	var p params
+	backing[1].applyUpdate(&p)
 	if !sentinelCalled {
 		t.Error("Update mutated the caller's opts backing array (sentinel at index 1 was overwritten)")
 	}
@@ -1233,7 +1233,7 @@ func TestMarshalRecordBodyDateFormat(t *testing.T) {
 		{"ISO", &iso, `{"dateformats":2,"fieldData":{"Created":"2026-06-23 14:05:00","DOB":"1990-06-23"}}`},
 	}
 	for _, c := range cases {
-		body, err := marshalRecordBody(fields, recordConfig{}, c.format)
+		body, err := marshalRecordBody(fields, params{}, c.format)
 		if err != nil {
 			t.Fatalf("%s: marshalRecordBody: %v", c.name, err)
 		}
@@ -1249,7 +1249,7 @@ func TestFieldDataWithTypedValues(t *testing.T) {
 		"DOB":     Date(time.Date(1990, 6, 23, 0, 0, 0, 0, time.UTC)),
 		"Created": Timestamp(time.Date(2026, 6, 23, 14, 5, 0, 0, time.UTC)),
 		"Name":    "Mark",
-	}, recordConfig{}, nil)
+	}, params{}, nil)
 	if err != nil {
 		t.Fatalf("marshalRecordBody: %v", err)
 	}

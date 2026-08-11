@@ -184,22 +184,22 @@ func TestGetWithScript(t *testing.T) {
 func TestGetQueryParams(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  recordConfig
+		p    params
 		want map[string]string
 	}{
 		{
 			name: "empty",
-			cfg:  recordConfig{},
+			p:    params{},
 			want: map[string]string{},
 		},
 		{
 			name: "portals",
-			cfg:  recordConfig{portals: []string{"Orders", "Notes"}},
+			p:    params{portals: []string{"Orders", "Notes"}},
 			want: map[string]string{"portal": `["Orders","Notes"]`},
 		},
 		{
 			name: "portal paging uses underscore prefix",
-			cfg: recordConfig{
+			p: params{
 				portals:      []string{"Orders"},
 				portalRanges: map[string]portalRange{"Orders": {offset: 3, limit: 10}},
 			},
@@ -211,19 +211,19 @@ func TestGetQueryParams(t *testing.T) {
 		},
 		{
 			name: "response layout",
-			cfg:  recordConfig{responseLayout: "PeopleAPI"},
+			p:    params{responseLayout: "PeopleAPI"},
 			want: map[string]string{"layout.response": "PeopleAPI"},
 		},
 		{
 			name: "script",
-			cfg:  recordConfig{script: scriptCall{name: "MyScript", param: "p"}},
+			p:    params{script: scriptCall{name: "MyScript", param: "p"}},
 			want: map[string]string{"script": "MyScript", "script.param": "p"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cfg.getQueryParams()
+			got := tt.p.getQueryParams()
 			for key, wantVal := range tt.want {
 				if gotVal := got.Get(key); gotVal != wantVal {
 					t.Errorf("key %q = %q, want %q", key, gotVal, wantVal)
@@ -434,22 +434,22 @@ func TestGetRangeWithScript(t *testing.T) {
 func TestGetRangeQueryParams(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  recordConfig
+		p    params
 		want map[string]string
 	}{
 		{
 			name: "empty",
-			cfg:  recordConfig{},
+			p:    params{},
 			want: map[string]string{},
 		},
 		{
 			name: "offset and limit use underscore prefix",
-			cfg:  recordConfig{offset: 10, limit: 25},
+			p:    params{offset: 10, limit: 25},
 			want: map[string]string{"_offset": "10", "_limit": "25"},
 		},
 		{
 			name: "sort is JSON-encoded with underscore prefix",
-			cfg: recordConfig{
+			p: params{
 				sort: []SortRule{
 					{Field: "Name", Order: SortAscending},
 					{Field: "Age", Order: SortDescending},
@@ -461,12 +461,12 @@ func TestGetRangeQueryParams(t *testing.T) {
 		},
 		{
 			name: "portals",
-			cfg:  recordConfig{portals: []string{"Orders"}},
+			p:    params{portals: []string{"Orders"}},
 			want: map[string]string{"portal": `["Orders"]`},
 		},
 		{
 			name: "portal paging uses underscore prefix",
-			cfg: recordConfig{
+			p: params{
 				portals:      []string{"Orders"},
 				portalRanges: map[string]portalRange{"Orders": {offset: 3, limit: 10}},
 			},
@@ -478,14 +478,14 @@ func TestGetRangeQueryParams(t *testing.T) {
 		},
 		{
 			name: "response layout",
-			cfg:  recordConfig{responseLayout: "API"},
+			p:    params{responseLayout: "API"},
 			want: map[string]string{"layout.response": "API"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cfg.getRangeQueryParams()
+			got := tt.p.getRangeQueryParams()
 			for key, wantVal := range tt.want {
 				if gotVal := got.Get(key); gotVal != wantVal {
 					t.Errorf("key %q = %q, want %q", key, gotVal, wantVal)

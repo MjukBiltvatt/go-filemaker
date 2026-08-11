@@ -281,7 +281,7 @@ func TestMarshalFindBody(t *testing.T) {
 	tests := []struct {
 		name     string
 		requests []FindRequest
-		cfg      recordConfig
+		p        params
 		want     string
 	}{
 		{
@@ -318,7 +318,7 @@ func TestMarshalFindBody(t *testing.T) {
 			requests: []FindRequest{
 				{Criteria: map[string]string{"Firstname": "Mark"}},
 			},
-			cfg: recordConfig{
+			p: params{
 				sort: []SortRule{
 					{Field: "Lastname", Order: SortAscending},
 					{Field: "Age", Order: SortDescending},
@@ -332,7 +332,7 @@ func TestMarshalFindBody(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := marshalFindBody(tt.requests, tt.cfg)
+			got, err := marshalFindBody(tt.requests, tt.p)
 			if err != nil {
 				t.Fatalf("marshalFindBody returned error: %v", err)
 			}

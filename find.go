@@ -116,12 +116,12 @@ func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest
 		return FindResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	cfg, err := resolveFindConfig(opts)
+	p, err := resolveFindParams(opts)
 	if err != nil {
 		return FindResponse{}, err
 	}
 
-	body, err := marshalFindBody(requests, cfg)
+	body, err := marshalFindBody(requests, p)
 	if err != nil {
 		return FindResponse{}, err
 	}
@@ -156,28 +156,28 @@ func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest
 //
 // It is assembled as a map because the per-portal paging keys are dynamic
 // ("offset.<portal>"/"limit.<portal>"); a fixed struct cannot express them.
-func marshalFindBody(requests []FindRequest, cfg recordConfig) ([]byte, error) {
+func marshalFindBody(requests []FindRequest, p params) ([]byte, error) {
 	if requests == nil {
 		requests = []FindRequest{}
 	}
 
 	body := map[string]any{"query": requests}
-	if len(cfg.sort) > 0 {
-		body["sort"] = cfg.sort
+	if len(p.sort) > 0 {
+		body["sort"] = p.sort
 	}
-	if cfg.limit > 0 {
-		body["limit"] = cfg.limit
+	if p.limit > 0 {
+		body["limit"] = p.limit
 	}
-	if cfg.offset > 0 {
-		body["offset"] = cfg.offset
+	if p.offset > 0 {
+		body["offset"] = p.offset
 	}
-	if cfg.responseLayout != "" {
-		body["layout.response"] = cfg.responseLayout
+	if p.responseLayout != "" {
+		body["layout.response"] = p.responseLayout
 	}
-	if len(cfg.portals) > 0 {
-		body["portal"] = cfg.portals
+	if len(p.portals) > 0 {
+		body["portal"] = p.portals
 	}
-	for name, pr := range cfg.portalRanges {
+	for name, pr := range p.portalRanges {
 		if pr.offset > 0 {
 			body["offset."+name] = pr.offset
 		}
@@ -185,7 +185,7 @@ func marshalFindBody(requests []FindRequest, cfg recordConfig) ([]byte, error) {
 			body["limit."+name] = pr.limit
 		}
 	}
-	for _, kv := range cfg.scriptParams() {
+	for _, kv := range p.scriptParams() {
 		body[kv[0]] = kv[1]
 	}
 

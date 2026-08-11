@@ -49,12 +49,12 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 		return CreateResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	cfg, err := resolveCreateConfig(opts)
+	p, err := resolveCreateParams(opts)
 	if err != nil {
 		return CreateResponse{}, err
 	}
 
-	body, err := marshalRecordBody(fields, cfg, c.dateFormat)
+	body, err := marshalRecordBody(fields, p, c.dateFormat)
 	if err != nil {
 		return CreateResponse{}, err
 	}
@@ -83,13 +83,13 @@ func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts 
 	// Every other option passes through untouched, so new UpdateOptions need no
 	// change here; delegating also keeps layout/id validation and the write in one
 	// place, like Delete and UploadToContainer.
-	cfg, err := resolveUpdateConfig(opts, &rec)
+	p, err := resolveUpdateParams(opts, &rec)
 	if err != nil {
 		return UpdateResponse{}, err
 	}
-	if cfg.conditional {
+	if p.conditional {
 		// Full-slice expression so the append never mutates the caller's array.
-		opts = append(opts[:len(opts):len(opts)], WithModID(cfg.modID))
+		opts = append(opts[:len(opts):len(opts)], WithModID(p.modID))
 	}
 	return c.UpdateByID(ctx, rec.layout, rec.id, fields, opts...)
 }
@@ -108,12 +108,12 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 		return UpdateResponse{}, errors.New("filemaker: no record id specified")
 	}
 
-	cfg, err := resolveUpdateConfig(opts, nil)
+	p, err := resolveUpdateParams(opts, nil)
 	if err != nil {
 		return UpdateResponse{}, err
 	}
 
-	body, err := marshalRecordBody(fields, cfg, c.dateFormat)
+	body, err := marshalRecordBody(fields, p, c.dateFormat)
 	if err != nil {
 		return UpdateResponse{}, err
 	}
@@ -150,13 +150,13 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...Dele
 		return DeleteResponse{}, errors.New("filemaker: no record id specified")
 	}
 
-	cfg, err := resolveDeleteConfig(opts)
+	p, err := resolveDeleteParams(opts)
 	if err != nil {
 		return DeleteResponse{}, err
 	}
 
 	u := c.recordURL(layout, id)
-	if q := cfg.queryParams(); len(q) > 0 {
+	if q := p.queryParams(); len(q) > 0 {
 		u += "?" + q.Encode()
 	}
 
@@ -189,12 +189,12 @@ func (c *Client) DuplicateByID(ctx context.Context, layout, id string, opts ...D
 		return DuplicateResponse{}, errors.New("filemaker: no record id specified")
 	}
 
-	cfg, err := resolveDuplicateConfig(opts)
+	p, err := resolveDuplicateParams(opts)
 	if err != nil {
 		return DuplicateResponse{}, err
 	}
 
-	body, err := marshalDuplicateBody(cfg)
+	body, err := marshalDuplicateBody(p)
 	if err != nil {
 		return DuplicateResponse{}, err
 	}
@@ -217,13 +217,13 @@ func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filen
 	// IfUnchanged is record-relative, so resolve it here against rec and append
 	// the resolved lock as an explicit WithModID, then delegate — mirroring
 	// Update/UpdateByID.
-	cfg, err := resolveUploadConfig(opts, &rec)
+	p, err := resolveUploadParams(opts, &rec)
 	if err != nil {
 		return err
 	}
-	if cfg.conditional {
+	if p.conditional {
 		// Full-slice expression so the append never mutates the caller's array.
-		opts = append(opts[:len(opts):len(opts)], WithModID(cfg.modID))
+		opts = append(opts[:len(opts):len(opts)], WithModID(p.modID))
 	}
 	return c.UploadToContainerByID(ctx, rec.layout, rec.id, field, filename, data, opts...)
 }
@@ -246,7 +246,7 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 		return errors.New("filemaker: no container field specified")
 	}
 
-	cfg, err := resolveUploadConfig(opts, nil)
+	p, err := resolveUploadParams(opts, nil)
 	if err != nil {
 		return err
 	}
@@ -265,7 +265,7 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 	}
 
 	u := c.containerURL(layout, id, field)
-	if q := cfg.queryParams(); len(q) > 0 {
+	if q := p.queryParams(); len(q) > 0 {
 		u += "?" + q.Encode()
 	}
 
@@ -368,9 +368,9 @@ func (c *Client) SetGlobalFields(ctx context.Context, fields FieldData) error {
 // marshalDuplicateBody builds the optional request body for Duplicate: only
 // the script directives (when set), with no fieldData envelope. An empty body
 // ({}) is always sent so the host receives a valid JSON payload.
-func marshalDuplicateBody(cfg recordConfig) ([]byte, error) {
+func marshalDuplicateBody(p params) ([]byte, error) {
 	body := map[string]any{}
-	for _, kv := range cfg.scriptParams() {
+	for _, kv := range p.scriptParams() {
 		body[kv[0]] = kv[1]
 	}
 	out, err := json.Marshal(body)
@@ -382,7 +382,7 @@ func marshalDuplicateBody(cfg recordConfig) ([]byte, error) {
 
 // marshalRecordBody wraps fields in the {"fieldData": ...} envelope the host
 // expects, drawing the optional parameters (portal data, a modId for optimistic
-// locking, and any script directives) from cfg and omitting each when unset. A
+// locking, and any script directives) from p and omitting each when unset. A
 // nil fields map becomes an empty object so the host applies defaults on create
 // and leaves the record's own fields untouched on a portal-only edit.
 //
@@ -393,12 +393,12 @@ func marshalDuplicateBody(cfg recordConfig) ([]byte, error) {
 //
 // The body is assembled as a map so the script directives (whose keys carry dots,
 // e.g. "script.param") share one source of truth with the Delete query string:
-// both read recordConfig.scriptParams.
-func marshalRecordBody(fields FieldData, cfg recordConfig, format *DateFormat) ([]byte, error) {
+// both read params.scriptParams.
+func marshalRecordBody(fields FieldData, p params, format *DateFormat) ([]byte, error) {
 	if fields == nil {
 		fields = FieldData{}
 	}
-	portals := cfg.portalData
+	portals := p.portalData
 
 	var dateFormats *int
 	if format != nil {
@@ -412,13 +412,13 @@ func marshalRecordBody(fields FieldData, cfg recordConfig, format *DateFormat) (
 	if len(portals) > 0 {
 		body["portalData"] = portals
 	}
-	if cfg.modID != "" {
-		body["modId"] = cfg.modID
+	if p.modID != "" {
+		body["modId"] = p.modID
 	}
-	if opts := cfg.entryOptions(); len(opts) > 0 {
+	if opts := p.entryOptions(); len(opts) > 0 {
 		body["options"] = opts
 	}
-	for _, kv := range cfg.scriptParams() {
+	for _, kv := range p.scriptParams() {
 		body[kv[0]] = kv[1]
 	}
 	if dateFormats != nil {

@@ -6,14 +6,14 @@ import (
 	"net/url"
 )
 
-// recordConfig accumulates the optional parameters the options set; each
-// endpoint resolves it into a request. Optimistic concurrency is one flag plus a
-// version: conditional means a mod-ID check is wanted, and modID is the version
-// to check against (empty means "source it from the record"). Both WithModID and
+// params accumulates the optional parameters the options set; each endpoint
+// resolves it into a request. Optimistic concurrency is one flag plus a version:
+// conditional means a mod-ID check is wanted, and modID is the version to check
+// against (empty means "source it from the record"). Both WithModID and
 // IfUnchanged set conditional, so the options are order-independent. err carries
 // deferred option validation (an option cannot return an error directly),
-// surfaced when the config is resolved.
-type recordConfig struct {
+// surfaced when the params are resolved.
+type params struct {
 	conditional bool
 	modID       string
 	portalData  PortalData
@@ -58,20 +58,20 @@ type scriptCall struct {
 // updatePortalRange applies fn to the range for the named portal, creating the
 // map and entry on first use. Map values are not addressable, so it reads,
 // mutates, and writes back.
-func (c *recordConfig) updatePortalRange(name string, fn func(*portalRange)) {
-	if c.portalRanges == nil {
-		c.portalRanges = map[string]portalRange{}
+func (p *params) updatePortalRange(name string, fn func(*portalRange)) {
+	if p.portalRanges == nil {
+		p.portalRanges = map[string]portalRange{}
 	}
-	pr := c.portalRanges[name]
+	pr := p.portalRanges[name]
 	fn(&pr)
-	c.portalRanges[name] = pr
+	p.portalRanges[name] = pr
 }
 
-// scriptParams returns the script-directive wire key/value pairs the config
-// carries, in a stable order, with empty phases (and empty params) omitted. The
+// scriptParams returns the script-directive wire key/value pairs the params
+// carry, in a stable order, with empty phases (and empty parameters) omitted. The
 // keys are identical for the JSON body (Create/Update) and the URL query string
 // (Delete), so both serializers draw from here.
-func (c recordConfig) scriptParams() [][2]string {
+func (p params) scriptParams() [][2]string {
 	var out [][2]string
 	add := func(key string, s scriptCall) {
 		if s.name == "" {
@@ -82,22 +82,22 @@ func (c recordConfig) scriptParams() [][2]string {
 			out = append(out, [2]string{key + ".param", s.param})
 		}
 	}
-	add("script", c.script)
-	add("script.prerequest", c.prerequest)
-	add("script.presort", c.presort)
+	add("script", p.script)
+	add("script.prerequest", p.prerequest)
+	add("script.presort", p.presort)
 	return out
 }
 
 // entryOptions returns the body "options" object — the data-entry modes set on a
 // Create/Update — omitting each mode when unset. The result is empty (so the
 // caller omits the key) when neither is set.
-func (c recordConfig) entryOptions() map[string]string {
+func (p params) entryOptions() map[string]string {
 	opts := map[string]string{}
-	if c.entryMode != "" {
-		opts["entrymode"] = string(c.entryMode)
+	if p.entryMode != "" {
+		opts["entrymode"] = string(p.entryMode)
 	}
-	if c.prohibitMode != "" {
-		opts["prohibitmode"] = string(c.prohibitMode)
+	if p.prohibitMode != "" {
+		opts["prohibitmode"] = string(p.prohibitMode)
 	}
 	return opts
 }
@@ -107,134 +107,134 @@ func (c recordConfig) entryOptions() map[string]string {
 // (Delete) and a mod ID (UploadToContainer). The names match their body keys.
 // Delete never sets a mod ID and Upload never sets scripts, so each endpoint only
 // emits what applies to it.
-func (c recordConfig) queryParams() url.Values {
+func (p params) queryParams() url.Values {
 	v := url.Values{}
-	if c.modID != "" {
-		v.Set("modId", c.modID)
+	if p.modID != "" {
+		v.Set("modId", p.modID)
 	}
-	for _, kv := range c.scriptParams() {
+	for _, kv := range p.scriptParams() {
 		v.Set(kv[0], kv[1])
 	}
 	return v
 }
 
-// resolveCreateConfig applies the create options. Deferred option errors surface
+// resolveCreateParams applies the create options. Deferred option errors surface
 // here.
-func resolveCreateConfig(opts []CreateOption) (recordConfig, error) {
-	var cfg recordConfig
+func resolveCreateParams(opts []CreateOption) (params, error) {
+	var p params
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyCreate(&cfg)
+			opt.applyCreate(&p)
 		}
 	}
-	return cfg, cfg.err
+	return p, p.err
 }
 
-// resolveDuplicateConfig applies the duplicate options. Deferred option errors
+// resolveDuplicateParams applies the duplicate options. Deferred option errors
 // surface here.
-func resolveDuplicateConfig(opts []DuplicateOption) (recordConfig, error) {
-	var cfg recordConfig
+func resolveDuplicateParams(opts []DuplicateOption) (params, error) {
+	var p params
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyDuplicate(&cfg)
+			opt.applyDuplicate(&p)
 		}
 	}
-	return cfg, cfg.err
+	return p, p.err
 }
 
-// resolveDeleteConfig applies the delete options. Deferred option errors surface
+// resolveDeleteParams applies the delete options. Deferred option errors surface
 // here.
-func resolveDeleteConfig(opts []DeleteOption) (recordConfig, error) {
-	var cfg recordConfig
+func resolveDeleteParams(opts []DeleteOption) (params, error) {
+	var p params
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyDelete(&cfg)
+			opt.applyDelete(&p)
 		}
 	}
-	return cfg, cfg.err
+	return p, p.err
 }
 
-// resolveFindConfig applies the find options. Deferred option errors surface
+// resolveFindParams applies the find options. Deferred option errors surface
 // here.
-func resolveFindConfig(opts []FindOption) (recordConfig, error) {
-	var cfg recordConfig
+func resolveFindParams(opts []FindOption) (params, error) {
+	var p params
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyFind(&cfg)
+			opt.applyFind(&p)
 		}
 	}
-	return cfg, cfg.err
+	return p, p.err
 }
 
-// resolveGetConfig applies the get options. Deferred option errors surface here.
-func resolveGetConfig(opts []GetOption) (recordConfig, error) {
-	var cfg recordConfig
+// resolveGetParams applies the get options. Deferred option errors surface here.
+func resolveGetParams(opts []GetOption) (params, error) {
+	var p params
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyGet(&cfg)
+			opt.applyGet(&p)
 		}
 	}
-	return cfg, cfg.err
+	return p, p.err
 }
 
-// resolveGetRangeConfig applies the get-range options. Deferred option errors
+// resolveGetRangeParams applies the get-range options. Deferred option errors
 // surface here.
-func resolveGetRangeConfig(opts []GetRangeOption) (recordConfig, error) {
-	var cfg recordConfig
+func resolveGetRangeParams(opts []GetRangeOption) (params, error) {
+	var p params
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyGetRange(&cfg)
+			opt.applyGetRange(&p)
 		}
 	}
-	return cfg, cfg.err
+	return p, p.err
 }
 
 // resolveConditional fills in a record-sourced mod ID for a conditional write
 // (IfUnchanged). rec is nil for the *ByID forms, which cannot honor it; byIDForm
 // names that form for the error hint. It also surfaces any deferred option error.
-func (cfg *recordConfig) resolveConditional(rec *Record, byIDForm string) error {
-	if cfg.err != nil {
-		return cfg.err
+func (p *params) resolveConditional(rec *Record, byIDForm string) error {
+	if p.err != nil {
+		return p.err
 	}
-	if cfg.conditional && cfg.modID == "" {
+	if p.conditional && p.modID == "" {
 		switch {
 		case rec == nil:
 			return fmt.Errorf("filemaker: IfUnchanged requires a record; use WithModID with %s", byIDForm)
 		case rec.modID == "":
 			return errors.New("filemaker: IfUnchanged requires a record with a ModID")
 		}
-		cfg.modID = rec.modID
+		p.modID = rec.modID
 	}
 	return nil
 }
 
-// resolveUpdateConfig applies the options and resolves the mod ID. A conditional
+// resolveUpdateParams applies the options and resolves the mod ID. A conditional
 // update with no explicit version sources it from rec (nil for the id-addressed
 // path, which cannot honor IfUnchanged). Deferred option errors surface here.
-func resolveUpdateConfig(opts []UpdateOption, rec *Record) (recordConfig, error) {
-	var cfg recordConfig
+func resolveUpdateParams(opts []UpdateOption, rec *Record) (params, error) {
+	var p params
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyUpdate(&cfg)
+			opt.applyUpdate(&p)
 		}
 	}
-	if err := cfg.resolveConditional(rec, "UpdateByID"); err != nil {
-		return cfg, err
+	if err := p.resolveConditional(rec, "UpdateByID"); err != nil {
+		return p, err
 	}
-	return cfg, nil
+	return p, nil
 }
 
-// resolveUploadConfig applies the upload options and resolves the mod ID, the
-// same way resolveUpdateConfig does for writes (IfUnchanged sources it from rec).
-func resolveUploadConfig(opts []UploadOption, rec *Record) (recordConfig, error) {
-	var cfg recordConfig
+// resolveUploadParams applies the upload options and resolves the mod ID, the
+// same way resolveUpdateParams does for writes (IfUnchanged sources it from rec).
+func resolveUploadParams(opts []UploadOption, rec *Record) (params, error) {
+	var p params
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyUpload(&cfg)
+			opt.applyUpload(&p)
 		}
 	}
-	if err := cfg.resolveConditional(rec, "UploadToContainerByID"); err != nil {
-		return cfg, err
+	if err := p.resolveConditional(rec, "UploadToContainerByID"); err != nil {
+		return p, err
 	}
-	return cfg, nil
+	return p, nil
 }
