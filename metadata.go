@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -224,6 +225,10 @@ func WithValueListRecordID(recordID string) LayoutMetadataOption {
 // first use (and triggers reauth like any other database operation) and counts
 // as session activity, updating LastActivity.
 func (c *Client) LayoutMetadata(ctx context.Context, layout string, opts ...LayoutMetadataOption) (LayoutMetadata, error) {
+	if layout == "" {
+		return LayoutMetadata{}, errors.New("filemaker: no layout specified")
+	}
+
 	var cfg layoutMetadataConfig
 	for _, opt := range opts {
 		if opt != nil {

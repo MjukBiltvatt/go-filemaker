@@ -436,6 +436,13 @@ func TestLayoutMetadataWithValueListRecordID(t *testing.T) {
 	}
 }
 
+func TestLayoutMetadataValidation(t *testing.T) {
+	c, _ := New("https://example.com", "db", "user", "pass")
+	if _, err := c.LayoutMetadata(context.Background(), ""); err == nil {
+		t.Error("expected error for empty layout")
+	}
+}
+
 func TestLayoutMetadataAPIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, `{"response":{},"messages":[{"code":"105","message":"Layout is missing"}]}`)
