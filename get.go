@@ -44,7 +44,7 @@ func (c *Client) GetByID(ctx context.Context, layout, id string, opts ...GetOpti
 	}
 
 	u := c.recordURL(layout, id)
-	if q := p.getQuery(); len(q) > 0 {
+	if q := p.singleRecordQuery(); len(q) > 0 {
 		u += "?" + q.Encode()
 	}
 
@@ -68,11 +68,12 @@ func (c *Client) GetByID(ctx context.Context, layout, id string, opts ...GetOpti
 	return GetResponse{Record: record, Scripts: rb.scriptOutcomes()}, nil
 }
 
-// getQuery encodes the read-shaping options as URL query parameters for the GET
-// single-record request. Portal names are JSON-encoded (the wire format the host
-// expects for that query key); per-portal paging uses _offset.<name>/_limit.<name>
-// (with a leading underscore, unlike the Find body keys which omit it).
-func (p params) getQuery() url.Values {
+// singleRecordQuery encodes the read-shaping options as URL query parameters for
+// the GET single-record request. Portal names are JSON-encoded (the wire format
+// the host expects for that query key); per-portal paging uses
+// _offset.<name>/_limit.<name> (with a leading underscore, unlike the Find body
+// keys which omit it).
+func (p params) singleRecordQuery() url.Values {
 	v := url.Values{}
 	if len(p.portals) > 0 {
 		b, _ := json.Marshal(p.portals)
@@ -125,7 +126,7 @@ func (c *Client) GetRange(ctx context.Context, layout string, opts ...GetRangeOp
 	}
 
 	u := c.recordsURL(layout)
-	if q := p.getRangeQuery(); len(q) > 0 {
+	if q := p.recordRangeQuery(); len(q) > 0 {
 		u += "?" + q.Encode()
 	}
 
@@ -150,12 +151,12 @@ func (c *Client) GetRange(ctx context.Context, layout string, opts ...GetRangeOp
 	return GetRangeResponse{Records: records, DataInfo: rb.Response.DataInfo, Scripts: rb.scriptOutcomes()}, nil
 }
 
-// getRangeQuery encodes the options as URL query parameters for the GET records
-// endpoint. Top-level pagination and sort use underscore-prefixed keys
+// recordRangeQuery encodes the options as URL query parameters for the GET
+// records endpoint. Top-level pagination and sort use underscore-prefixed keys
 // (_offset, _limit, _sort); portal filtering and paging share the same keys as
-// the get-single endpoint (portal, _offset.<name>, _limit.<name>). Sort is
+// the single-record endpoint (portal, _offset.<name>, _limit.<name>). Sort is
 // JSON-encoded as an array, matching the wire format the host expects.
-func (p params) getRangeQuery() url.Values {
+func (p params) recordRangeQuery() url.Values {
 	v := url.Values{}
 	if p.offset > 0 {
 		v.Set("_offset", strconv.Itoa(p.offset))

@@ -181,7 +181,7 @@ func TestGetWithScript(t *testing.T) {
 	}
 }
 
-func TestGetQuery(t *testing.T) {
+func TestSingleRecordQuery(t *testing.T) {
 	tests := []struct {
 		name string
 		p    params
@@ -223,7 +223,7 @@ func TestGetQuery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.p.getQuery()
+			got := tt.p.singleRecordQuery()
 			for key, wantVal := range tt.want {
 				if gotVal := got.Get(key); gotVal != wantVal {
 					t.Errorf("key %q = %q, want %q", key, gotVal, wantVal)
@@ -431,7 +431,7 @@ func TestGetRangeWithScript(t *testing.T) {
 	}
 }
 
-func TestGetRangeQuery(t *testing.T) {
+func TestRecordRangeQuery(t *testing.T) {
 	tests := []struct {
 		name string
 		p    params
@@ -485,7 +485,7 @@ func TestGetRangeQuery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.p.getRangeQuery()
+			got := tt.p.recordRangeQuery()
 			for key, wantVal := range tt.want {
 				if gotVal := got.Get(key); gotVal != wantVal {
 					t.Errorf("key %q = %q, want %q", key, gotVal, wantVal)
