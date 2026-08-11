@@ -118,72 +118,20 @@ func (p params) query() url.Values {
 	return v
 }
 
-// resolveCreateParams applies the create options. Deferred option errors surface
-// here.
-func resolveCreateParams(opts []CreateOption) (params, error) {
+// resolveOptions applies opts to a fresh params, skipping nil options, and
+// surfaces any deferred option validation error.
+//
+// apply selects which of an option's apply methods runs, and so which endpoint's
+// option set is being resolved. Callers pass the endpoint interface's method
+// expression — resolveOptions(opts, CreateOption.applyCreate) — whose type is
+// func(CreateOption, *params), matching apply. Every endpoint resolves the same
+// way, so this is the one place the loop lives; the two writes that also need a
+// mod ID wrap it below.
+func resolveOptions[O any](opts []O, apply func(O, *params)) (params, error) {
 	var p params
 	for _, opt := range opts {
-		if opt != nil {
-			opt.applyCreate(&p)
-		}
-	}
-	return p, p.err
-}
-
-// resolveDuplicateParams applies the duplicate options. Deferred option errors
-// surface here.
-func resolveDuplicateParams(opts []DuplicateOption) (params, error) {
-	var p params
-	for _, opt := range opts {
-		if opt != nil {
-			opt.applyDuplicate(&p)
-		}
-	}
-	return p, p.err
-}
-
-// resolveDeleteParams applies the delete options. Deferred option errors surface
-// here.
-func resolveDeleteParams(opts []DeleteOption) (params, error) {
-	var p params
-	for _, opt := range opts {
-		if opt != nil {
-			opt.applyDelete(&p)
-		}
-	}
-	return p, p.err
-}
-
-// resolveFindParams applies the find options. Deferred option errors surface
-// here.
-func resolveFindParams(opts []FindOption) (params, error) {
-	var p params
-	for _, opt := range opts {
-		if opt != nil {
-			opt.applyFind(&p)
-		}
-	}
-	return p, p.err
-}
-
-// resolveGetParams applies the get options. Deferred option errors surface here.
-func resolveGetParams(opts []GetOption) (params, error) {
-	var p params
-	for _, opt := range opts {
-		if opt != nil {
-			opt.applyGet(&p)
-		}
-	}
-	return p, p.err
-}
-
-// resolveGetRangeParams applies the get-range options. Deferred option errors
-// surface here.
-func resolveGetRangeParams(opts []GetRangeOption) (params, error) {
-	var p params
-	for _, opt := range opts {
-		if opt != nil {
-			opt.applyGetRange(&p)
+		if any(opt) != nil {
+			apply(opt, &p)
 		}
 	}
 	return p, p.err
@@ -191,11 +139,9 @@ func resolveGetRangeParams(opts []GetRangeOption) (params, error) {
 
 // resolveConditional fills in a record-sourced mod ID for a conditional write
 // (IfUnchanged). rec is nil for the *ByID forms, which cannot honor it; byIDForm
-// names that form for the error hint. It also surfaces any deferred option error.
+// names that form for the error hint. Callers resolve the options first, so a
+// deferred option error has already surfaced by the time this runs.
 func (p *params) resolveConditional(rec *Record, byIDForm string) error {
-	if p.err != nil {
-		return p.err
-	}
 	if p.conditional && p.modID == "" {
 		switch {
 		case rec == nil:
@@ -212,11 +158,9 @@ func (p *params) resolveConditional(rec *Record, byIDForm string) error {
 // update with no explicit version sources it from rec (nil for the id-addressed
 // path, which cannot honor IfUnchanged). Deferred option errors surface here.
 func resolveUpdateParams(opts []UpdateOption, rec *Record) (params, error) {
-	var p params
-	for _, opt := range opts {
-		if opt != nil {
-			opt.applyUpdate(&p)
-		}
+	p, err := resolveOptions(opts, UpdateOption.applyUpdate)
+	if err != nil {
+		return p, err
 	}
 	if err := p.resolveConditional(rec, "UpdateByID"); err != nil {
 		return p, err
@@ -227,11 +171,9 @@ func resolveUpdateParams(opts []UpdateOption, rec *Record) (params, error) {
 // resolveUploadParams applies the upload options and resolves the mod ID, the
 // same way resolveUpdateParams does for writes (IfUnchanged sources it from rec).
 func resolveUploadParams(opts []UploadOption, rec *Record) (params, error) {
-	var p params
-	for _, opt := range opts {
-		if opt != nil {
-			opt.applyUpload(&p)
-		}
+	p, err := resolveOptions(opts, UploadOption.applyUpload)
+	if err != nil {
+		return p, err
 	}
 	if err := p.resolveConditional(rec, "UploadToContainerByID"); err != nil {
 		return p, err

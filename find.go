@@ -116,7 +116,7 @@ func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest
 		return FindResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	p, err := resolveFindParams(opts)
+	p, err := resolveOptions(opts, FindOption.applyFind)
 	if err != nil {
 		return FindResponse{}, err
 	}

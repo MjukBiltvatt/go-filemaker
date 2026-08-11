@@ -38,7 +38,7 @@ func (c *Client) GetByID(ctx context.Context, layout, id string, opts ...GetOpti
 		return GetResponse{}, errors.New("filemaker: no record id specified")
 	}
 
-	p, err := resolveGetParams(opts)
+	p, err := resolveOptions(opts, GetOption.applyGet)
 	if err != nil {
 		return GetResponse{}, err
 	}
@@ -119,7 +119,7 @@ func (c *Client) GetRange(ctx context.Context, layout string, opts ...GetRangeOp
 		return GetRangeResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	p, err := resolveGetRangeParams(opts)
+	p, err := resolveOptions(opts, GetRangeOption.applyGetRange)
 	if err != nil {
 		return GetRangeResponse{}, err
 	}

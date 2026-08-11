@@ -49,7 +49,7 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 		return CreateResponse{}, errors.New("filemaker: no layout specified")
 	}
 
-	p, err := resolveCreateParams(opts)
+	p, err := resolveOptions(opts, CreateOption.applyCreate)
 	if err != nil {
 		return CreateResponse{}, err
 	}
@@ -150,7 +150,7 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...Dele
 		return DeleteResponse{}, errors.New("filemaker: no record id specified")
 	}
 
-	p, err := resolveDeleteParams(opts)
+	p, err := resolveOptions(opts, DeleteOption.applyDelete)
 	if err != nil {
 		return DeleteResponse{}, err
 	}
@@ -189,7 +189,7 @@ func (c *Client) DuplicateByID(ctx context.Context, layout, id string, opts ...D
 		return DuplicateResponse{}, errors.New("filemaker: no record id specified")
 	}
 
-	p, err := resolveDuplicateParams(opts)
+	p, err := resolveOptions(opts, DuplicateOption.applyDuplicate)
 	if err != nil {
 		return DuplicateResponse{}, err
 	}
