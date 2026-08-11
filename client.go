@@ -97,6 +97,10 @@ func WithTimeout(timeout time.Duration) Option {
 //
 // Combine with WithReauthOnIdle for full coverage: proactive refresh avoids most
 // invalid-token errors, and this reactive retry backstops any that still occur.
+//
+// Container downloads are the one exception: they read from a streaming endpoint
+// that reports no host error code, so there is no 952 to react to. See
+// Client.DownloadFromContainerByURL.
 func WithReauthOnInvalidToken() Option {
 	return func(c *config) {
 		c.reauthOnInvalidToken = true

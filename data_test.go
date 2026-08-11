@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -829,6 +830,75 @@ func TestDownloadFromContainer(t *testing.T) {
 	mu.Unlock()
 	if auth != "Bearer tok" {
 		t.Errorf("auth = %q, want Bearer tok", auth)
+	}
+}
+
+func TestDownloadFromContainerRefreshesIdleSession(t *testing.T) {
+	var sessionCalls, downloadCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sessions") {
+			sessionCalls.Add(1)
+			writeJSON(w, `{"response":{"token":"newtok"},"messages":[{"code":"0","message":"OK"}]}`)
+			return
+		}
+		downloadCalls.Add(1)
+		if got := r.Header.Get("Authorization"); got != "Bearer newtok" {
+			t.Errorf("download auth = %q, want Bearer newtok (token should be refreshed before send)", got)
+		}
+		w.Write([]byte("filecontents"))
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.idleTimeout = time.Minute
+	c.lastActivity = time.Now().Add(-2 * time.Minute) // idle past the threshold
+
+	data, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/abc")
+	if err != nil {
+		t.Fatalf("DownloadFromContainerByURL: %v", err)
+	}
+	if string(data) != "filecontents" {
+		t.Errorf("data = %q, want filecontents", data)
+	}
+	if got := sessionCalls.Load(); got != 1 {
+		t.Errorf("session (reauth) calls = %d, want 1 (proactive refresh)", got)
+	}
+	if got := downloadCalls.Load(); got != 1 {
+		t.Errorf("download calls = %d, want 1", got)
+	}
+}
+
+// A 401 from the streaming endpoint is ambiguous — expired token, aged-out
+// container URL, or no access to the field — so it must surface as itself rather
+// than be reported as an invalid token and retried on a fresh session.
+func TestDownloadFromContainerUnauthorizedIsNotReauthed(t *testing.T) {
+	var downloadCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sessions") {
+			t.Error("must not re-authenticate on a container 401")
+			writeJSON(w, okSession)
+			return
+		}
+		downloadCalls.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.reauthOnInvalidToken = true
+
+	_, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/abc")
+	if err == nil {
+		t.Fatal("expected an error for a 401 container response")
+	}
+	if errors.Is(err, ErrInvalidToken) {
+		t.Errorf("err = %v, want no ErrInvalidToken match (401 does not imply 952)", err)
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("err = %v, want the HTTP status reported as-is", err)
+	}
+	if got := downloadCalls.Load(); got != 1 {
+		t.Errorf("download calls = %d, want 1 (no retry)", got)
 	}
 }
 

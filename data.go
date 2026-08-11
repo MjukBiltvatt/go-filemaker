@@ -289,6 +289,15 @@ func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field st
 // its streaming URL. The URL must be on the session host (typically obtained
 // from a record via record.String(field)); the bearer token is never sent to a
 // foreign host.
+//
+// WithReauthOnIdle covers this operation like any other: an idle session is
+// refreshed before the download is attempted. WithReauthOnInvalidToken does not.
+// The streaming endpoint answers with a bare HTTP status instead of a Data API
+// body, so an expired token is indistinguishable from a container URL that has
+// aged out or an account without access to the field — all three surface as 401.
+// Rather than guess, the status is reported as-is; a 401 here may mean the
+// record must be re-read to obtain a fresh URL, which no retry inside this call
+// could do.
 func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL string) ([]byte, error) {
 	if containerURL == "" {
 		return nil, errors.New("filemaker: empty container url")
@@ -297,36 +306,42 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 		return nil, fmt.Errorf("filemaker: refusing to fetch container from foreign host: %s", containerURL)
 	}
 
-	if err := c.ensureAuthenticated(ctx); err != nil {
+	// Streaming responses are raw bytes, not a responseBody, so this cannot go
+	// through attempt — but withAuth is generic over the attempt closure, so the
+	// lazy and proactive halves of the auth handling are still shared.
+	var data []byte
+	err := c.withAuth(ctx, func() (string, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, containerURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("filemaker: failed to build request: %w", err)
+		}
+		c.mu.RLock()
+		token := c.token
+		c.mu.RUnlock()
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			return token, fmt.Errorf("filemaker: request failed: %w", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			return token, fmt.Errorf("filemaker: failed to fetch container data: %s", res.Status)
+		}
+
+		data, err = io.ReadAll(res.Body)
+		if err != nil {
+			return token, fmt.Errorf("filemaker: failed to read container data: %w", err)
+		}
+
+		c.mu.Lock()
+		c.lastActivity = time.Now()
+		c.mu.Unlock()
+		return token, nil
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, containerURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("filemaker: failed to build request: %w", err)
-	}
-	c.mu.RLock()
-	token := c.token
-	c.mu.RUnlock()
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("filemaker: request failed: %w", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("filemaker: failed to fetch container data: %s", res.Status)
-	}
-
-	data, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, fmt.Errorf("filemaker: failed to read container data: %w", err)
-	}
-
-	c.mu.Lock()
-	c.lastActivity = time.Now()
-	c.mu.Unlock()
 	return data, nil
 }
 
