@@ -280,7 +280,8 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 // DownloadFromContainer downloads the binary contents of a container field of
 // the record identified by rec. The field must hold a container streaming URL
 // (the value FileMaker returns for a container field); an empty or non-string
-// field is reported as an error.
+// field is reported as an error. As with DownloadFromContainerByURL, the
+// contents are buffered in memory.
 func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) ([]byte, error) {
 	u, err := rec.StringE(field)
 	if err != nil || u == "" {
@@ -302,6 +303,10 @@ func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field st
 // Rather than guess, the status is reported as-is; a 401 here may mean the
 // record must be re-read to obtain a fresh URL, which no retry inside this call
 // could do.
+//
+// The response body is read to completion before it is returned, so peak memory
+// scales with the size of the container's contents. There is no streaming form:
+// the method answers with the bytes themselves.
 func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL string) ([]byte, error) {
 	if containerURL == "" {
 		return nil, errors.New("filemaker: empty container url")
