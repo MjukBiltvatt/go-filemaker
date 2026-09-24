@@ -11,6 +11,10 @@ Two rules follow from that:
 
 Go has no enforced layout, and the standard library organizes both by type (`net/http`) and by operation (`encoding/json`) depending on the package's primary axis. This package's axis is the endpoint domain. When a new type has no obvious home, name its concept first; if the concept has no file and would not justify one, leave the type in the domain file that already owns its vocabulary rather than inventing a layer file.
 
+## Record identity in errors
+
+An endpoint that addresses a record by layout and ID returns every failure after its argument checks through `recordErr` in `errors.go`, so the error names the record. The helper holds the rule and its reasoning. A new record-addressed endpoint calls `recordErr`; change the rule there, in one place.
+
 ## Keeping the public docs in sync
 
 `README.md` and `doc.go` document the exported API at a **coarse grain**. When you add, remove, or rename an exported *operation* (a `*Client` method) or *client option* (`With…` passed to `New`), update the matching table in `README.md` — the **"What it does"** capability map or the **Client options** table — and reconcile `doc.go` if the change touches the overview narrative (lifecycle, reading/writing model, concurrency, errors).

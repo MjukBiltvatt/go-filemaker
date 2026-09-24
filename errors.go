@@ -26,7 +26,7 @@ var (
 	// Host-code sentinels. The library exposes a sentinel only for a host code it
 	// attaches control-flow meaning to — currently the three below, each of which
 	// the client itself interprets (Find swallows 401, the reauth path keys off
-	// 952, Update surfaces 306). FileMaker defines hundreds of other codes, but
+	// 952, the conditional writes surface 306). FileMaker defines hundreds of other codes, but
 	// the vast majority are developer-time faults (missing layout, bad calc,
 	// malformed request) that callers fix rather than branch on, so mirroring the
 	// host's full error table here would be churn without value. To branch on any
@@ -39,10 +39,13 @@ var (
 	// here, no APIError.Is change — so the bar for a new one is a concrete,
 	// recurring runtime branch, not completeness.
 
-	// ErrRecordModified is returned (wrapped) by Update when a WithModID check
-	// fails because the record changed since the mod ID was read (optimistic-lock
-	// conflict). It corresponds to host code 306 and is also matched by errors.Is
-	// against any *APIError carrying that code.
+	// ErrRecordModified is returned (wrapped) by Update and UploadToContainer,
+	// and their *ByID forms, when a WithModID or IfUnchanged check fails because
+	// the record changed since the mod ID was read (optimistic-lock conflict). It
+	// corresponds to host code 306 and is also matched by errors.Is against any
+	// *APIError carrying that code. Like every error from those endpoints, it
+	// names the record and layout and wraps the host's *APIError, so errors.As
+	// still reaches it.
 	ErrRecordModified error = &codeError{306, "filemaker: record modified since mod ID was read"}
 
 	// ErrNoRecords matches an *APIError whose host code is 401 ("no records match
@@ -58,6 +61,25 @@ var (
 	// Test for it with errors.Is.
 	ErrInvalidToken error = &codeError{952, "filemaker: invalid or expired session token"}
 )
+
+// recordErr names the record an operation addressed, and it is the one place an
+// error gains that identity: every endpoint addressing a record by layout and
+// ID passes each failure after its argument checks through it — host, transport,
+// and decode errors alike — the way os.Open names the path on every failure. An
+// error is usually logged or reported far from the call that produced it, where
+// the caller's layout and ID are no longer in scope, so the error carries them.
+// Argument-check errors ("no record id specified") skip it: there is no record
+// to name yet.
+//
+// The error is wrapped rather than replaced, so the host's message, errors.Is
+// against the sentinels, and errors.As to *APIError or *HTTPError all survive.
+// It returns nil for a nil err.
+func recordErr(err error, layout, id string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("filemaker: record %q in layout %q: %w", id, layout, err)
+}
 
 // Message is a single status message returned by the FileMaker host.
 type Message struct {

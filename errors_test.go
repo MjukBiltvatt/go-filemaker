@@ -1,7 +1,10 @@
 package filemaker
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -137,5 +140,88 @@ func TestAPIErrorIsIgnoresSecondaryMessage(t *testing.T) {
 	err = error(&APIError{Messages: []Message{{Code: 401, Text: "x"}, {Code: 500, Text: "y"}}})
 	if !errors.Is(err, ErrNoRecords) {
 		t.Errorf("errors.Is should match the primary message regardless of secondaries")
+	}
+}
+
+// TestRecordErrIdentity pins the recordErr rule across every endpoint that
+// addresses a record: each failure after the argument checks names the record
+// and layout, and still unwraps to what the host or transport reported.
+func TestRecordErrIdentity(t *testing.T) {
+	const identity = `record "9" in layout "People"`
+	ctx := context.Background()
+	endpoints := []struct {
+		name string
+		call func(*Client) error
+	}{
+		{"GetByID", func(c *Client) error {
+			_, err := c.GetByID(ctx, "People", "9")
+			return err
+		}},
+		{"UpdateByID", func(c *Client) error {
+			_, err := c.UpdateByID(ctx, "People", "9", FieldData{"Name": "Jane"}, WithModID("3"))
+			return err
+		}},
+		{"DeleteByID", func(c *Client) error {
+			_, err := c.DeleteByID(ctx, "People", "9")
+			return err
+		}},
+		{"DuplicateByID", func(c *Client) error {
+			_, err := c.DuplicateByID(ctx, "People", "9")
+			return err
+		}},
+		{"UploadToContainerByID", func(c *Client) error {
+			return c.UploadToContainerByID(ctx, "People", "9", "Photo", "pic.png", strings.NewReader("x"), WithModID("3"))
+		}},
+	}
+	failures := []struct {
+		name  string
+		body  string
+		check func(*testing.T, error)
+	}{
+		{"conflict", `{"response":{},"messages":[{"code":"306","message":"Record modification ID does not match"}]}`, func(t *testing.T, err error) {
+			if !errors.Is(err, ErrRecordModified) {
+				t.Errorf("got %v, want ErrRecordModified", err)
+			}
+		}},
+		{"host", `{"response":{},"messages":[{"code":"101","message":"Record is missing"}]}`, func(t *testing.T, err error) {
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Code() != 101 {
+				t.Errorf("got %v, want it to wrap the host's *APIError (101)", err)
+			}
+			if !strings.Contains(err.Error(), "Record is missing") {
+				t.Errorf("err = %q, want the host message", err)
+			}
+		}},
+		{"non-API", `<html>Bad Gateway</html>`, func(t *testing.T, err error) {
+			var httpErr *HTTPError
+			if !errors.As(err, &httpErr) {
+				t.Errorf("got %v, want it to wrap *HTTPError", err)
+			}
+		}},
+	}
+	for _, e := range endpoints {
+		for _, f := range failures {
+			t.Run(e.name+"/"+f.name, func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					writeJSON(w, f.body)
+				}))
+				defer srv.Close()
+
+				err := e.call(testClient(srv))
+				if err == nil {
+					t.Fatal("got nil error")
+				}
+				if !strings.Contains(err.Error(), identity) {
+					t.Errorf("err = %q, want it to name %s", err, identity)
+				}
+				f.check(t, err)
+			})
+		}
+	}
+}
+
+func TestRecordErrNil(t *testing.T) {
+	if err := recordErr(nil, "People", "9"); err != nil {
+		t.Errorf("recordErr(nil) = %v, want nil", err)
 	}
 }

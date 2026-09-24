@@ -50,11 +50,11 @@ func (c *Client) GetByID(ctx context.Context, layout, id string, opts ...GetOpti
 
 	var rb responseBody
 	if err := c.do(ctx, http.MethodGet, u, nil, &rb); err != nil {
-		return GetResponse{}, err
+		return GetResponse{}, recordErr(err, layout, id)
 	}
 
 	if len(rb.Response.Data) == 0 {
-		return GetResponse{}, errors.New("filemaker: get returned no record data")
+		return GetResponse{}, recordErr(errors.New("filemaker: get returned no record data"), layout, id)
 	}
 	w := rb.Response.Data[0]
 	record := Record{

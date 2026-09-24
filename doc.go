@@ -84,7 +84,10 @@
 // inspect it with errors.As and branch on [APIError.Code]. A few host codes that
 // carry control-flow meaning have errors.Is-friendly sentinels: [ErrRecordModified]
 // (306), [ErrNoRecords] (401), and [ErrInvalidToken] (952). Find treats "no
-// records" (401) as an empty result with a nil error, not a failure.
+// records" (401) as an empty result with a nil error, not a failure. An
+// operation that addresses a single record by layout and ID names both in any
+// error from the request itself, wrapping the underlying error so errors.Is and
+// errors.As still reach it.
 //
 // A request that never reached those semantics — a proxy or gateway answered, the
 // body would not decode, or the container streaming endpoint refused it — returns

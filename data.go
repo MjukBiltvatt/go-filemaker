@@ -120,10 +120,7 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 
 	var rb responseBody
 	if err := c.do(ctx, http.MethodPatch, c.recordURL(layout, id), body, &rb); err != nil {
-		if errors.Is(err, ErrRecordModified) {
-			return UpdateResponse{}, fmt.Errorf("filemaker: record %q in layout %q: %w", id, layout, err)
-		}
-		return UpdateResponse{}, err
+		return UpdateResponse{}, recordErr(err, layout, id)
 	}
 	return UpdateResponse{ModID: rb.Response.ModID, Scripts: rb.scriptOutcomes()}, nil
 }
@@ -162,7 +159,7 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...Dele
 
 	var rb responseBody
 	if err := c.do(ctx, http.MethodDelete, u, nil, &rb); err != nil {
-		return DeleteResponse{}, err
+		return DeleteResponse{}, recordErr(err, layout, id)
 	}
 	return DeleteResponse{Scripts: rb.scriptOutcomes()}, nil
 }
@@ -201,7 +198,7 @@ func (c *Client) DuplicateByID(ctx context.Context, layout, id string, opts ...D
 
 	var rb responseBody
 	if err := c.do(ctx, http.MethodPost, c.recordURL(layout, id), body, &rb); err != nil {
-		return DuplicateResponse{}, err
+		return DuplicateResponse{}, recordErr(err, layout, id)
 	}
 	return DuplicateResponse{RecordID: rb.Response.RecordID, ModID: rb.Response.ModID, Scripts: rb.scriptOutcomes()}, nil
 }
@@ -272,9 +269,10 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 	contentType := w.FormDataContentType()
 	body := buf.Bytes()
 	var rb responseBody
-	return c.withAuth(ctx, func() (string, error) {
+	err = c.withAuth(ctx, func() (string, error) {
 		return c.attempt(ctx, http.MethodPost, u, contentType, body, &rb)
 	})
+	return recordErr(err, layout, id)
 }
 
 // DownloadFromContainer downloads the binary contents of a container field of

@@ -163,7 +163,7 @@ c.Create(ctx, "People", filemaker.FieldData{
 
 Dates render in US format by default; build the client with `WithDateFormat(filemaker.DateFormatISO)` to write and interpret ISO 8601 instead.
 
-**Optimistic concurrency** is opt-in on `Update`: `IfUnchanged()` locks against the record's own mod ID, `WithModID(id)` against a specific one. A stale write returns `ErrRecordModified`.
+**Optimistic concurrency** is opt-in on `Update` and `UploadToContainer`: `IfUnchanged()` locks against the record's own mod ID, `WithModID(id)` against a specific one. A stale write returns `ErrRecordModified`.
 
 ## Client options
 
@@ -194,6 +194,8 @@ if err != nil {
 ```
 
 A few codes that carry control-flow meaning have `errors.Is`-friendly sentinels — `ErrRecordModified` (306), `ErrNoRecords` (401), `ErrInvalidToken` (952). `Find` treats "no records" as an empty result with a nil error, not a failure.
+
+An operation that addresses a single record (`Get`, `Update`, `Delete`, `Duplicate`, `UploadToContainer`, and their `ByID` forms) names that record and its layout in any error from the request itself. The underlying error is wrapped, so `errors.Is` and `errors.As` see through it.
 
 ## Concurrency
 
