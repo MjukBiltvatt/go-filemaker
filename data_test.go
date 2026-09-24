@@ -951,12 +951,31 @@ func TestDownloadFromContainerNotAURL(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", fieldData: map[string]any{"Age": float64(42)}}
-	if _, err := c.DownloadFromContainer(context.Background(), rec, "Age"); err == nil {
-		t.Error("expected error for a non-string field")
+	rec := Record{layout: "People", fieldData: map[string]any{"Age": float64(42), "Photo": ""}}
+
+	_, err := c.DownloadFromContainer(context.Background(), rec, "Age")
+	if !errors.Is(err, ErrNotString) || errors.Is(err, ErrEmptyContainer) {
+		t.Errorf("non-string field: err = %v, want ErrNotString", err)
 	}
-	if _, err := c.DownloadFromContainer(context.Background(), rec, "Missing"); err == nil {
-		t.Error("expected error for a missing field")
+
+	_, err = c.DownloadFromContainer(context.Background(), rec, "Photo")
+	if !errors.Is(err, ErrEmptyContainer) || errors.Is(err, ErrNotString) {
+		t.Errorf("empty container: err = %v, want ErrEmptyContainer", err)
+	}
+
+	_, err = c.DownloadFromContainer(context.Background(), rec, "Missing")
+	if err == nil || errors.Is(err, ErrNotString) || errors.Is(err, ErrEmptyContainer) {
+		t.Errorf("missing field: err = %v, want an error distinct from ErrNotString and ErrEmptyContainer", err)
+	}
+
+	for _, f := range []string{"Age", "Photo", "Missing"} {
+		_, err := c.DownloadFromContainer(context.Background(), rec, f)
+		if !strings.Contains(err.Error(), fmt.Sprintf("%q", f)) {
+			t.Errorf("err = %q, want it to name field %q", err, f)
+		}
+		if n := strings.Count(err.Error(), "filemaker:"); n != 1 {
+			t.Errorf("err = %q names the package %d times, want once", err, n)
+		}
 	}
 }
 

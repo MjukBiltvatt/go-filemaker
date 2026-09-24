@@ -277,13 +277,21 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 
 // DownloadFromContainer downloads the binary contents of a container field of
 // the record identified by rec. The field must hold a container streaming URL
-// (the value FileMaker returns for a container field); an empty or non-string
-// field is reported as an error. As with DownloadFromContainerByURL, the
-// contents are buffered in memory.
+// (the value FileMaker returns for a container field). A container with nothing
+// in it is returned as ErrEmptyContainer, so a caller walking many records can
+// skip those without an attachment; a field absent from rec, or one holding a
+// non-string value (ErrNotString), is reported as an error too. As with
+// DownloadFromContainerByURL, the contents are buffered in memory.
 func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) ([]byte, error) {
+	if !rec.Has(field) {
+		return nil, fmt.Errorf("filemaker: record has no field %q", field)
+	}
 	u, err := rec.StringE(field)
-	if err != nil || u == "" {
-		return nil, fmt.Errorf("filemaker: field %q is not a container URL", field)
+	if err != nil {
+		return nil, fmt.Errorf("%w (field %q)", err, field)
+	}
+	if u == "" {
+		return nil, fmt.Errorf("%w (field %q)", ErrEmptyContainer, field)
 	}
 	return c.DownloadFromContainerByURL(ctx, u)
 }

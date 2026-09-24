@@ -23,6 +23,12 @@ var (
 	ErrNotString     = errors.New("filemaker: value is not a string")
 	ErrUnknownFormat = errors.New("filemaker: unknown format")
 
+	// ErrEmptyContainer is returned (wrapped) by DownloadFromContainer when the
+	// container field holds nothing. An empty container is a normal state, not a
+	// fault, so it has its own sentinel: test for it with errors.Is to skip
+	// records that have no attachment.
+	ErrEmptyContainer = errors.New("filemaker: container is empty")
+
 	// Host-code sentinels. The library exposes a sentinel only for a host code it
 	// attaches control-flow meaning to — currently the three below, each of which
 	// the client itself interprets (Find swallows 401, the reauth path keys off
