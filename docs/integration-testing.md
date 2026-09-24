@@ -220,6 +220,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationRequiredField` | Server-side Not-Empty validation (code 509) |
 | `TestIntegrationFindNoMatch` | Empty result is a nil error, not `ErrNoRecords` |
 | `TestIntegrationContainer` | Container upload + download round-trip |
+| `TestIntegrationContainerDownloadError` | A container URL with a damaged object token fails as an `*HTTPError` with status 401 |
 | `TestIntegrationPortal` | Related-record add / edit / delete via portals |
 | `TestIntegrationPortalPaging` | Portal row cap: default find returns at most the portal's configured row count; `WithPortalLimit` overrides it (needs the portal configured to 3 rows) |
 | `TestIntegrationUpdateWithModID` | Optimistic lock by mod ID; conflict → 306 |

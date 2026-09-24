@@ -103,10 +103,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -803,6 +807,64 @@ func TestIntegrationContainer(t *testing.T) {
 	}
 	if !bytes.Equal(data, payload) {
 		t.Errorf("downloaded %d bytes, want %d (content mismatch)", len(data), len(payload))
+	}
+}
+
+// TestIntegrationContainerDownloadError confirms a streaming URL the host
+// cannot serve comes back as an *HTTPError carrying 401, the status the
+// DownloadFromContainerByURL doc tells callers to check for. The URL is read
+// from a real record and its object token overwritten, so it stays on the
+// session host and passes the origin check.
+func TestIntegrationContainerDownloadError(t *testing.T) {
+	requireServer(t)
+	ctx := context.Background()
+
+	const marker = "go-filemaker-it-container-error"
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldText:         marker,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	if err := itClient.UploadToContainerByID(ctx, itLayout, created.RecordID, fieldContainer, "hello.txt", bytes.NewReader([]byte("hello"))); err != nil {
+		t.Fatalf("UploadToContainerByID: %v", err)
+	}
+
+	raw, err := findParent(t, ctx, marker).StringE(fieldContainer)
+	if err != nil || raw == "" {
+		t.Fatalf("container field = %q, %v; want a streaming URL", raw, err)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse container URL %q: %v", raw, err)
+	}
+
+	// The last path segment is the object token plus the file's extension.
+	// Overwriting the token with zeros of the same length keeps the URL well
+	// formed while pointing it at nothing.
+	dir, file := path.Split(u.Path)
+	ext := path.Ext(file)
+	token := strings.TrimSuffix(file, ext)
+	if token == "" {
+		t.Fatalf("container URL %q has no object token in its path", raw)
+	}
+	u.Path = dir + strings.Repeat("0", len(token)) + ext
+
+	data, err := itClient.DownloadFromContainerByURL(ctx, u.String())
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("DownloadFromContainerByURL(damaged URL) = %d bytes, err %v (%T); want *HTTPError", len(data), err, err)
+	}
+	if httpErr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("StatusCode = %d (%v); want 401", httpErr.StatusCode, httpErr)
 	}
 }
 
