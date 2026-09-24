@@ -78,8 +78,25 @@ func recordErr(err error, layout, id string) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("filemaker: record %q in layout %q: %w", id, layout, err)
+	return &recordError{layout: layout, id: id, err: err}
 }
+
+// recordError is the error recordErr returns. Its message keeps the package
+// prefix at the front and drops the wrapped error's own copy of it, so it reads
+// `filemaker: record "9" in layout "People": Record is missing (101)` rather
+// than naming the package twice. It is unexported because the identity is for
+// people reading the message; code branches on what it wraps.
+type recordError struct {
+	layout, id string
+	err        error
+}
+
+func (e *recordError) Error() string {
+	return fmt.Sprintf("filemaker: record %q in layout %q: %s",
+		e.id, e.layout, strings.TrimPrefix(e.err.Error(), "filemaker: "))
+}
+
+func (e *recordError) Unwrap() error { return e.err }
 
 // Message is a single status message returned by the FileMaker host.
 type Message struct {

@@ -145,7 +145,8 @@ func TestAPIErrorIsIgnoresSecondaryMessage(t *testing.T) {
 
 // TestRecordErrIdentity pins the recordErr rule across every endpoint that
 // addresses a record: each failure after the argument checks names the record
-// and layout, and still unwraps to what the host or transport reported.
+// and layout, names the package once, and still unwraps to what the host or
+// transport reported.
 func TestRecordErrIdentity(t *testing.T) {
 	const identity = `record "9" in layout "People"`
 	ctx := context.Background()
@@ -188,8 +189,11 @@ func TestRecordErrIdentity(t *testing.T) {
 			if !errors.As(err, &apiErr) || apiErr.Code() != 101 {
 				t.Errorf("got %v, want it to wrap the host's *APIError (101)", err)
 			}
-			if !strings.Contains(err.Error(), "Record is missing") {
-				t.Errorf("err = %q, want the host message", err)
+			// Exact, so a change to the inner prefix that TrimPrefix no longer
+			// matches shows up here as a doubled "filemaker:".
+			const want = `filemaker: record "9" in layout "People": Record is missing (101)`
+			if err.Error() != want {
+				t.Errorf("err = %q, want %q", err, want)
 			}
 		}},
 		{"non-API", `<html>Bad Gateway</html>`, func(t *testing.T, err error) {
@@ -213,6 +217,9 @@ func TestRecordErrIdentity(t *testing.T) {
 				}
 				if !strings.Contains(err.Error(), identity) {
 					t.Errorf("err = %q, want it to name %s", err, identity)
+				}
+				if n := strings.Count(err.Error(), "filemaker:"); n != 1 {
+					t.Errorf("err = %q names the package %d times, want once", err, n)
 				}
 				f.check(t, err)
 			})
