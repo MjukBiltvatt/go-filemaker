@@ -344,6 +344,47 @@ func TestDoReauthEnabled(t *testing.T) {
 	}
 }
 
+// TestDoReauthRetryForeignResponse covers a retry answered by something other
+// than the host. The retry decodes into the same responseBody as the 952
+// attempt, so the message-less body must not inherit that attempt's messages
+// and surface as ErrInvalidToken.
+func TestDoReauthRetryForeignResponse(t *testing.T) {
+	var opCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sessions") {
+			writeJSON(w, `{"response":{"token":"newtok"},"messages":[{"code":"0","message":"OK"}]}`)
+			return
+		}
+		if opCalls.Add(1) == 1 {
+			writeJSON(w, `{"response":{},"messages":[{"code":"952","message":"Invalid FileMaker Data API token"}]}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprint(w, `{"error":"upstream connect error"}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.reauthOnInvalidToken = true
+	var rb responseBody
+	err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb)
+
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("err = %v, want *HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusBadGateway {
+		t.Errorf("StatusCode = %d, want 502", httpErr.StatusCode)
+	}
+	if errors.Is(err, ErrInvalidToken) {
+		t.Errorf("err = %v, want no ErrInvalidToken match (stale 952 from the first attempt)", err)
+	}
+	if n := opCalls.Load(); n != 2 {
+		t.Errorf("op calls = %d, want 2", n)
+	}
+}
+
 func TestDoReauthDisabled(t *testing.T) {
 	var opCalls, sessionCalls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

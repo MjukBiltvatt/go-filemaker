@@ -417,6 +417,11 @@ func (c *Client) send(req *http.Request, out *responseBody) error {
 		return fmt.Errorf("filemaker: failed to read response body: %w", err)
 	}
 
+	// Start from a zero value: json.Unmarshal leaves fields absent from the body
+	// untouched, and a reauth retry decodes into the same out as the attempt it
+	// replaces. Without the reset, a retry answered by something other than the
+	// host would keep that attempt's 952 and be misreported as ErrInvalidToken.
+	*out = responseBody{}
 	if err := json.Unmarshal(bodyBytes, out); err != nil {
 		return &HTTPError{StatusCode: res.StatusCode, Err: err, snippet: bodySnippet(bodyBytes)}
 	}
