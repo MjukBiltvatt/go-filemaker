@@ -10,8 +10,10 @@
 #                      Toggle request/response logging inline with FM_DEBUG:
 #                        make integration FM_DEBUG=1 RUN=TestIntegrationCRUD
 # `make test-all`    - unit tests, then the full integration suite.
+# `make lint`        - gofmt check and golangci-lint, as in CI. Needs a
+#                      golangci-lint built with a Go at least as new as yours.
 
-.PHONY: test integration test-all vet
+.PHONY: test integration test-all vet lint
 
 # -run regexp for the integration suite; defaults to every TestIntegration*.
 RUN ?= Integration
@@ -21,6 +23,14 @@ test:
 
 vet:
 	go vet ./...
+
+# Same checks as the CI lint job. golangci-lint reads .golangci.yml, which also
+# covers the integration-tagged files.
+lint:
+	@out=$$(gofmt -l .); if [ -n "$$out" ]; then \
+		echo "These files are not gofmt-formatted:"; echo "$$out"; exit 1; \
+	fi
+	golangci-lint run ./...
 
 # Unit tests first (fast, no server), then integration. Running them in this
 # order surfaces hermetic failures before the suite touches the host, and a unit

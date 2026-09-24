@@ -1,0 +1,21 @@
+version: "2"
+
+run:
+  # Lint integration_test.go as well; it needs no server to type-check.
+  build-tags:
+    - integration
+
+linters:
+  settings:
+    errcheck:
+      # Calls whose errors are deliberately ignored. errcheck stays on
+      # everywhere else, test files included.
+      exclude-functions:
+        # Closing a response body: there is nothing useful to do on failure.
+        - (io.Closer).Close
+        # Debug output (debug.go) and httptest handler bodies: a failed write
+        # must not fail the request, and in tests it surfaces as a failed
+        # assertion anyway.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - (net/http.ResponseWriter).Write
