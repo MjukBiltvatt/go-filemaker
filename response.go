@@ -62,7 +62,9 @@ func (rb *responseBody) scriptOutcomes() ScriptOutcomes {
 
 // check inspects the host messages and returns an *APIError unless the primary
 // message reports success (code 0). It guards against an empty messages array
-// rather than indexing blindly.
+// rather than indexing blindly. send reports a message-less body as an
+// *HTTPError before calling check, so the guard only keeps check safe to call on
+// its own.
 func (rb *responseBody) check() error {
 	if len(rb.Messages) == 0 {
 		return errors.New("filemaker: response contained no messages")

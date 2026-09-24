@@ -335,7 +335,12 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 		}
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
-			return token, fmt.Errorf("filemaker: failed to fetch container data: %s", res.Status)
+			// Read a bounded prefix of the body for the error message: the streaming
+			// endpoint answers with a bare status, so whatever a gateway in front of
+			// it has to say is the only account of the failure. The limit keeps an
+			// error page from being pulled into memory whole.
+			preview, _ := io.ReadAll(io.LimitReader(res.Body, 4<<10))
+			return token, &HTTPError{StatusCode: res.StatusCode, snippet: bodySnippet(preview)}
 		}
 
 		data, err = io.ReadAll(res.Body)

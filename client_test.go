@@ -154,6 +154,116 @@ func TestDoMalformedBody(t *testing.T) {
 	}
 }
 
+// TestDoClassifiesFailures pins the boundary between the two error types: an
+// *APIError means the host answered with a Data API result, an *HTTPError means
+// the exchange never got that far. The host-error case uses a 500 with a valid
+// envelope because that is what FileMaker actually sends for an ordinary data
+// problem — a mod-ID conflict is HTTP 500 — so classifying on the status alone
+// would misread it.
+func TestDoClassifiesFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		check  func(t *testing.T, err error)
+	}{
+		{
+			name:   "gateway page is an HTTPError carrying the body",
+			status: http.StatusBadGateway,
+			body:   "<html><head><title>502</title></head>\n<body>Error 1016: Origin DNS error</body></html>",
+			check: func(t *testing.T, err error) {
+				var httpErr *HTTPError
+				if !errors.As(err, &httpErr) {
+					t.Fatalf("err = %v, want *HTTPError", err)
+				}
+				if httpErr.StatusCode != http.StatusBadGateway {
+					t.Errorf("StatusCode = %d, want 502", httpErr.StatusCode)
+				}
+				if httpErr.Err == nil {
+					t.Error("Err = nil, want the decode failure")
+				}
+				if !strings.Contains(err.Error(), "Error 1016: Origin DNS error") {
+					t.Errorf("err = %v, want the gateway's own words in the message", err)
+				}
+			},
+		},
+		{
+			name:   "json without messages is an HTTPError with no decode failure",
+			status: http.StatusServiceUnavailable,
+			body:   `{"error":"upstream connect error"}`,
+			check: func(t *testing.T, err error) {
+				var httpErr *HTTPError
+				if !errors.As(err, &httpErr) {
+					t.Fatalf("err = %v, want *HTTPError", err)
+				}
+				if httpErr.StatusCode != http.StatusServiceUnavailable {
+					t.Errorf("StatusCode = %d, want 503", httpErr.StatusCode)
+				}
+				if httpErr.Err != nil {
+					t.Errorf("Err = %v, want nil (the body decoded fine)", httpErr.Err)
+				}
+			},
+		},
+		{
+			name:   "host error keeps its envelope despite the 500",
+			status: http.StatusInternalServerError,
+			body:   `{"messages":[{"code":"306","message":"Record modification ID does not match"}],"response":{}}`,
+			check: func(t *testing.T, err error) {
+				var httpErr *HTTPError
+				if errors.As(err, &httpErr) {
+					t.Fatalf("err = %v, want *APIError not *HTTPError", err)
+				}
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) {
+					t.Fatalf("err = %v, want *APIError", err)
+				}
+				if !errors.Is(err, ErrRecordModified) {
+					t.Errorf("err = %v, want errors.Is ErrRecordModified", err)
+				}
+			},
+		},
+		{
+			// A success status does not make a message-less body a Data API
+			// response: a proxy routed to the wrong backend answers exactly like
+			// this. The status is carried, not consulted.
+			name:   "message-less 200 is an HTTPError too",
+			status: http.StatusOK,
+			body:   `{"status":"ok"}`,
+			check: func(t *testing.T, err error) {
+				var httpErr *HTTPError
+				if !errors.As(err, &httpErr) {
+					t.Fatalf("err = %v, want *HTTPError", err)
+				}
+				if httpErr.StatusCode != http.StatusOK {
+					t.Errorf("StatusCode = %d, want 200", httpErr.StatusCode)
+				}
+				if httpErr.Err != nil {
+					t.Errorf("Err = %v, want nil (the body decoded fine)", httpErr.Err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				fmt.Fprint(w, tt.body)
+			}))
+			defer srv.Close()
+
+			c := testClient(srv)
+			var rb responseBody
+			err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			tt.check(t, err)
+		})
+	}
+}
+
 func TestDoBearerAndActivity(t *testing.T) {
 	var mu sync.Mutex
 	var gotAuth string
