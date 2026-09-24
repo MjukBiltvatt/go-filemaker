@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -46,6 +47,37 @@ func TestGetByID(t *testing.T) {
 	}
 	if !strings.HasSuffix(path, "/layouts/People/records/42") {
 		t.Errorf("path = %q, want suffix /layouts/People/records/42", path)
+	}
+}
+
+// TestGetPortalDataInfo checks that Get and GetRange, which build their records
+// separately from Find, carry the host's portal information too.
+func TestGetPortalDataInfo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{
+			"data":[{"recordId":"7","modId":"1","fieldData":{},"portalData":{"Orders":[]},
+				"portalDataInfo":[{"database":"Shop","table":"Orders","foundCount":3,"returnedCount":0}]}]
+		},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	want := map[string]PortalDataInfo{"Orders": {Database: "Shop", Table: "Orders", FoundCount: 3, ReturnedCount: 0}}
+
+	got, err := c.GetByID(context.Background(), "People", "7")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if info := got.Record.PortalDataInfo(); !reflect.DeepEqual(info, want) {
+		t.Errorf("GetByID: PortalDataInfo() = %+v, want %+v", info, want)
+	}
+
+	rng, err := c.GetRange(context.Background(), "People")
+	if err != nil {
+		t.Fatalf("GetRange: %v", err)
+	}
+	if info := rng.Records[0].PortalDataInfo(); !reflect.DeepEqual(info, want) {
+		t.Errorf("GetRange: PortalDataInfo() = %+v, want %+v", info, want)
 	}
 }
 

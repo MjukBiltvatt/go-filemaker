@@ -298,11 +298,15 @@ func WithResponseLayout(layout string) ReadOption {
 	})
 }
 
-// WithPortals restricts which portals the result includes to the named ones (by
-// table-occurrence/portal-object name); portals not listed are omitted. The
-// record's own field data is always returned — this affects only which portals
-// accompany it, not whether field data comes back. Omitting the option (or
-// passing no names) returns all portals. Calling it again replaces the set.
+// WithPortals restricts which portals the result includes to the named ones;
+// portals not listed are omitted from both Record.Portals and
+// Record.PortalDataInfo. A portal is named by its object name when it has one,
+// otherwise by its table-occurrence name — a portal with an object name does not
+// answer to its table occurrence. A name that matches no portal on the layout
+// fails the request (FileMaker error 110). The record's own field data is always
+// returned — this affects only which portals accompany it, not whether field
+// data comes back. Omitting the option (or passing no names) returns all
+// portals. Calling it again replaces the set.
 func WithPortals(names ...string) ReadOption {
 	return option(func(c *params) {
 		c.portals = names

@@ -3,6 +3,7 @@ package filemaker
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -29,13 +30,26 @@ type FieldData map[string]any
 // format.
 type PortalData map[string][]map[string]any
 
+// PortalDataInfo is the host's account of one portal on a returned record, as
+// reported by Record.PortalDataInfo: the table occurrence the portal shows, how
+// many related records it holds (FoundCount), and how many of those the
+// response carries (ReturnedCount). The two differ when the portal's row count,
+// WithPortalLimit, or WithPortalOffset leaves rows out, so FoundCount is what a
+// caller pages a portal against.
+type PortalDataInfo struct {
+	Database      string `json:"database"`
+	Table         string `json:"table"`
+	FoundCount    int    `json:"foundCount"`
+	ReturnedCount int    `json:"returnedCount"`
+}
+
 // Record is a single record returned by a read operation (Find). It is a plain,
 // immutable value: it holds no reference back to the Client and has no methods
 // that touch the host. All of its state is unexported and exposed through
 // read-only accessors — ID, ModID, Layout, and the field/portal accessors
-// (String, Int, …, Decode, Fields, Portals) — so a returned record cannot be
-// mutated. Writes are performed by passing field data to the Client's
-// Create/Update methods.
+// (String, Int, …, Decode, Fields, Portals, PortalDataInfo) — so a returned
+// record cannot be mutated. Writes are performed by passing field data to the
+// Client's Create/Update methods.
 type Record struct {
 	id     string
 	modID  string
@@ -43,6 +57,7 @@ type Record struct {
 
 	fieldData  map[string]any
 	portalData map[string][]map[string]any
+	portalInfo map[string]PortalDataInfo
 
 	// loc is the time zone used to interpret date/timestamp fields. It is set
 	// by the client from its WithLocation option; nil means UTC.
@@ -76,6 +91,16 @@ func (r Record) Fields() FieldData {
 // portal data.
 func (r Record) Portals() PortalData {
 	return clonePortalData(r.portalData)
+}
+
+// PortalDataInfo returns the host's account of each portal on the record, keyed
+// by the same portal names as Portals: the portal's object name when it has one,
+// otherwise its table-occurrence name. It has an entry for exactly the portals
+// Portals has — WithPortals omits a portal from both — including a portal with
+// no rows. The result is a copy, and is nil when the host reports no portal
+// information.
+func (r Record) PortalDataInfo() map[string]PortalDataInfo {
+	return maps.Clone(r.portalInfo)
 }
 
 // cloneFields returns a copy of a field map. Field values are immutable scalars

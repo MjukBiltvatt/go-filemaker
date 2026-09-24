@@ -1000,7 +1000,9 @@ func TestIntegrationPortal(t *testing.T) {
 // against a real host. This is the coverage the mocks cannot give: the find body
 // pages a portal with "offset.<portal>"/"limit.<portal>" keys (no leading
 // underscore, unlike the get-range endpoint), so only the host confirms the keys
-// are honored. It asserts row counts, which are independent of portal row order.
+// are honored. It asserts row counts, which are independent of portal row order,
+// and that the host's PortalDataInfo reports every seeded row in FoundCount and
+// the rows actually returned in ReturnedCount, whatever the paging.
 func TestIntegrationPortalPaging(t *testing.T) {
 	requireServer(t)
 	ctx := context.Background()
@@ -1028,7 +1030,8 @@ func TestIntegrationPortalPaging(t *testing.T) {
 	})
 
 	// countPortal finds the seeded record with the given read options and returns
-	// how many ChildTable rows came back.
+	// how many ChildTable rows came back, after checking the host's account of the
+	// portal agrees: all seeded rows found, exactly the returned ones returned.
 	countPortal := func(opts ...FindOption) int {
 		t.Helper()
 		found, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}}, opts...)
@@ -1038,7 +1041,16 @@ func TestIntegrationPortalPaging(t *testing.T) {
 		if len(found.Records) != 1 {
 			t.Fatalf("Find returned %d records, want 1", len(found.Records))
 		}
-		return len(found.Records[0].Portals()[portalName])
+		rec := found.Records[0]
+		n := len(rec.Portals()[portalName])
+		info, ok := rec.PortalDataInfo()[portalName]
+		if !ok {
+			t.Fatalf("no PortalDataInfo for portal %q: %+v", portalName, rec.PortalDataInfo())
+		}
+		if info.Table != portalName || info.FoundCount != childRows || info.ReturnedCount != n {
+			t.Errorf("PortalDataInfo = %+v, want Table %q, FoundCount %d, ReturnedCount %d", info, portalName, childRows, n)
+		}
+		return n
 	}
 
 	// A default find caps portal rows at the layout portal's configured height.

@@ -44,10 +44,38 @@ type responseBody struct {
 // the response decodes into this exported-field struct and Find builds Records
 // from it.
 type recordWire struct {
-	ID         string                      `json:"recordId"`
-	ModID      string                      `json:"modId"`
-	FieldData  map[string]any              `json:"fieldData"`
-	PortalData map[string][]map[string]any `json:"portalData"`
+	ID             string                      `json:"recordId"`
+	ModID          string                      `json:"modId"`
+	FieldData      map[string]any              `json:"fieldData"`
+	PortalData     map[string][]map[string]any `json:"portalData"`
+	PortalDataInfo []portalDataInfoWire        `json:"portalDataInfo"`
+}
+
+// portalDataInfoWire is one "portalDataInfo" entry. The host adds
+// portalObjectName only for a portal that has an object name; it is what that
+// portal's rows are keyed by in portalData, so it becomes the map key rather
+// than a field of PortalDataInfo.
+type portalDataInfoWire struct {
+	PortalObjectName string `json:"portalObjectName"`
+	PortalDataInfo
+}
+
+// portalInfo keys the host's portal information by portal name, matching
+// portalData: the object name when the host reports one, otherwise the table
+// occurrence. It is nil when the host sent no portalDataInfo.
+func (w recordWire) portalInfo() map[string]PortalDataInfo {
+	if w.PortalDataInfo == nil {
+		return nil
+	}
+	info := make(map[string]PortalDataInfo, len(w.PortalDataInfo))
+	for _, p := range w.PortalDataInfo {
+		name := p.PortalObjectName
+		if name == "" {
+			name = p.Table
+		}
+		info[name] = p.PortalDataInfo
+	}
+	return info
 }
 
 // scriptOutcomes assembles the per-phase script results the host reported. The

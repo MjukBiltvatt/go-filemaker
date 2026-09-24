@@ -63,6 +63,7 @@ func (c *Client) GetByID(ctx context.Context, layout, id string, opts ...GetOpti
 		layout:     layout,
 		fieldData:  w.FieldData,
 		portalData: w.PortalData,
+		portalInfo: w.portalInfo(),
 		loc:        c.location,
 	}
 	return GetResponse{Record: record, Scripts: rb.scriptOutcomes()}, nil
@@ -145,6 +146,7 @@ func (c *Client) GetRange(ctx context.Context, layout string, opts ...GetRangeOp
 			layout:     layout,
 			fieldData:  w.FieldData,
 			portalData: w.PortalData,
+			portalInfo: w.portalInfo(),
 			loc:        c.location,
 		}
 	}

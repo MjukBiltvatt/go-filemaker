@@ -222,7 +222,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationContainer` | Container upload + download round-trip; the upload's mod ID matches the record's, and the download reports the host-inferred `text/plain` media type |
 | `TestIntegrationContainerDownloadError` | A container URL with a damaged object token fails as an `*HTTPError` with status 401 |
 | `TestIntegrationPortal` | Related-record add / edit / delete via portals |
-| `TestIntegrationPortalPaging` | Portal row cap: default find returns at most the portal's configured row count; `WithPortalLimit` overrides it (needs the portal configured to 3 rows) |
+| `TestIntegrationPortalPaging` | Portal row cap: default find returns at most the portal's configured row count; `WithPortalLimit` overrides it; `PortalDataInfo` reports every related row in `FoundCount` and the returned ones in `ReturnedCount` (needs the portal configured to 3 rows) |
 | `TestIntegrationUpdateWithModID` | Optimistic lock by mod ID; conflict → 306 |
 | `TestIntegrationUpdateIfUnchanged` | Record-relative optimistic lock; conflict → 306 |
 | `TestIntegrationScriptResults` | `WithScript` on Update and Find: echo-param round-trip, script error without request failure, missing script → `*APIError` code 104 (needs the `EchoParam` and `TriggerError` fixtures) |

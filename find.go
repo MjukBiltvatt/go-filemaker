@@ -123,6 +123,7 @@ func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest
 			layout:     layout,
 			fieldData:  w.FieldData,
 			portalData: w.PortalData,
+			portalInfo: w.portalInfo(),
 			loc:        c.location,
 		}
 	}

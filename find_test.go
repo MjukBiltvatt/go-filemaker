@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -113,6 +114,62 @@ func TestFindWithPortalData(t *testing.T) {
 	}
 	if got := notes[0]["Notes::Body"]; got != "first note" {
 		t.Errorf("Notes[0] Body = %v, want \"first note\"", got)
+	}
+}
+
+// TestFindWithPortalDataInfo mirrors a live host's response for a layout with two
+// portals on the same table occurrence, one unnamed and one with an object name.
+// Only the named portal's entry carries portalObjectName, and portalData is keyed
+// by it, so PortalDataInfo must key by it too — by table alone the two collide.
+func TestFindWithPortalDataInfo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{"data":[{"recordId":"1","modId":"0","fieldData":{},
+			"portalData":{
+				"Orders":[{"recordId":"10","Orders::Item":"Widget"},{"recordId":"11","Orders::Item":"Gadget"}],
+				"RecentOrders":[]
+			},
+			"portalDataInfo":[
+				{"database":"Shop","table":"Orders","foundCount":5,"returnedCount":2},
+				{"portalObjectName":"RecentOrders","database":"Shop","table":"Orders","foundCount":0,"returnedCount":0}
+			]
+		}]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	resp, err := testClient(srv).Find(context.Background(), "People", []FindRequest{{Criteria: map[string]string{"Name": "Mark"}}})
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	rec := resp.Records[0]
+
+	want := map[string]PortalDataInfo{
+		"Orders":       {Database: "Shop", Table: "Orders", FoundCount: 5, ReturnedCount: 2},
+		"RecentOrders": {Database: "Shop", Table: "Orders", FoundCount: 0, ReturnedCount: 0},
+	}
+	if got := rec.PortalDataInfo(); !reflect.DeepEqual(got, want) {
+		t.Errorf("PortalDataInfo() = %+v, want %+v", got, want)
+	}
+	for name := range rec.Portals() {
+		if _, ok := rec.PortalDataInfo()[name]; !ok {
+			t.Errorf("portal %q has rows but no PortalDataInfo entry", name)
+		}
+	}
+}
+
+// TestFindWithoutPortalDataInfo covers a record the host reports no portal
+// information for (a layout without portals): PortalDataInfo is nil.
+func TestFindWithoutPortalDataInfo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{"data":[{"recordId":"1","modId":"0","fieldData":{},"portalData":{}}]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	resp, err := testClient(srv).Find(context.Background(), "People", []FindRequest{{Criteria: map[string]string{"Name": "Mark"}}})
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if got := resp.Records[0].PortalDataInfo(); got != nil {
+		t.Errorf("PortalDataInfo() = %+v, want nil", got)
 	}
 }
 

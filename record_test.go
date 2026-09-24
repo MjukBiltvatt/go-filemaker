@@ -48,13 +48,17 @@ func TestFieldsAndPortalsAreFaithfulCopies(t *testing.T) {
 		rec  Record
 	}{
 		{"nil", Record{}},
-		{"empty", Record{fieldData: map[string]any{}, portalData: map[string][]map[string]any{}}},
+		{"empty", Record{fieldData: map[string]any{}, portalData: map[string][]map[string]any{}, portalInfo: map[string]PortalDataInfo{}}},
 		{"populated", Record{
 			fieldData: map[string]any{"Name": "Mark", "Age": float64(42), "Note": ""},
 			portalData: map[string][]map[string]any{
 				"Lines":   {{"Item": "Widget", "Qty": float64(3)}, {"Item": "Gadget", "Qty": float64(0)}},
 				"Empty":   {},
 				"NilRows": nil,
+			},
+			portalInfo: map[string]PortalDataInfo{
+				"Lines": {Table: "Lines", FoundCount: 4, ReturnedCount: 2},
+				"Empty": {Table: "Lines"},
 			},
 		}},
 	}
@@ -66,6 +70,9 @@ func TestFieldsAndPortalsAreFaithfulCopies(t *testing.T) {
 			if got := tc.rec.Portals(); !reflect.DeepEqual(got, PortalData(tc.rec.portalData)) {
 				t.Errorf("Portals() = %#v, want %#v", got, tc.rec.portalData)
 			}
+			if got := tc.rec.PortalDataInfo(); !reflect.DeepEqual(got, tc.rec.portalInfo) {
+				t.Errorf("PortalDataInfo() = %#v, want %#v", got, tc.rec.portalInfo)
+			}
 		})
 	}
 
@@ -73,6 +80,7 @@ func TestFieldsAndPortalsAreFaithfulCopies(t *testing.T) {
 	rec := Record{
 		fieldData:  map[string]any{"Name": "Mark"},
 		portalData: map[string][]map[string]any{"Lines": {{"Item": "Widget"}}},
+		portalInfo: map[string]PortalDataInfo{"Lines": {FoundCount: 1, ReturnedCount: 1}},
 	}
 	f := rec.Fields()
 	f["Name"] = "CHANGED"
@@ -80,6 +88,9 @@ func TestFieldsAndPortalsAreFaithfulCopies(t *testing.T) {
 	p := rec.Portals()
 	p["Lines"][0]["Item"] = "CHANGED"
 	p["Lines"] = append(p["Lines"], map[string]any{"Item": "Extra"})
+	pi := rec.PortalDataInfo()
+	pi["Lines"] = PortalDataInfo{FoundCount: 99}
+	pi["New"] = PortalDataInfo{}
 
 	if rec.Get("Name") != "Mark" {
 		t.Errorf("record Name mutated to %v via Fields() copy", rec.Get("Name"))
@@ -92,6 +103,9 @@ func TestFieldsAndPortalsAreFaithfulCopies(t *testing.T) {
 	}
 	if n := len(rec.portalData["Lines"]); n != 1 {
 		t.Errorf("portal slice grew to %d rows via Portals() copy", n)
+	}
+	if got := rec.portalInfo["Lines"].FoundCount; got != 1 || len(rec.portalInfo) != 1 {
+		t.Errorf("portal info mutated via PortalDataInfo() copy: %+v", rec.portalInfo)
 	}
 }
 
