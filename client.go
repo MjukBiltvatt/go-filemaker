@@ -417,8 +417,21 @@ func (c *Client) send(req *http.Request, out *responseBody) error {
 		return fmt.Errorf("filemaker: failed to read response body: %w", err)
 	}
 
+	// Start from a zero value: json.Unmarshal leaves fields absent from the body
+	// untouched, and a reauth retry decodes into the same out as the attempt it
+	// replaces. Without the reset, a retry answered by something other than the
+	// host would keep that attempt's 952 and be misreported as ErrInvalidToken.
+	*out = responseBody{}
 	if err := json.Unmarshal(bodyBytes, out); err != nil {
-		return fmt.Errorf("filemaker: failed to decode response (status %s): %w", res.Status, err)
+		return &HTTPError{StatusCode: res.StatusCode, Err: err, snippet: bodySnippet(bodyBytes)}
+	}
+
+	// A body that decoded but carries no messages is not a Data API response —
+	// the host includes messages on every reply, errors too — so something else
+	// answered: a gateway with a JSON error page, or a proxy routed to the wrong
+	// backend. That holds whatever the status, so the status is not consulted.
+	if len(out.Messages) == 0 {
+		return &HTTPError{StatusCode: res.StatusCode, snippet: bodySnippet(bodyBytes)}
 	}
 
 	return out.check()

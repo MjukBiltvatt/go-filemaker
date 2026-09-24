@@ -85,4 +85,10 @@
 // carry control-flow meaning have errors.Is-friendly sentinels: [ErrRecordModified]
 // (306), [ErrNoRecords] (401), and [ErrInvalidToken] (952). Find treats "no
 // records" (401) as an empty result with a nil error, not a failure.
+//
+// A request that never reached those semantics — a proxy or gateway answered, the
+// body would not decode, or the container streaming endpoint refused it — returns
+// an *[HTTPError] carrying the HTTP status instead. The two are worth telling
+// apart: an *APIError means the host received the request and rejected it, while
+// an *HTTPError leaves an attempted write in an unknown state.
 package filemaker

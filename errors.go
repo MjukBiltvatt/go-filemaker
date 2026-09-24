@@ -3,7 +3,10 @@ package filemaker
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // codeError is a sentinel error that carries the FileMaker host code it stands
@@ -108,4 +111,109 @@ func (e *APIError) Is(target error) bool {
 		return false
 	}
 	return e.Code() == ce.code
+}
+
+// HTTPError is returned when an exchange never reached Data API semantics: a
+// proxy or gateway answered instead of the host, the body could not be decoded
+// as a Data API response, or the container streaming endpoint refused the
+// request. It is the counterpart to *[APIError], and the two divide cleanly:
+// an *APIError means FileMaker received the request and reported a result,
+// while an HTTPError means the exchange did not get that far. For a write that
+// distinction is the difference between "the host rejected this" and "this may
+// or may not have been applied".
+//
+// StatusCode is the HTTP status of the response, as sent by whoever answered: a
+// gateway, a misrouted proxy, or FileMaker Server's own web tier. It need not
+// signal failure — a proxy routed to the wrong backend can answer 200 — so read
+// it as a diagnostic rather than a retry policy. Retrying is safe for reads;
+// retrying a write risks applying it twice, since the first attempt may have
+// reached the host.
+//
+// Err is the decode failure when there was one, and nil otherwise; it is
+// reachable with errors.As through [HTTPError.Unwrap].
+type HTTPError struct {
+	StatusCode int
+	Err        error
+
+	// snippet is the start of the response body, for diagnostics. A gateway
+	// names the actual fault in its body ("Error 1016: Origin DNS error") and
+	// nowhere else, so it is folded into the message rather than dropped. It is
+	// unexported because it is material for a log line, not something to branch
+	// on.
+	snippet string
+}
+
+// Error reports what went wrong with the status as context and, when one was
+// captured, the start of the body. The status is context rather than the
+// subject because it need not be a failure: a proxy routed to the wrong backend
+// can answer 200 with a body that is simply not a Data API response.
+func (e *HTTPError) Error() string {
+	status := strconv.Itoa(e.StatusCode)
+	if text := http.StatusText(e.StatusCode); text != "" {
+		// Blank for the codes a gateway is most likely to invent — Cloudflare's
+		// 520-527 and 530 are unregistered — which is why the body carries the
+		// diagnostic weight here.
+		status += " " + text
+	}
+
+	msg := fmt.Sprintf("filemaker: unexpected response (HTTP %s)", status)
+	if e.Err != nil {
+		msg = fmt.Sprintf("filemaker: failed to decode response (HTTP %s)", status)
+	}
+
+	switch {
+	case e.snippet != "":
+		// The snippet supersedes Err: a decode failure reports the first byte it
+		// choked on, which is the first byte of the snippet being printed next.
+		return msg + ": " + e.snippet
+	case e.Err != nil:
+		return msg + ": " + e.Err.Error()
+	}
+	return msg
+}
+
+// Unwrap returns the decode failure, if any, so callers can match the
+// underlying error (a *json.SyntaxError, say) with errors.As.
+func (e *HTTPError) Unwrap() error { return e.Err }
+
+// bodySnippet renders the start of a response body for an error message:
+// whitespace collapsed to single spaces so an HTML error page stays on one
+// line, and truncated on a rune boundary so the result is always valid UTF-8.
+// It returns "" for a body that is empty or entirely whitespace.
+//
+// Only the first maxBytes are examined. A body reaching here can be a whole
+// response that failed to decode near its end, and copying megabytes to render
+// a 200-rune diagnostic would be a poor trade.
+func bodySnippet(body []byte) string {
+	const (
+		maxBytes = 4 << 10
+		maxRunes = 200
+	)
+
+	if len(body) > maxBytes {
+		body = body[:maxBytes]
+		// The byte cut can land inside a rune, and nothing downstream would drop
+		// the remainder: an invalid sequence decodes as RuneError one byte at a
+		// time, which is not whitespace and so survives the collapse below. Trim
+		// it here instead. A real U+FFFD in the body decodes with its full width,
+		// so only an incomplete tail is removed.
+		for len(body) > 0 {
+			if r, size := utf8.DecodeLastRune(body); r == utf8.RuneError && size <= 1 {
+				body = body[:len(body)-1]
+				continue
+			}
+			break
+		}
+	}
+
+	collapsed := strings.Join(strings.Fields(string(body)), " ")
+	if collapsed == "" {
+		return ""
+	}
+
+	runes := []rune(collapsed)
+	if len(runes) <= maxRunes {
+		return collapsed
+	}
+	return string(runes[:maxRunes]) + "…"
 }

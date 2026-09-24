@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -868,6 +869,36 @@ func TestDownloadFromContainerRefreshesIdleSession(t *testing.T) {
 	}
 }
 
+// TestDownloadFromContainerHTTPError covers the streaming endpoint's failure
+// path: it answers with a bare status rather than a Data API body, so the
+// status and whatever a gateway put in the body are the only account of what
+// went wrong. 522 is one of Cloudflare's unregistered codes, which net/http has
+// no text for — exactly the case where the body has to carry the message.
+func TestDownloadFromContainerHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(522)
+		fmt.Fprint(w, "<html><body>\n  Connection timed out\n</body></html>")
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	_, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/abc")
+
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("err = %v, want *HTTPError", err)
+	}
+	if httpErr.StatusCode != 522 {
+		t.Errorf("StatusCode = %d, want 522", httpErr.StatusCode)
+	}
+	if httpErr.Err != nil {
+		t.Errorf("Err = %v, want nil (nothing was decoded)", httpErr.Err)
+	}
+	if !strings.Contains(err.Error(), "Connection timed out") {
+		t.Errorf("err = %v, want the body reported in the message", err)
+	}
+}
+
 // A 401 from the streaming endpoint is ambiguous — expired token, aged-out
 // container URL, or no access to the field — so it must surface as itself rather
 // than be reported as an invalid token and retried on a fresh session.
@@ -888,14 +919,15 @@ func TestDownloadFromContainerUnauthorizedIsNotReauthed(t *testing.T) {
 	c.reauthOnInvalidToken = true
 
 	_, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/abc")
-	if err == nil {
-		t.Fatal("expected an error for a 401 container response")
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("err = %v, want *HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("StatusCode = %d, want 401", httpErr.StatusCode)
 	}
 	if errors.Is(err, ErrInvalidToken) {
 		t.Errorf("err = %v, want no ErrInvalidToken match (401 does not imply 952)", err)
-	}
-	if !strings.Contains(err.Error(), "401") {
-		t.Errorf("err = %v, want the HTTP status reported as-is", err)
 	}
 	if got := downloadCalls.Load(); got != 1 {
 		t.Errorf("download calls = %d, want 1 (no retry)", got)

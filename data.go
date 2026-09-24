@@ -280,7 +280,8 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 // DownloadFromContainer downloads the binary contents of a container field of
 // the record identified by rec. The field must hold a container streaming URL
 // (the value FileMaker returns for a container field); an empty or non-string
-// field is reported as an error.
+// field is reported as an error. As with DownloadFromContainerByURL, the
+// contents are buffered in memory.
 func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) ([]byte, error) {
 	u, err := rec.StringE(field)
 	if err != nil || u == "" {
@@ -299,9 +300,14 @@ func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field st
 // The streaming endpoint answers with a bare HTTP status instead of a Data API
 // body, so an expired token is indistinguishable from a container URL that has
 // aged out or an account without access to the field — all three surface as 401.
-// Rather than guess, the status is reported as-is; a 401 here may mean the
-// record must be re-read to obtain a fresh URL, which no retry inside this call
-// could do.
+// Rather than guess, any status other than 200 is returned as an *[HTTPError]
+// carrying it in StatusCode. A 401 here may mean the record must be re-read to
+// obtain a fresh URL, which no retry inside this call could do; detect it with
+// errors.As and check StatusCode == http.StatusUnauthorized.
+//
+// The response body is read to completion before it is returned, so peak memory
+// scales with the size of the container's contents. There is no streaming form:
+// the method answers with the bytes themselves.
 func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL string) ([]byte, error) {
 	if containerURL == "" {
 		return nil, errors.New("filemaker: empty container url")
@@ -330,7 +336,12 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 		}
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
-			return token, fmt.Errorf("filemaker: failed to fetch container data: %s", res.Status)
+			// Read a bounded prefix of the body for the error message: the streaming
+			// endpoint answers with a bare status, so whatever a gateway in front of
+			// it has to say is the only account of the failure. The limit keeps an
+			// error page from being pulled into memory whole.
+			preview, _ := io.ReadAll(io.LimitReader(res.Body, 4<<10))
+			return token, &HTTPError{StatusCode: res.StatusCode, snippet: bodySnippet(preview)}
 		}
 
 		data, err = io.ReadAll(res.Body)
