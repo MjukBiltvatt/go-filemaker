@@ -27,10 +27,11 @@ func TestProductInfo(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	info, err := c.ProductInfo(context.Background())
+	res, err := c.ProductInfo(context.Background())
 	if err != nil {
 		t.Fatalf("ProductInfo: %v", err)
 	}
+	info := res.ProductInfo
 
 	want := ProductInfo{
 		Name:            "FileMaker Data API Engine",
@@ -70,10 +71,11 @@ func TestProductInfoWithoutCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	info, err := c.ProductInfo(context.Background())
+	res, err := c.ProductInfo(context.Background())
 	if err != nil {
 		t.Fatalf("ProductInfo: %v", err)
 	}
+	info := res.ProductInfo
 	if info.Name != "FileMaker Data API Engine" || info.DateFormat != "MM/dd/yyyy" {
 		t.Errorf("info = %+v", info)
 	}
@@ -118,10 +120,11 @@ func TestDatabases(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	dbs, err := c.Databases(context.Background())
+	res, err := c.Databases(context.Background())
 	if err != nil {
 		t.Fatalf("Databases: %v", err)
 	}
+	dbs := res.Databases
 
 	if len(dbs) != 2 || dbs[0].Name != "Customers" || dbs[1].Name != "Sales" {
 		t.Errorf("databases = %+v", dbs)
@@ -165,10 +168,11 @@ func TestDatabasesWithoutCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	dbs, err := c.Databases(context.Background())
+	res, err := c.Databases(context.Background())
 	if err != nil {
 		t.Fatalf("Databases: %v", err)
 	}
+	dbs := res.Databases
 	if len(dbs) != 1 || dbs[0].Name != "Customers" {
 		t.Errorf("databases = %+v", dbs)
 	}
@@ -213,10 +217,11 @@ func TestScripts(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	scripts, err := c.Scripts(context.Background())
+	res, err := c.Scripts(context.Background())
 	if err != nil {
 		t.Fatalf("Scripts: %v", err)
 	}
+	scripts := res.Scripts
 
 	want := []Script{
 		{Name: "Daily Cleanup", IsFolder: false},
@@ -271,13 +276,15 @@ func TestLayouts(t *testing.T) {
 		mu.Lock()
 		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
 		mu.Unlock()
+		// Hosts report each layout's table occurrence in "table"; folders carry
+		// none, and "Details" omits it as a host that does not report it would.
 		writeJSON(w, `{"response":{"layouts":[
-			{"name":"Customers"},
+			{"name":"Customers","table":"Customers"},
 			{"name":"Details"},
 			{"name":"Package Management","isFolder":true,"folderLayoutNames":[
-				{"name":"Mark as sent"},
+				{"name":"Mark as sent","table":"Packages"},
 				{"name":"Subfolder","isFolder":true,"folderLayoutNames":[
-					{"name":"Find Unsent"}
+					{"name":"Find Unsent","table":"Packages"}
 				]}
 			]}
 		]},"messages":[{"code":"0","message":"OK"}]}`)
@@ -285,18 +292,19 @@ func TestLayouts(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	layouts, err := c.Layouts(context.Background())
+	res, err := c.Layouts(context.Background())
 	if err != nil {
 		t.Fatalf("Layouts: %v", err)
 	}
+	layouts := res.Layouts
 
 	want := []Layout{
-		{Name: "Customers"},
+		{Name: "Customers", Table: "Customers"},
 		{Name: "Details"},
 		{Name: "Package Management", IsFolder: true, FolderLayoutNames: []Layout{
-			{Name: "Mark as sent"},
+			{Name: "Mark as sent", Table: "Packages"},
 			{Name: "Subfolder", IsFolder: true, FolderLayoutNames: []Layout{
-				{Name: "Find Unsent"},
+				{Name: "Find Unsent", Table: "Packages"},
 			}},
 		}},
 	}
@@ -369,7 +377,7 @@ func TestLayoutMetadata(t *testing.T) {
 		t.Fatalf("LayoutMetadata: %v", err)
 	}
 
-	want := LayoutMetadata{
+	want := LayoutMetadataResponse{
 		FieldMetadata: []FieldMetadata{
 			{Name: "TextField", Type: "normal", DisplayType: "editText", Result: "text", MaxRepeat: 1},
 			{Name: "Status", Type: "normal", DisplayType: "popupList", Result: "text", ValueList: "Statuses", MaxRepeat: 1, MaxCharacters: 20, NotEmpty: true},

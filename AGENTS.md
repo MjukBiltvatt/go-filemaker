@@ -11,6 +11,14 @@ Two rules follow from that:
 
 Go has no enforced layout, and the standard library organizes both by type (`net/http`) and by operation (`encoding/json`) depending on the package's primary axis. This package's axis is the endpoint domain. When a new type has no obvious home, name its concept first; if the concept has no file and would not justify one, leave the type in the domain file that already owns its vocabulary rather than inventing a layer file.
 
+## Endpoint result types
+
+Every data endpoint method returns `<Method>Response`, which corresponds to the endpoint's `response` object — even when that object is empty, so a key the host adds later becomes a new field rather than a new return value. A pair of methods over one endpoint shares a type (`Get`/`GetByID` → `GetResponse`, `UploadToContainer`/`UploadToContainerByID` → `UploadResponse`). A named object inside `response` gets its own type, named for the object (`ProductInfo`, `Database`), held as a field of the `…Response`. Field names are Go-idiomatic, not wire keys: rename or regroup where it serves the caller (`data` → `Records`; the six script keys → `ScriptOutcomes`).
+
+An endpoint with no Data API body (the container stream) still returns `<Method>Response`, corresponding to the HTTP response as a whole. Headers become fields only when they describe the payload (`Content-Type`) and are lifted into typed fields; never expose `http.Header` or transport details such as status codes or caching headers.
+
+`Authenticate` and `Logout` return only `error`: they manage the client's session rather than return data to the caller, and the session token stays private. Local accessors such as `LastActivity` make no request and are not endpoint methods.
+
 ## Record identity in errors
 
 An endpoint that addresses a record by layout and ID returns every failure after its argument checks through `recordErr` in `errors.go`, so the error names the record. The helper holds the rule and its reasoning. A new record-addressed endpoint calls `recordErr`; change the rule there, in one place.

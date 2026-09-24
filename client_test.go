@@ -148,12 +148,12 @@ func TestRedirectsStayOnOrigin(t *testing.T) {
 	}
 
 	// A same-origin redirect is still followed, with the token forwarded.
-	data, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/bounce")
+	res, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/bounce")
 	if err != nil {
 		t.Fatalf("DownloadFromContainerByURL(bounce): %v", err)
 	}
-	if string(data) != "filecontents" || bouncedAuth != "Bearer tok" {
-		t.Errorf("bounce: data = %q, auth = %q; want filecontents, Bearer tok", data, bouncedAuth)
+	if string(res.Data) != "filecontents" || bouncedAuth != "Bearer tok" {
+		t.Errorf("bounce: data = %q, auth = %q; want filecontents, Bearer tok", res.Data, bouncedAuth)
 	}
 }
 

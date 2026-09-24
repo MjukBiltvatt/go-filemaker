@@ -412,7 +412,7 @@ func TestRecordWriteNoID(t *testing.T) {
 	if _, err := c.Delete(context.Background(), rec); err == nil {
 		t.Error("Delete: expected error for record without ID")
 	}
-	if err := c.UploadToContainer(context.Background(), rec, "Photo", "f.png", strings.NewReader("x")); err == nil {
+	if _, err := c.UploadToContainer(context.Background(), rec, "Photo", "f.png", strings.NewReader("x")); err == nil {
 		t.Error("UploadToContainer: expected error for record without ID")
 	}
 }
@@ -719,14 +719,17 @@ func TestUploadToContainerByID(t *testing.T) {
 		mu.Lock()
 		gotMethod, gotPath, gotContentType, gotBody = r.Method, r.URL.Path, r.Header.Get("Content-Type"), string(b)
 		mu.Unlock()
-		writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+		writeJSON(w, `{"response":{"modId":"8"},"messages":[{"code":"0","message":"OK"}]}`)
 	}))
 	defer srv.Close()
 
 	c := testClient(srv)
-	err := c.UploadToContainerByID(context.Background(), "People", "1", "Photo", "pic.png", strings.NewReader("imgdata"))
+	res, err := c.UploadToContainerByID(context.Background(), "People", "1", "Photo", "pic.png", strings.NewReader("imgdata"))
 	if err != nil {
 		t.Fatalf("UploadToContainer: %v", err)
+	}
+	if res.ModID != "8" {
+		t.Errorf("ModID = %q, want 8 (the record's mod ID after the upload)", res.ModID)
 	}
 
 	mu.Lock()
@@ -760,7 +763,7 @@ func TestUploadToContainerWithModID(t *testing.T) {
 	c := testClient(srv)
 	// Explicit mod ID via the id-addressed form; the container endpoint has no
 	// body, so it rides in the query string.
-	if err := c.UploadToContainerByID(context.Background(), "People", "1", "Photo", "pic.png", strings.NewReader("x"), WithModID("7")); err != nil {
+	if _, err := c.UploadToContainerByID(context.Background(), "People", "1", "Photo", "pic.png", strings.NewReader("x"), WithModID("7")); err != nil {
 		t.Fatalf("UploadToContainerByID: %v", err)
 	}
 
@@ -786,7 +789,7 @@ func TestUploadToContainerIfUnchanged(t *testing.T) {
 	c := testClient(srv)
 	// IfUnchanged locks against the record's own ModID, sourced here from rec.
 	rec := Record{layout: "People", id: "1", modID: "5"}
-	if err := c.UploadToContainer(context.Background(), rec, "Photo", "pic.png", strings.NewReader("x"), IfUnchanged()); err != nil {
+	if _, err := c.UploadToContainer(context.Background(), rec, "Photo", "pic.png", strings.NewReader("x"), IfUnchanged()); err != nil {
 		t.Fatalf("UploadToContainer: %v", err)
 	}
 
@@ -806,11 +809,11 @@ func TestUploadIfUnchangedErrors(t *testing.T) {
 
 	c := testClient(srv)
 	// IfUnchanged on the id-addressed form has no record to source a ModID from.
-	if err := c.UploadToContainerByID(context.Background(), "People", "1", "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
+	if _, err := c.UploadToContainerByID(context.Background(), "People", "1", "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
 		t.Error("UploadToContainerByID: expected error for IfUnchanged without a record")
 	}
 	// IfUnchanged on a record without a ModID must error, not silently degrade.
-	if err := c.UploadToContainer(context.Background(), Record{layout: "People", id: "1"}, "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
+	if _, err := c.UploadToContainer(context.Background(), Record{layout: "People", id: "1"}, "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
 		t.Error("UploadToContainer: expected error for IfUnchanged on a record without a ModID")
 	}
 }
@@ -822,18 +825,22 @@ func TestDownloadFromContainer(t *testing.T) {
 		mu.Lock()
 		gotAuth = r.Header.Get("Authorization")
 		mu.Unlock()
+		w.Header().Set("Content-Type", "image/png")
 		w.Write([]byte("filecontents"))
 	}))
 	defer srv.Close()
 
 	c := testClient(srv)
 	rec := Record{layout: "People", fieldData: map[string]any{"Photo": srv.URL + "/Streaming/abc"}}
-	data, err := c.DownloadFromContainer(context.Background(), rec, "Photo")
+	res, err := c.DownloadFromContainer(context.Background(), rec, "Photo")
 	if err != nil {
 		t.Fatalf("DownloadFromContainer: %v", err)
 	}
-	if string(data) != "filecontents" {
-		t.Errorf("data = %q, want filecontents", data)
+	if string(res.Data) != "filecontents" {
+		t.Errorf("Data = %q, want filecontents", res.Data)
+	}
+	if res.ContentType != "image/png" {
+		t.Errorf("ContentType = %q, want image/png (the host's Content-Type header)", res.ContentType)
 	}
 
 	mu.Lock()
@@ -864,12 +871,12 @@ func TestDownloadFromContainerRefreshesIdleSession(t *testing.T) {
 	c.idleTimeout = time.Minute
 	c.lastActivity = time.Now().Add(-2 * time.Minute) // idle past the threshold
 
-	data, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/abc")
+	res, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/abc")
 	if err != nil {
 		t.Fatalf("DownloadFromContainerByURL: %v", err)
 	}
-	if string(data) != "filecontents" {
-		t.Errorf("data = %q, want filecontents", data)
+	if string(res.Data) != "filecontents" {
+		t.Errorf("Data = %q, want filecontents", res.Data)
 	}
 	if got := sessionCalls.Load(); got != 1 {
 		t.Errorf("session (reauth) calls = %d, want 1 (proactive refresh)", got)
@@ -1223,7 +1230,7 @@ func TestSetGlobalFields(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	err := c.SetGlobalFields(context.Background(), FieldData{
+	_, err := c.SetGlobalFields(context.Background(), FieldData{
 		"Contacts::gCompany": "FileMaker",
 		"Contacts::gCode":    "95054",
 	})
@@ -1267,7 +1274,7 @@ func TestSetGlobalFieldsNilBecomesEmptyObject(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	if err := c.SetGlobalFields(context.Background(), nil); err != nil {
+	if _, err := c.SetGlobalFields(context.Background(), nil); err != nil {
 		t.Fatalf("SetGlobalFields(nil): %v", err)
 	}
 	if gotBody != `{"globalFields":{}}` {

@@ -211,7 +211,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationProductInfo` | Unauthenticated connectivity / metadata |
 | `TestIntegrationDatabases` | Database listing (Basic-auth path) |
 | `TestIntegrationScripts` | Script catalog listing; recursive folder hierarchy (needs the script fixture) |
-| `TestIntegrationLayouts` | Layout catalog listing; recursive folder hierarchy; `ParentTable` present (needs the layout folder fixture) |
+| `TestIntegrationLayouts` | Layout catalog listing; recursive folder hierarchy; `ParentTable` present and reporting its `ParentTable` table occurrence (needs the layout folder fixture) |
 | `TestIntegrationLayoutMetadata` | Single-layout metadata for `ParentTable`: doubles as an environment check — every documented field present with the right result type, only `RequiredField` and `SoftRequiredField` Not-Empty, `ChildTable` portal exposes `ChildText` (no extra fixture) |
 | `TestIntegrationCRUD` | Create → find → update (patch) → delete; number coercion |
 | `TestIntegrationSpecialLayoutNames` | URL-reserved characters in a layout name are escaped into the path (needs the `Sales #1` layout) |
@@ -219,7 +219,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationDateTimeLocation` | `WithLocation` zone applied on read (needs `FM_LOCATION`) |
 | `TestIntegrationRequiredField` | Server-side Not-Empty validation (code 509) |
 | `TestIntegrationFindNoMatch` | Empty result is a nil error, not `ErrNoRecords` |
-| `TestIntegrationContainer` | Container upload + download round-trip |
+| `TestIntegrationContainer` | Container upload + download round-trip; the upload's mod ID matches the record's, and the download reports the host-inferred `text/plain` media type |
 | `TestIntegrationContainerDownloadError` | A container URL with a damaged object token fails as an `*HTTPError` with status 401 |
 | `TestIntegrationPortal` | Related-record add / edit / delete via portals |
 | `TestIntegrationPortalPaging` | Portal row cap: default find returns at most the portal's configured row count; `WithPortalLimit` overrides it (needs the portal configured to 3 rows) |

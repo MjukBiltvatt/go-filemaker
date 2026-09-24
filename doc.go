@@ -47,6 +47,11 @@
 // acknowledgement (a record ID, a mod ID), not a refreshed record. To read a
 // record back after a write, issue a [Client.Find] or [Client.Get].
 //
+// Every data operation returns its result as its own response type —
+// [FindResponse], [UploadResponse], [LayoutsResponse], and so on — even where the
+// host reports nothing ([SetGlobalFieldsResponse]), so a value the host adds
+// later arrives as a new field rather than a changed signature.
+//
 // FieldData is marshaled faithfully — string and number values are sent as-is.
 // The optional wrappers [Bool], [Date], [Timestamp], [Time], and [Duration]
 // render Go values in the formats FileMaker expects and slot directly into the

@@ -40,6 +40,28 @@ type DuplicateResponse struct {
 	Scripts  ScriptOutcomes
 }
 
+// UploadResponse is the host's acknowledgement of an UploadToContainer. ModID is
+// the record's mod ID after the upload, so a follow-up write can lock against it
+// without re-reading the record.
+type UploadResponse struct {
+	ModID string
+}
+
+// DownloadResponse is the result of a DownloadFromContainer: the container's
+// contents, and the media type the host reports for them. ContentType is the
+// host's own reading of the stored file (e.g. "text/plain; charset=utf-8"), not
+// the type it was uploaded with; it is empty when the host sends none. The host
+// does not report the file's original name.
+type DownloadResponse struct {
+	Data        []byte
+	ContentType string
+}
+
+// SetGlobalFieldsResponse is the host's acknowledgement of a SetGlobalFields. The
+// host returns no data for it; the type exists so fields can be added without
+// changing the method's signature.
+type SetGlobalFieldsResponse struct{}
+
 // Create inserts a new record with the given field data and returns the host's
 // acknowledgement (record ID and mod ID). Pass WithPortalData to add related
 // records, or WithScript and friends to run scripts, in the same request; script
@@ -206,17 +228,18 @@ func (c *Client) DuplicateByID(ctx context.Context, layout, id string, opts ...D
 // UploadToContainer uploads data to a container field of the record identified
 // by rec. The record must already exist (created or returned by a find). Pass
 // IfUnchanged (or WithModID) for optimistic concurrency against the record's
-// current mod ID. As with UploadToContainerByID, data is buffered in memory.
-func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader, opts ...UploadOption) error {
+// current mod ID. The record's new mod ID is returned in the UploadResponse. As
+// with UploadToContainerByID, data is buffered in memory.
+func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader, opts ...UploadOption) (UploadResponse, error) {
 	if rec.id == "" {
-		return errors.New("filemaker: record has no ID; create or find it first")
+		return UploadResponse{}, errors.New("filemaker: record has no ID; create or find it first")
 	}
 	// IfUnchanged is record-relative, so resolve it here against rec and append
 	// the resolved lock as an explicit WithModID, then delegate — mirroring
 	// Update/UpdateByID.
 	p, err := resolveUploadParams(opts, &rec)
 	if err != nil {
-		return err
+		return UploadResponse{}, err
 	}
 	if p.conditional {
 		// Full-slice expression so the append never mutates the caller's array.
@@ -228,37 +251,38 @@ func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filen
 // UploadToContainerByID uploads data to a container field of an existing record
 // addressed by layout and id. For optimistic concurrency pass WithModID
 // (IfUnchanged needs a record); the container endpoint has no JSON body, so the
-// mod ID rides in the URL query string.
+// mod ID rides in the URL query string. The record's new mod ID is returned in
+// the UploadResponse.
 //
 // data is read to completion and the encoded request body is held in memory so
 // it can be replayed if the session token expires mid-request and the client
 // reauthenticates. Peak memory therefore scales with the size of the upload.
-func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, filename string, data io.Reader, opts ...UploadOption) error {
+func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, filename string, data io.Reader, opts ...UploadOption) (UploadResponse, error) {
 	switch {
 	case layout == "":
-		return errors.New("filemaker: no layout specified")
+		return UploadResponse{}, errors.New("filemaker: no layout specified")
 	case id == "":
-		return errors.New("filemaker: no record id specified")
+		return UploadResponse{}, errors.New("filemaker: no record id specified")
 	case field == "":
-		return errors.New("filemaker: no container field specified")
+		return UploadResponse{}, errors.New("filemaker: no container field specified")
 	}
 
 	p, err := resolveUploadParams(opts, nil)
 	if err != nil {
-		return err
+		return UploadResponse{}, err
 	}
 
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	part, err := w.CreateFormFile("upload", filename)
 	if err != nil {
-		return fmt.Errorf("filemaker: failed to build upload: %w", err)
+		return UploadResponse{}, fmt.Errorf("filemaker: failed to build upload: %w", err)
 	}
 	if _, err := io.Copy(part, data); err != nil {
-		return fmt.Errorf("filemaker: failed to read upload data: %w", err)
+		return UploadResponse{}, fmt.Errorf("filemaker: failed to read upload data: %w", err)
 	}
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("filemaker: failed to finalize upload: %w", err)
+		return UploadResponse{}, fmt.Errorf("filemaker: failed to finalize upload: %w", err)
 	}
 
 	u := c.containerURL(layout, id, field)
@@ -272,7 +296,10 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 	err = c.withAuth(ctx, func() (string, error) {
 		return c.attempt(ctx, http.MethodPost, u, contentType, body, &rb)
 	})
-	return recordErr(err, layout, id)
+	if err != nil {
+		return UploadResponse{}, recordErr(err, layout, id)
+	}
+	return UploadResponse{ModID: rb.Response.ModID}, nil
 }
 
 // DownloadFromContainer downloads the binary contents of a container field of
@@ -282,16 +309,16 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 // skip those without an attachment; a field absent from rec, or one holding a
 // non-string value (ErrNotString), is reported as an error too. As with
 // DownloadFromContainerByURL, the contents are buffered in memory.
-func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) ([]byte, error) {
+func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) (DownloadResponse, error) {
 	if !rec.Has(field) {
-		return nil, fmt.Errorf("filemaker: record has no field %q", field)
+		return DownloadResponse{}, fmt.Errorf("filemaker: record has no field %q", field)
 	}
 	u, err := rec.StringE(field)
 	if err != nil {
-		return nil, fmt.Errorf("%w (field %q)", err, field)
+		return DownloadResponse{}, fmt.Errorf("%w (field %q)", err, field)
 	}
 	if u == "" {
-		return nil, fmt.Errorf("%w (field %q)", ErrEmptyContainer, field)
+		return DownloadResponse{}, fmt.Errorf("%w (field %q)", ErrEmptyContainer, field)
 	}
 	return c.DownloadFromContainerByURL(ctx, u)
 }
@@ -314,19 +341,19 @@ func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field st
 //
 // The response body is read to completion before it is returned, so peak memory
 // scales with the size of the container's contents. There is no streaming form:
-// the method answers with the bytes themselves.
-func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL string) ([]byte, error) {
+// the DownloadResponse carries the bytes themselves.
+func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL string) (DownloadResponse, error) {
 	if containerURL == "" {
-		return nil, errors.New("filemaker: empty container url")
+		return DownloadResponse{}, errors.New("filemaker: empty container url")
 	}
 	if !sameOrigin(c.host, containerURL) {
-		return nil, fmt.Errorf("filemaker: refusing to fetch container from foreign host: %s", containerURL)
+		return DownloadResponse{}, fmt.Errorf("filemaker: refusing to fetch container from foreign host: %s", containerURL)
 	}
 
 	// Streaming responses are raw bytes, not a responseBody, so this cannot go
 	// through attempt — but withAuth is generic over the attempt closure, so the
 	// lazy and proactive halves of the auth handling are still shared.
-	var data []byte
+	var out DownloadResponse
 	err := c.withAuth(ctx, func() (string, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, containerURL, nil)
 		if err != nil {
@@ -351,10 +378,11 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 			return token, &HTTPError{StatusCode: res.StatusCode, snippet: bodySnippet(preview)}
 		}
 
-		data, err = io.ReadAll(res.Body)
+		data, err := io.ReadAll(res.Body)
 		if err != nil {
 			return token, fmt.Errorf("filemaker: failed to read container data: %w", err)
 		}
+		out = DownloadResponse{Data: data, ContentType: res.Header.Get("Content-Type")}
 
 		c.mu.Lock()
 		c.lastActivity = time.Now()
@@ -362,25 +390,28 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 		return token, nil
 	})
 	if err != nil {
-		return nil, err
+		return DownloadResponse{}, err
 	}
-	return data, nil
+	return out, nil
 }
 
 // SetGlobalFields sets the values of global fields in the database. Fields must
 // use fully qualified names (Table::FieldName); values follow the same rules as
 // regular field data (string for text/date/timestamp/time, float64 for number).
 // Global fields persist for the duration of the session.
-func (c *Client) SetGlobalFields(ctx context.Context, fields FieldData) error {
+func (c *Client) SetGlobalFields(ctx context.Context, fields FieldData) (SetGlobalFieldsResponse, error) {
 	if fields == nil {
 		fields = FieldData{}
 	}
 	body, err := json.Marshal(map[string]any{"globalFields": fields})
 	if err != nil {
-		return fmt.Errorf("filemaker: failed to marshal global fields: %w", err)
+		return SetGlobalFieldsResponse{}, fmt.Errorf("filemaker: failed to marshal global fields: %w", err)
 	}
 	var rb responseBody
-	return c.do(ctx, http.MethodPatch, c.globalsURL(), body, &rb)
+	if err := c.do(ctx, http.MethodPatch, c.globalsURL(), body, &rb); err != nil {
+		return SetGlobalFieldsResponse{}, err
+	}
+	return SetGlobalFieldsResponse{}, nil
 }
 
 // marshalDuplicateBody builds the optional request body for Duplicate: only

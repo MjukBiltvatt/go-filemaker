@@ -19,10 +19,20 @@ type ProductInfo struct {
 	TimeStampFormat string `json:"timeStampFormat"`
 }
 
+// ProductInfoResponse is the result of a ProductInfo.
+type ProductInfoResponse struct {
+	ProductInfo ProductInfo
+}
+
 // Database is a single FileMaker database hosted on the server and enabled for
 // Data API access, as listed by Databases. Only its name is reported.
 type Database struct {
 	Name string `json:"name"`
+}
+
+// DatabasesResponse is the result of a Databases.
+type DatabasesResponse struct {
+	Databases []Database
 }
 
 // Script is an entry in a database's script catalog as listed by Scripts:
@@ -36,15 +46,27 @@ type Script struct {
 	FolderScriptNames []Script `json:"folderScriptNames"`
 }
 
+// ScriptsResponse is the result of a Scripts: the database's script catalog.
+type ScriptsResponse struct {
+	Scripts []Script
+}
+
 // Layout is an entry in a database's layout catalog as listed by Layouts:
 // either a layout or a layout folder. When IsFolder is false the entry is a
 // layout and FolderLayoutNames is empty; when IsFolder is true the entry is a
 // folder and FolderLayoutNames holds its contents, which may themselves be
-// folders, nesting arbitrarily deep.
+// folders, nesting arbitrarily deep. Table names the table occurrence a layout
+// is based on; it is empty for a folder, and on a host that does not report it.
 type Layout struct {
 	Name              string   `json:"name"`
+	Table             string   `json:"table"`
 	IsFolder          bool     `json:"isFolder"`
 	FolderLayoutNames []Layout `json:"folderLayoutNames"`
+}
+
+// LayoutsResponse is the result of a Layouts: the database's layout catalog.
+type LayoutsResponse struct {
+	Layouts []Layout
 }
 
 // FieldMetadata describes a single field as it appears on a layout, reported by
@@ -91,14 +113,13 @@ type ValueList struct {
 	Values []ValueListItem `json:"values"`
 }
 
-// LayoutMetadata is the full metadata for a single layout, as returned by the
-// Client's LayoutMetadata method: the fields placed on the layout, the fields of
-// each related portal keyed by the portal's table-occurrence name, and the value
-// lists available on the layout.
-type LayoutMetadata struct {
-	FieldMetadata  []FieldMetadata            `json:"fieldMetaData"`
-	PortalMetadata map[string][]FieldMetadata `json:"portalMetaData"`
-	ValueLists     []ValueList                `json:"valueLists"`
+// LayoutMetadataResponse is the result of a LayoutMetadata: the fields placed on
+// the layout, the fields of each related portal keyed by the portal's
+// table-occurrence name, and the value lists available on the layout.
+type LayoutMetadataResponse struct {
+	FieldMetadata  []FieldMetadata
+	PortalMetadata map[string][]FieldMetadata
+	ValueLists     []ValueList
 }
 
 // Databases lists the databases hosted on the server that are enabled for
@@ -115,10 +136,10 @@ type LayoutMetadata struct {
 // sends the client's username/password whenever a username is set — covering the
 // enabled case — while a client built without credentials can still call it
 // against a host that has filtering disabled.
-func (c *Client) Databases(ctx context.Context) ([]Database, error) {
+func (c *Client) Databases(ctx context.Context) (DatabasesResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiURL()+"/databases", nil)
 	if err != nil {
-		return nil, fmt.Errorf("filemaker: failed to build request: %w", err)
+		return DatabasesResponse{}, fmt.Errorf("filemaker: failed to build request: %w", err)
 	}
 	// Basic auth (not the session bearer token) per the endpoint's spec; sent
 	// only when credentials exist, so a credential-free client still works
@@ -129,9 +150,9 @@ func (c *Client) Databases(ctx context.Context) ([]Database, error) {
 
 	var rb responseBody
 	if err := c.send(req, &rb); err != nil {
-		return nil, err
+		return DatabasesResponse{}, err
 	}
-	return rb.Response.Databases, nil
+	return DatabasesResponse{Databases: rb.Response.Databases}, nil
 }
 
 // ProductInfo fetches metadata about the FileMaker Data API engine on the host:
@@ -141,19 +162,19 @@ func (c *Client) Databases(ctx context.Context) ([]Database, error) {
 // ProductInfo neither establishes nor touches a session — it makes a single
 // unauthenticated request and does not update LastActivity. This makes it a
 // cheap connectivity check that can run before any login.
-func (c *Client) ProductInfo(ctx context.Context) (ProductInfo, error) {
+func (c *Client) ProductInfo(ctx context.Context) (ProductInfoResponse, error) {
 	// The endpoint takes no request body and no headers (the host documents its
 	// HTTP header as "None"), so neither Content-Type nor Authorization is set.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiURL()+"/productInfo", nil)
 	if err != nil {
-		return ProductInfo{}, fmt.Errorf("filemaker: failed to build request: %w", err)
+		return ProductInfoResponse{}, fmt.Errorf("filemaker: failed to build request: %w", err)
 	}
 
 	var rb responseBody
 	if err := c.send(req, &rb); err != nil {
-		return ProductInfo{}, err
+		return ProductInfoResponse{}, err
 	}
-	return rb.Response.ProductInfo, nil
+	return ProductInfoResponse{ProductInfo: rb.Response.ProductInfo}, nil
 }
 
 // Scripts lists the scripts defined in the client's database, as reported by the
@@ -167,12 +188,12 @@ func (c *Client) ProductInfo(ctx context.Context) (ProductInfo, error) {
 // token, so it establishes a session on first use (and triggers reauth like any
 // other database operation) and counts as session activity, updating
 // LastActivity.
-func (c *Client) Scripts(ctx context.Context) ([]Script, error) {
+func (c *Client) Scripts(ctx context.Context) (ScriptsResponse, error) {
 	var rb responseBody
 	if err := c.do(ctx, http.MethodGet, c.baseURL()+"/scripts", nil, &rb); err != nil {
-		return nil, err
+		return ScriptsResponse{}, err
 	}
-	return rb.Response.Scripts, nil
+	return ScriptsResponse{Scripts: rb.Response.Scripts}, nil
 }
 
 // Layouts lists the layouts defined in the client's database, as reported by the
@@ -185,12 +206,12 @@ func (c *Client) Scripts(ctx context.Context) ([]Script, error) {
 // the session bearer token, so it establishes a session on first use (and
 // triggers reauth like any other database operation) and counts as session
 // activity, updating LastActivity.
-func (c *Client) Layouts(ctx context.Context) ([]Layout, error) {
+func (c *Client) Layouts(ctx context.Context) (LayoutsResponse, error) {
 	var rb responseBody
 	if err := c.do(ctx, http.MethodGet, c.baseURL()+"/layouts", nil, &rb); err != nil {
-		return nil, err
+		return LayoutsResponse{}, err
 	}
-	return rb.Response.Layouts, nil
+	return LayoutsResponse{Layouts: rb.Response.Layouts}, nil
 }
 
 // LayoutMetadataOption configures a LayoutMetadata call.
@@ -224,9 +245,9 @@ func WithValueListRecordID(recordID string) LayoutMetadataOption {
 // authenticated with the session bearer token, so it establishes a session on
 // first use (and triggers reauth like any other database operation) and counts
 // as session activity, updating LastActivity.
-func (c *Client) LayoutMetadata(ctx context.Context, layout string, opts ...LayoutMetadataOption) (LayoutMetadata, error) {
+func (c *Client) LayoutMetadata(ctx context.Context, layout string, opts ...LayoutMetadataOption) (LayoutMetadataResponse, error) {
 	if layout == "" {
-		return LayoutMetadata{}, errors.New("filemaker: no layout specified")
+		return LayoutMetadataResponse{}, errors.New("filemaker: no layout specified")
 	}
 
 	var cfg layoutMetadataConfig
@@ -245,9 +266,9 @@ func (c *Client) LayoutMetadata(ctx context.Context, layout string, opts ...Layo
 
 	var rb responseBody
 	if err := c.do(ctx, http.MethodGet, u, nil, &rb); err != nil {
-		return LayoutMetadata{}, err
+		return LayoutMetadataResponse{}, err
 	}
-	return LayoutMetadata{
+	return LayoutMetadataResponse{
 		FieldMetadata:  rb.Response.FieldMetaData,
 		PortalMetadata: rb.Response.PortalMetaData,
 		ValueLists:     rb.Response.ValueLists,

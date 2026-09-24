@@ -76,10 +76,12 @@ func TestNilOptionsAreSkipped(t *testing.T) {
 			return err
 		}},
 		{"UploadToContainer", func() error {
-			return c.UploadToContainer(ctx, rec, "File", "a.txt", strings.NewReader("x"), nil, WithModID("3"))
+			_, err := c.UploadToContainer(ctx, rec, "File", "a.txt", strings.NewReader("x"), nil, WithModID("3"))
+			return err
 		}},
 		{"UploadToContainerByID", func() error {
-			return c.UploadToContainerByID(ctx, "People", "7", "File", "a.txt", strings.NewReader("x"), nil, WithModID("3"))
+			_, err := c.UploadToContainerByID(ctx, "People", "7", "File", "a.txt", strings.NewReader("x"), nil, WithModID("3"))
+			return err
 		}},
 	}
 

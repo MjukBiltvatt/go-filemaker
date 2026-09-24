@@ -266,10 +266,11 @@ func requireServer(t *testing.T) {
 func TestIntegrationProductInfo(t *testing.T) {
 	requireServer(t)
 
-	info, err := itClient.ProductInfo(context.Background())
+	res, err := itClient.ProductInfo(context.Background())
 	if err != nil {
 		t.Fatalf("ProductInfo: %v", err)
 	}
+	info := res.ProductInfo
 	if info.Name == "" {
 		t.Errorf("ProductInfo returned empty Name: %+v", info)
 	}
@@ -282,11 +283,11 @@ func TestIntegrationProductInfo(t *testing.T) {
 func TestIntegrationDatabases(t *testing.T) {
 	requireServer(t)
 
-	dbs, err := itClient.Databases(context.Background())
+	res, err := itClient.Databases(context.Background())
 	if err != nil {
 		t.Fatalf("Databases: %v", err)
 	}
-	t.Logf("databases: %+v", dbs)
+	t.Logf("databases: %+v", res.Databases)
 }
 
 // TestIntegrationScripts lists the scripts defined in the configured database
@@ -300,10 +301,11 @@ func TestIntegrationDatabases(t *testing.T) {
 func TestIntegrationScripts(t *testing.T) {
 	requireServer(t)
 
-	scripts, err := itClient.Scripts(context.Background())
+	res, err := itClient.Scripts(context.Background())
 	if err != nil {
 		t.Fatalf("Scripts: %v", err)
 	}
+	scripts := res.Scripts
 	t.Logf("scripts: %+v", scripts)
 
 	var topLevelScript, folderWithScript bool
@@ -331,18 +333,22 @@ func TestIntegrationScripts(t *testing.T) {
 // test relies on a fixture (see docs/integration-testing.md): at least one
 // folder that itself contains a layout, which exercises the recursive
 // folderLayoutNames decode. It also confirms the ParentTable layout appears
-// somewhere in the catalog — a real-data check the scripts test cannot make.
+// somewhere in the catalog, reporting the table occurrence it is based on — a
+// real-data check the scripts test cannot make.
 func TestIntegrationLayouts(t *testing.T) {
 	requireServer(t)
 
-	layouts, err := itClient.Layouts(context.Background())
+	res, err := itClient.Layouts(context.Background())
 	if err != nil {
 		t.Fatalf("Layouts: %v", err)
 	}
+	layouts := res.Layouts
 	t.Logf("layouts: %+v", layouts)
 
-	if !findLayout(layouts, itLayout) {
+	if l, ok := findLayout(layouts, itLayout); !ok {
 		t.Errorf("configured layout %q not found in the catalog", itLayout)
+	} else if l.Table != itLayout {
+		t.Errorf("layout %q Table = %q, want %q (the layout must be based on the ParentTable table occurrence; see docs/integration-testing.md)", itLayout, l.Table, itLayout)
 	}
 
 	var folderWithLayout bool
@@ -467,18 +473,20 @@ func portalKeys(m map[string][]FieldMetadata) []string {
 	return keys
 }
 
-// findLayout reports whether a layout with the given name exists anywhere in the
-// catalog, descending into folders.
-func findLayout(layouts []Layout, name string) bool {
+// findLayout returns the layout with the given name from anywhere in the
+// catalog, descending into folders, and reports whether it was found.
+func findLayout(layouts []Layout, name string) (Layout, bool) {
 	for _, l := range layouts {
 		if !l.IsFolder && l.Name == name {
-			return true
+			return l, true
 		}
-		if l.IsFolder && findLayout(l.FolderLayoutNames, name) {
-			return true
+		if l.IsFolder {
+			if found, ok := findLayout(l.FolderLayoutNames, name); ok {
+				return found, true
+			}
 		}
 	}
-	return false
+	return Layout{}, false
 }
 
 // TestIntegrationCRUD exercises the full record lifecycle against a real host:
@@ -769,7 +777,9 @@ func TestIntegrationFindNoMatch(t *testing.T) {
 }
 
 // TestIntegrationContainer round-trips bytes through the layout's container
-// field: upload, find the record back, download, and compare.
+// field: upload, find the record back, download, and compare. It also checks
+// what the host reports alongside: the upload's mod ID matches the record's, and
+// the download carries the media type the host inferred from the file.
 func TestIntegrationContainer(t *testing.T) {
 	requireServer(t)
 	ctx := context.Background()
@@ -789,7 +799,8 @@ func TestIntegrationContainer(t *testing.T) {
 	})
 
 	payload := []byte("hello from go-filemaker integration test")
-	if err := itClient.UploadToContainerByID(ctx, itLayout, created.RecordID, fieldContainer, "hello.txt", bytes.NewReader(payload)); err != nil {
+	uploaded, err := itClient.UploadToContainerByID(ctx, itLayout, created.RecordID, fieldContainer, "hello.txt", bytes.NewReader(payload))
+	if err != nil {
 		t.Fatalf("UploadToContainerByID: %v", err)
 	}
 
@@ -801,12 +812,21 @@ func TestIntegrationContainer(t *testing.T) {
 		t.Fatal("Find returned no records after container upload")
 	}
 
-	data, err := itClient.DownloadFromContainer(ctx, found.Records[0], fieldContainer)
+	if got := found.Records[0].ModID(); uploaded.ModID == "" || uploaded.ModID != got {
+		t.Errorf("upload ModID = %q, want the record's mod ID %q", uploaded.ModID, got)
+	}
+
+	downloaded, err := itClient.DownloadFromContainer(ctx, found.Records[0], fieldContainer)
 	if err != nil {
 		t.Fatalf("DownloadFromContainer: %v", err)
 	}
-	if !bytes.Equal(data, payload) {
-		t.Errorf("downloaded %d bytes, want %d (content mismatch)", len(data), len(payload))
+	if !bytes.Equal(downloaded.Data, payload) {
+		t.Errorf("downloaded %d bytes, want %d (content mismatch)", len(downloaded.Data), len(payload))
+	}
+	// The upload is sent as application/octet-stream; the host infers the type
+	// from the stored file's extension instead.
+	if !strings.HasPrefix(downloaded.ContentType, "text/plain") {
+		t.Errorf("ContentType = %q, want text/plain (inferred by the host from hello.txt)", downloaded.ContentType)
 	}
 }
 
@@ -834,7 +854,7 @@ func TestIntegrationContainerDownloadError(t *testing.T) {
 		}
 	})
 
-	if err := itClient.UploadToContainerByID(ctx, itLayout, created.RecordID, fieldContainer, "hello.txt", bytes.NewReader([]byte("hello"))); err != nil {
+	if _, err := itClient.UploadToContainerByID(ctx, itLayout, created.RecordID, fieldContainer, "hello.txt", bytes.NewReader([]byte("hello"))); err != nil {
 		t.Fatalf("UploadToContainerByID: %v", err)
 	}
 
@@ -858,10 +878,10 @@ func TestIntegrationContainerDownloadError(t *testing.T) {
 	}
 	u.Path = dir + strings.Repeat("0", len(token)) + ext
 
-	data, err := itClient.DownloadFromContainerByURL(ctx, u.String())
+	res, err := itClient.DownloadFromContainerByURL(ctx, u.String())
 	var httpErr *HTTPError
 	if !errors.As(err, &httpErr) {
-		t.Fatalf("DownloadFromContainerByURL(damaged URL) = %d bytes, err %v (%T); want *HTTPError", len(data), err, err)
+		t.Fatalf("DownloadFromContainerByURL(damaged URL) = %d bytes, err %v (%T); want *HTTPError", len(res.Data), err, err)
 	}
 	if httpErr.StatusCode != http.StatusUnauthorized {
 		t.Errorf("StatusCode = %d (%v); want 401", httpErr.StatusCode, httpErr)
@@ -1698,7 +1718,7 @@ func TestIntegrationSetGlobalFields(t *testing.T) {
 	ctx := context.Background()
 
 	const value = "go-filemaker-it-global"
-	if err := itClient.SetGlobalFields(ctx, FieldData{
+	if _, err := itClient.SetGlobalFields(ctx, FieldData{
 		"ParentTable::GlobalField": value,
 	}); err != nil {
 		t.Fatalf("SetGlobalFields: %v", err)

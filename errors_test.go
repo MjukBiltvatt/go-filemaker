@@ -171,7 +171,8 @@ func TestRecordErrIdentity(t *testing.T) {
 			return err
 		}},
 		{"UploadToContainerByID", func(c *Client) error {
-			return c.UploadToContainerByID(ctx, "People", "9", "Photo", "pic.png", strings.NewReader("x"), WithModID("3"))
+			_, err := c.UploadToContainerByID(ctx, "People", "9", "Photo", "pic.png", strings.NewReader("x"), WithModID("3"))
+			return err
 		}},
 	}
 	failures := []struct {

@@ -171,16 +171,17 @@ _, err := c.DeleteByID(ctx, "People", id) // from an id
 
 ### Container fields
 
-`CommitToContainer` becomes `UploadToContainer`, taking an `io.Reader`:
+`CommitToContainer` becomes `UploadToContainer`, taking an `io.Reader`. It
+returns an `UploadResponse` carrying the record's new mod ID, like `Update`:
 
 ```go
 // v3
 err := rec.CommitToContainer("Photo", "photo.jpg", buf)
 
 // v4
-err := c.UploadToContainer(ctx, rec, "Photo", "photo.jpg", buf)
+_, err := c.UploadToContainer(ctx, rec, "Photo", "photo.jpg", buf)
 // or, by id:
-err := c.UploadToContainerByID(ctx, "People", id, "Photo", "photo.jpg", buf)
+_, err := c.UploadToContainerByID(ctx, "People", id, "Photo", "photo.jpg", buf)
 ```
 
 `CommitFileToContainer` (which read a path for you) has no direct equivalent —
@@ -190,11 +191,12 @@ open the file and pass it as the reader:
 f, err := os.Open("/path/to/photo.jpg")
 if err != nil { /* … */ }
 defer f.Close()
-err = c.UploadToContainer(ctx, rec, "Photo", "photo.jpg", f)
+_, err = c.UploadToContainer(ctx, rec, "Photo", "photo.jpg", f)
 ```
 
 v4 also adds `DownloadFromContainer` / `DownloadFromContainerByURL`, which v3 did
-not provide.
+not provide. They return a `DownloadResponse` with the contents in `Data` and the
+host's media type in `ContentType`.
 
 ### Reading values & `Map` → `Decode`
 
@@ -255,6 +257,8 @@ The time zone that was the second argument to `Map` is now a client-level settin
   `int32`, `int64`, `float32`, `float64`, `bool`, `time.Duration`, `time.Time`,
   `*time.Time`.
 - **`Find` returns `FindResponse`**, not `[]Record`. Reach for `res.Records`.
+  Every data operation returns its own `…Response` type the same way, even where
+  the host reports nothing (`SetGlobalFieldsResponse`).
 - **Default find limit.** v3 imposed a default limit of 100 client-side; v4 sends
   no limit unless you set `WithLimit`, so the server's own default (also 100)
   applies. Same effective result — but if you relied on exactly 100, set it
