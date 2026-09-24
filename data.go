@@ -300,9 +300,10 @@ func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field st
 // The streaming endpoint answers with a bare HTTP status instead of a Data API
 // body, so an expired token is indistinguishable from a container URL that has
 // aged out or an account without access to the field — all three surface as 401.
-// Rather than guess, the status is reported as-is; a 401 here may mean the
-// record must be re-read to obtain a fresh URL, which no retry inside this call
-// could do.
+// Rather than guess, any status other than 200 is returned as an *[HTTPError]
+// carrying it in StatusCode. A 401 here may mean the record must be re-read to
+// obtain a fresh URL, which no retry inside this call could do; detect it with
+// errors.As and check StatusCode == http.StatusUnauthorized.
 //
 // The response body is read to completion before it is returned, so peak memory
 // scales with the size of the container's contents. There is no streaming form:

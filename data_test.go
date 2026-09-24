@@ -869,7 +869,6 @@ func TestDownloadFromContainerRefreshesIdleSession(t *testing.T) {
 	}
 }
 
-// A 401 from the streaming endpoint is ambiguous — expired token, aged-out
 // TestDownloadFromContainerHTTPError covers the streaming endpoint's failure
 // path: it answers with a bare status rather than a Data API body, so the
 // status and whatever a gateway put in the body are the only account of what
@@ -900,6 +899,7 @@ func TestDownloadFromContainerHTTPError(t *testing.T) {
 	}
 }
 
+// A 401 from the streaming endpoint is ambiguous — expired token, aged-out
 // container URL, or no access to the field — so it must surface as itself rather
 // than be reported as an invalid token and retried on a fresh session.
 func TestDownloadFromContainerUnauthorizedIsNotReauthed(t *testing.T) {
@@ -919,14 +919,15 @@ func TestDownloadFromContainerUnauthorizedIsNotReauthed(t *testing.T) {
 	c.reauthOnInvalidToken = true
 
 	_, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/abc")
-	if err == nil {
-		t.Fatal("expected an error for a 401 container response")
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("err = %v, want *HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("StatusCode = %d, want 401", httpErr.StatusCode)
 	}
 	if errors.Is(err, ErrInvalidToken) {
 		t.Errorf("err = %v, want no ErrInvalidToken match (401 does not imply 952)", err)
-	}
-	if !strings.Contains(err.Error(), "401") {
-		t.Errorf("err = %v, want the HTTP status reported as-is", err)
 	}
 	if got := downloadCalls.Load(); got != 1 {
 		t.Errorf("download calls = %d, want 1 (no retry)", got)

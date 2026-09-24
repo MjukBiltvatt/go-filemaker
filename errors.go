@@ -122,10 +122,12 @@ func (e *APIError) Is(target error) bool {
 // distinction is the difference between "the host rejected this" and "this may
 // or may not have been applied".
 //
-// StatusCode is the HTTP status of the response. Unlike the status accompanying
-// an *APIError — where FileMaker answers 500 for ordinary data problems such as
-// a failed validation — this one comes from a party that follows HTTP
-// conventions, so the usual reading (5xx is worth retrying, 4xx is not) holds.
+// StatusCode is the HTTP status of the response, as sent by whoever answered: a
+// gateway, a misrouted proxy, or FileMaker Server's own web tier. It need not
+// signal failure — a proxy routed to the wrong backend can answer 200 — so read
+// it as a diagnostic rather than a retry policy. Retrying is safe for reads;
+// retrying a write risks applying it twice, since the first attempt may have
+// reached the host.
 //
 // Err is the decode failure when there was one, and nil otherwise; it is
 // reachable with errors.As through [HTTPError.Unwrap].
