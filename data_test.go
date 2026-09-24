@@ -360,6 +360,16 @@ func TestUpdateModIDMismatch(t *testing.T) {
 	if !errors.Is(err, ErrRecordModified) {
 		t.Fatalf("got %v, want ErrRecordModified", err)
 	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("got %T, want it to wrap *APIError", err)
+	}
+	if apiErr.Code() != 306 {
+		t.Errorf("Code() = %d, want 306", apiErr.Code())
+	}
+	if !strings.Contains(err.Error(), "Record modification ID does not match") {
+		t.Errorf("err = %q, want the host message", err)
+	}
 }
 
 func TestUpdateByRecord(t *testing.T) {

@@ -121,7 +121,7 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 	var rb responseBody
 	if err := c.do(ctx, http.MethodPatch, c.recordURL(layout, id), body, &rb); err != nil {
 		if errors.Is(err, ErrRecordModified) {
-			return UpdateResponse{}, fmt.Errorf("filemaker: record %q in layout %q: %w", id, layout, ErrRecordModified)
+			return UpdateResponse{}, fmt.Errorf("filemaker: record %q in layout %q: %w", id, layout, err)
 		}
 		return UpdateResponse{}, err
 	}
