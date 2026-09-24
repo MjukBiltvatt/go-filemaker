@@ -217,7 +217,11 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 	}
 
 	jar, _ := cookiejar.New(nil)
-	httpClient := &http.Client{Timeout: cfg.timeout, Jar: jar}
+	httpClient := &http.Client{
+		Timeout:       cfg.timeout,
+		Jar:           jar,
+		CheckRedirect: sameOriginRedirects(normalizedHost),
+	}
 	if cfg.debug {
 		w := cfg.debugWriter
 		if w == nil {
@@ -286,6 +290,28 @@ func sameOrigin(base, raw string) bool {
 	}
 	// url.Parse lowercases the scheme but leaves the host as written.
 	return u.Scheme == b.Scheme && strings.EqualFold(originHost(u), originHost(b))
+}
+
+// sameOriginRedirects returns a CheckRedirect policy that refuses any redirect
+// hop leaving base's origin. Every request carries a secret in its
+// Authorization header — the Basic credentials on login, the bearer token
+// otherwise — and net/http re-sends it on redirect whenever the target's
+// hostname is the original's or a subdomain of it, ignoring scheme and port. So
+// a hop to sub.host, to host:8443, or down to http://host would all receive it.
+// Checking sameOrigin per hop closes that; same-origin redirects, such as the
+// cookie bounce on a container streaming URL, are still followed.
+func sameOriginRedirects(base string) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		// Setting CheckRedirect replaces net/http's default policy, so its
+		// 10-hop limit has to be restated here.
+		if len(via) >= 10 {
+			return errors.New("filemaker: stopped after 10 redirects")
+		}
+		if !sameOrigin(base, req.URL.String()) {
+			return fmt.Errorf("filemaker: refusing redirect to foreign host: %s", req.URL.Redacted())
+		}
+		return nil
+	}
 }
 
 // originHost returns u's host with the port omitted when it is the default for

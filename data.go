@@ -293,7 +293,8 @@ func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field st
 // DownloadFromContainerByURL downloads the binary contents of a container from
 // its streaming URL. The URL must be on the session host (typically obtained
 // from a record via record.String(field)); the bearer token is never sent to a
-// foreign host.
+// foreign host, and a redirect off the session host is refused rather than
+// followed.
 //
 // WithReauthOnIdle covers this operation like any other: an idle session is
 // refreshed before the download is attempted. WithReauthOnInvalidToken does not.

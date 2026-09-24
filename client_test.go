@@ -23,7 +23,7 @@ func writeJSON(w http.ResponseWriter, body string) {
 // testClient builds a Client pointed at srv with a known token, bypassing New.
 func testClient(srv *httptest.Server) *Client {
 	return &Client{
-		httpClient: srv.Client(),
+		httpClient: redirectGuarded(srv.Client(), srv.URL),
 		host:       srv.URL,
 		database:   "db",
 		username:   "user",
@@ -31,6 +31,13 @@ func testClient(srv *httptest.Server) *Client {
 		token:      "tok",
 		authSem:    make(chan struct{}, 1),
 	}
+}
+
+// redirectGuarded installs the redirect policy New sets on its client, so the
+// test client follows redirects exactly as a real one does.
+func redirectGuarded(hc *http.Client, host string) *http.Client {
+	hc.CheckRedirect = sameOriginRedirects(host)
+	return hc
 }
 
 func TestNormalizeHost(t *testing.T) {
@@ -89,6 +96,75 @@ func TestSameOrigin(t *testing.T) {
 		if got := sameOrigin(base, c.raw); got != c.want {
 			t.Errorf("sameOrigin(%q, %q) = %v, want %v (%s)", base, c.raw, got, c.want, c.desc)
 		}
+	}
+}
+
+// TestRedirectsStayOnOrigin checks that the client built by New refuses to
+// follow a redirect off the session origin. The foreign server shares the
+// session host's hostname (127.0.0.1) on another port, which is exactly the
+// case net/http's own header policy lets through: without the guard it would
+// receive the Authorization header.
+func TestRedirectsStayOnOrigin(t *testing.T) {
+	var foreignHits atomic.Int32
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		foreignHits.Add(1)
+		t.Errorf("foreign host reached with Authorization = %q", r.Header.Get("Authorization"))
+	}))
+	defer foreign.Close()
+
+	var bouncedAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/sessions"), r.URL.Path == "/Streaming/away":
+			http.Redirect(w, r, foreign.URL+r.URL.Path, http.StatusTemporaryRedirect)
+		case r.URL.Path == "/Streaming/bounce":
+			http.Redirect(w, r, "/Streaming/landed", http.StatusFound)
+		case r.URL.Path == "/Streaming/landed":
+			bouncedAuth = r.Header.Get("Authorization")
+			w.Write([]byte("filecontents"))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Login carries the Basic credentials.
+	if err := c.Authenticate(context.Background()); err == nil || !strings.Contains(err.Error(), "foreign host") {
+		t.Errorf("Authenticate = %v, want a foreign-host redirect refusal", err)
+	}
+
+	// Downloads carry the bearer token.
+	c.token = "tok"
+	if _, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/away"); err == nil || !strings.Contains(err.Error(), "foreign host") {
+		t.Errorf("DownloadFromContainerByURL(away) = %v, want a foreign-host redirect refusal", err)
+	}
+	if n := foreignHits.Load(); n != 0 {
+		t.Errorf("foreign host hit %d times, want 0", n)
+	}
+
+	// A same-origin redirect is still followed, with the token forwarded.
+	data, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/Streaming/bounce")
+	if err != nil {
+		t.Fatalf("DownloadFromContainerByURL(bounce): %v", err)
+	}
+	if string(data) != "filecontents" || bouncedAuth != "Bearer tok" {
+		t.Errorf("bounce: data = %q, auth = %q; want filecontents, Bearer tok", data, bouncedAuth)
+	}
+}
+
+func TestSameOriginRedirectsHopLimit(t *testing.T) {
+	check := sameOriginRedirects("https://fms.example.com")
+	req, _ := http.NewRequest(http.MethodGet, "https://fms.example.com/x", nil)
+	if err := check(req, make([]*http.Request, 9)); err != nil {
+		t.Errorf("9 prior hops: %v, want nil", err)
+	}
+	if err := check(req, make([]*http.Request, 10)); err == nil {
+		t.Error("10 prior hops: want an error")
 	}
 }
 
