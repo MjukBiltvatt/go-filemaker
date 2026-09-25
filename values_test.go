@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
