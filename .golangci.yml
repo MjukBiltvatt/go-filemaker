@@ -1,0 +1,25 @@
+version: "2"
+
+run:
+  # Lint integration_test.go as well; it needs no server to type-check.
+  build-tags:
+    - integration
+
+linters:
+  exclusions:
+    # Errors deliberately ignored at known call sites. Each rule is scoped to
+    # its site, so errcheck still reports the same calls anywhere else. A rule
+    # that stops matching (e.g. after a rename) makes lint report the call,
+    # never silently allow a new one.
+    rules:
+      # Closing an HTTP response body: nothing useful to do on failure.
+      - linters: [errcheck]
+        source: '^\s*defer res\.Body\.Close\(\)$'
+      # Debug output must not fail the request it describes.
+      - path: debug\.go$
+        linters: [errcheck]
+        text: '`fmt\.Fprintf`'
+      # httptest handler bodies: a failed write surfaces as a failed assertion.
+      - path: _test\.go$
+        linters: [errcheck]
+        text: '`(w\.Write|fmt\.Fprint)`'
