@@ -23,6 +23,18 @@ var (
 	ErrNotString     = errors.New("filemaker: value is not a string")
 	ErrUnknownFormat = errors.New("filemaker: unknown format")
 
+	// ErrNotInteger is returned when a number that is not written as an integer —
+	// it has a fractional part, or uses exponent notation — is read with an
+	// integer accessor (Number.Int64, Record.IntE, Record.Int64E). The value is a
+	// number, so it is not ErrNotNumber: read it with Float64, or parse Number
+	// for other notations.
+	ErrNotInteger = errors.New("filemaker: value is not written as an integer")
+
+	// ErrOutOfRange is returned when a number does not fit the Go type it is read
+	// as: an integer beyond int64 (or int), or a magnitude beyond float64. Read it
+	// with Record.Number to keep its exact digits.
+	ErrOutOfRange = errors.New("filemaker: value is out of range")
+
 	// ErrEmptyContainer is returned (wrapped) by DownloadFromContainer when the
 	// container field holds nothing. An empty container is a normal state, not a
 	// fault, so it has its own sentinel: test for it with errors.Is to skip

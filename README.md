@@ -148,16 +148,17 @@ if err := rec.Decode(&p); err != nil { /* … */ }
 
 ## Writing field values
 
-Build a `FieldData` map. String and number values are sent as-is; the optional wrappers render Go types in FileMaker's expected formats:
+Build a `FieldData` map. Strings and Go numbers need no wrapper: integers are sent with their exact digits, and a `float64` is stored as the value it holds, which is exact for decimals of up to 15 significant digits. For a decimal that needs more, or an integer beyond `int64`, use `filemaker.Number`, which carries its exact decimal text. The other optional wrappers render Go types in FileMaker's expected formats:
 
 ```go
 c.Create(ctx, "People", filemaker.FieldData{
-	"Name":    "Mark",                          // raw
-	"Active":  filemaker.Bool(true),            // -> 1 / 0
-	"DOB":     filemaker.Date(birthday),        // -> "06/23/1990"
-	"Created": filemaker.Timestamp(time.Now()), // -> "06/23/1990 15:04:05"
-	"Alarm":   filemaker.Time(alarmTime),       // -> "15:04:05"
-	"Worked":  filemaker.Duration(elapsed),     // -> "37:30:00"
+	"Name":    "Mark",                                 // raw
+	"Total":   filemaker.Number("12345678901234.567"), // exact, beyond float64
+	"Active":  filemaker.Bool(true),                   // -> 1 / 0
+	"DOB":     filemaker.Date(birthday),               // -> "06/23/1990"
+	"Created": filemaker.Timestamp(time.Now()),        // -> "06/23/1990 15:04:05"
+	"Alarm":   filemaker.Time(alarmTime),              // -> "15:04:05"
+	"Worked":  filemaker.Duration(elapsed),            // -> "37:30:00"
 })
 ```
 

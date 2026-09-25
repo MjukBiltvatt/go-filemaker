@@ -529,3 +529,54 @@ func TestRecordRangeQuery(t *testing.T) {
 		})
 	}
 }
+
+// TestGetByIDExactNumbers checks that number fields keep the host's exact
+// digits, in field data and portal rows alike, rather than being rounded
+// through float64, and that text in a number field stays a string.
+func TestGetByIDExactNumbers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{"data":[{"recordId":"42","modId":"3",
+			"fieldData":{"Id":9007199254740993,"Big":123456789012345678901234567890,"Amount":12345678901234.567,"Typed":"abc","Empty":""},
+			"portalData":{"Lines":[{"recordId":"5","modId":"1","Lines::Qty":20260924123456789}]}
+		}]},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	resp, err := testClient(srv).GetByID(context.Background(), "People", "42")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	rec := resp.Record
+
+	want := FieldData{
+		"Id":     Number("9007199254740993"),
+		"Big":    Number("123456789012345678901234567890"),
+		"Amount": Number("12345678901234.567"),
+		"Typed":  "abc",
+		"Empty":  "",
+	}
+	if got := rec.Fields(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Fields() = %#v, want %#v", got, want)
+	}
+	wantPortals := PortalData{"Lines": {{"recordId": "5", "modId": "1", "Lines::Qty": Number("20260924123456789")}}}
+	if got := rec.Portals(); !reflect.DeepEqual(got, wantPortals) {
+		t.Errorf("Portals() = %#v, want %#v", got, wantPortals)
+	}
+	if got := rec.Int64("Id"); got != 9007199254740993 {
+		t.Errorf("Int64(Id) = %d, want 9007199254740993", got)
+	}
+}
+
+// TestGetByIDRejectsTrailingData checks that decoding with exact numbers keeps
+// json.Unmarshal's strictness: a body with data after the JSON value is not a
+// Data API response.
+func TestGetByIDRejectsTrailingData(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, `{"response":{"data":[{"recordId":"42","fieldData":{}}]},"messages":[{"code":"0","message":"OK"}]}}`)
+	}))
+	defer srv.Close()
+
+	if _, err := testClient(srv).GetByID(context.Background(), "People", "42"); err == nil {
+		t.Fatal("GetByID with trailing data = nil error, want an error")
+	}
+}

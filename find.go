@@ -117,15 +117,7 @@ func (c *Client) Find(ctx context.Context, layout string, requests []FindRequest
 
 	records := make([]Record, len(rb.Response.Data))
 	for i, w := range rb.Response.Data {
-		records[i] = Record{
-			id:         w.ID,
-			modID:      w.ModID,
-			layout:     layout,
-			fieldData:  w.FieldData,
-			portalData: w.PortalData,
-			portalInfo: w.portalInfo(),
-			loc:        c.location,
-		}
+		records[i] = w.record(layout, c.location)
 	}
 	return FindResponse{Records: records, DataInfo: rb.Response.DataInfo, Scripts: rb.scriptOutcomes()}, nil
 }

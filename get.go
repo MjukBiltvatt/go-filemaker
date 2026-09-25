@@ -57,15 +57,7 @@ func (c *Client) GetByID(ctx context.Context, layout, id string, opts ...GetOpti
 		return GetResponse{}, recordErr(errors.New("filemaker: get returned no record data"), layout, id)
 	}
 	w := rb.Response.Data[0]
-	record := Record{
-		id:         w.ID,
-		modID:      w.ModID,
-		layout:     layout,
-		fieldData:  w.FieldData,
-		portalData: w.PortalData,
-		portalInfo: w.portalInfo(),
-		loc:        c.location,
-	}
+	record := w.record(layout, c.location)
 	return GetResponse{Record: record, Scripts: rb.scriptOutcomes()}, nil
 }
 
@@ -140,15 +132,7 @@ func (c *Client) GetRange(ctx context.Context, layout string, opts ...GetRangeOp
 
 	records := make([]Record, len(rb.Response.Data))
 	for i, w := range rb.Response.Data {
-		records[i] = Record{
-			id:         w.ID,
-			modID:      w.ModID,
-			layout:     layout,
-			fieldData:  w.FieldData,
-			portalData: w.PortalData,
-			portalInfo: w.portalInfo(),
-			loc:        c.location,
-		}
+		records[i] = w.record(layout, c.location)
 	}
 	return GetRangeResponse{Records: records, DataInfo: rb.Response.DataInfo, Scripts: rb.scriptOutcomes()}, nil
 }

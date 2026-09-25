@@ -490,7 +490,7 @@ func findLayout(layouts []Layout, name string) (Layout, bool) {
 }
 
 // TestIntegrationCRUD exercises the full record lifecycle against a real host:
-// create, find back, assert the host's type coercion (number -> float64),
+// create, find back, assert the host's type coercion (number -> Number),
 // update a patch, re-find, then delete. It self-cleans via t.Cleanup so a failed
 // assertion mid-test still removes the record.
 func TestIntegrationCRUD(t *testing.T) {
@@ -533,7 +533,7 @@ func TestIntegrationCRUD(t *testing.T) {
 	if got := rec.String(fieldText); got != marker {
 		t.Errorf("%s = %q, want %q", fieldText, got, marker)
 	}
-	// FileMaker number fields decode as float64; Int() bridges that.
+	// FileMaker number fields decode as Number; Int() reads it as an int.
 	if got := rec.Int(fieldNumber); got != 7 {
 		t.Errorf("%s = %d, want 7", fieldNumber, got)
 	}
@@ -2095,4 +2095,62 @@ func TestIntegrationWithResponseLayout(t *testing.T) {
 		t.Fatalf("GetByID: %v", err)
 	}
 	t.Run("GetByID", func(t *testing.T) { check(t, res.Record) })
+}
+
+// TestIntegrationNumberPrecision verifies that numbers beyond float64's
+// precision survive a write and a read-back with every digit, and that a record
+// read and written back unchanged keeps them. The host parses a JSON-number
+// input as a double before storing it, so this holds only because the client
+// sends integers and Number values as strings, and decodes responses without
+// rounding through float64.
+func TestIntegrationNumberPrecision(t *testing.T) {
+	requireServer(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name  string
+		value any    // as written
+		want  Number // as stored and read back
+	}{
+		{"int64 past float64", int64(9007199254740993), "9007199254740993"},
+		{"Number beyond int64", Number("123456789012345678901234567890"), "123456789012345678901234567890"},
+		{"Number decimal", Number("12345678901234.567"), "12345678901234.567"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			created, err := itClient.Create(ctx, itLayout, FieldData{
+				fieldNumber:       tc.value,
+				fieldRequired:     "present",
+				fieldSoftRequired: "present",
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			t.Cleanup(func() {
+				if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+					t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+				}
+			})
+
+			got, err := itClient.GetByID(ctx, itLayout, created.RecordID)
+			if err != nil {
+				t.Fatalf("GetByID: %v", err)
+			}
+			if n := got.Record.Number(fieldNumber); n != tc.want {
+				t.Fatalf("%s after create = %q, want %q", fieldNumber, n, tc.want)
+			}
+
+			// Write the value read back as-is: it must not lose digits either.
+			if _, err := itClient.Update(ctx, got.Record, FieldData{fieldNumber: got.Record.Get(fieldNumber)}); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			again, err := itClient.GetByID(ctx, itLayout, created.RecordID)
+			if err != nil {
+				t.Fatalf("GetByID after update: %v", err)
+			}
+			if n := again.Record.Number(fieldNumber); n != tc.want {
+				t.Errorf("%s after write-back = %q, want %q", fieldNumber, n, tc.want)
+			}
+		})
+	}
 }

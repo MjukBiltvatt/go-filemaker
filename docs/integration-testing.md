@@ -239,6 +239,7 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationWithEntryModeScript` | `WithEntryMode(EntryModeScript)` bypasses "Only during data entry" validation — host rejects the write without it (code 509), accepts with it |
 | `TestIntegrationWithProhibitModeScript` | `WithProhibitMode(EntryModeScript)` bypasses a "Prohibit modification" field — host rejects the write without it (code 201), accepts with it and stores the supplied value |
 | `TestIntegrationWithResponseLayout` | `WithResponseLayout` causes the host to shape the response through a different layout — `NumberField` is absent when the response layout exposes only `TextField` (needs the `ParentTableResponse` layout) |
+| `TestIntegrationNumberPrecision` | Numbers beyond `float64` precision (an `int64` past 2⁵³, a 30-digit `Number`, a 17-digit decimal) are stored and read back exactly, and survive being written back unchanged |
 
 ## Date formats (`WithDateFormat`)
 

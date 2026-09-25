@@ -10,9 +10,17 @@ import (
 	"time"
 )
 
-// FieldData holds a record's fields keyed by field name. When read back from the
-// host, FileMaker number fields decode as float64 and text, date and timestamp
-// fields as string.
+// FieldData holds a record's fields keyed by field name.
+//
+// When read back from the host, number fields are Number, holding the host's
+// exact digits, and text, date, timestamp and time fields are string. An empty
+// field of any type is the empty string, and so is a number field holding text
+// a user typed into it: FileMaker keeps such text as entered.
+//
+// When writing, Go integers and Number values are sent as their exact digits,
+// floats as JSON numbers, and strings as-is; the wrappers in this package (Bool,
+// Date, …) render Go types in FileMaker's formats. See Number for why integers
+// are not sent as JSON numbers.
 type FieldData map[string]any
 
 // PortalData holds portal (related) records keyed by portal name, each value a
@@ -76,9 +84,8 @@ func (r Record) ModID() string { return r.modID }
 // target for the record-based writes (Update, Delete, UploadToContainer).
 func (r Record) Layout() string { return r.layout }
 
-// Fields returns a copy of the record's raw field values, keyed by field name.
-// FileMaker number fields are float64; text, date and timestamp fields are
-// string. The result is a copy — mutating it does not affect the record — and
+// Fields returns a copy of the record's raw field values, keyed by field name,
+// typed as FieldData describes (Number for numbers, string otherwise). The result is a copy — mutating it does not affect the record — and
 // is nil when the record carries no field data. Use the typed accessors
 // (String, Int, …) for individual fields.
 func (r Record) Fields() FieldData {
@@ -104,7 +111,7 @@ func (r Record) PortalDataInfo() map[string]PortalDataInfo {
 }
 
 // cloneFields returns a copy of a field map. Field values are immutable scalars
-// (float64/string), so a shallow copy is both faithful and fully independent. A
+// (Number/string), so a shallow copy is both faithful and fully independent. A
 // nil source yields nil (preserving the distinction from an empty map).
 func cloneFields(src map[string]any) map[string]any {
 	if src == nil {
@@ -156,8 +163,8 @@ func (r Record) Has(fieldName string) bool {
 	return ok
 }
 
-// Get returns the raw value of a field, or nil if it is absent. FileMaker number
-// fields are float64; text, date and timestamp fields are string.
+// Get returns the raw value of a field, or nil if it is absent. Values are typed
+// as FieldData describes: Number for numbers, string otherwise.
 func (r Record) Get(fieldName string) any {
 	return r.fieldData[fieldName]
 }
@@ -207,43 +214,83 @@ func (r Record) StringSlice(fieldName string) []string {
 	return s
 }
 
-// IntE behaves like Int but returns ErrNotNumber if the value is not a number.
-func (r Record) IntE(fieldName string) (int, error) {
-	if val, ok := r.Get(fieldName).(float64); ok {
-		return int(val), nil
+// NumberE behaves like Number but returns ErrNotNumber if the value is not a
+// number: text (including an empty field), or an absent field.
+func (r Record) NumberE(fieldName string) (Number, error) {
+	if val, ok := r.Get(fieldName).(Number); ok {
+		return val, nil
 	}
-	return 0, ErrNotNumber
+	return "", ErrNotNumber
 }
 
-// Int returns the field value as an int. The field needs to be a number field.
+// Number returns the field value as a Number, with the host's exact digits. Use
+// it for values the other numeric accessors cannot hold exactly: integers beyond
+// int64 and decimals beyond float64's precision. The field needs to be a number
+// field. Errors are ignored; use NumberE to detect them.
+func (r Record) Number(fieldName string) Number {
+	n, _ := r.NumberE(fieldName)
+	return n
+}
+
+// IntE behaves like Int but returns an error instead of 0: ErrNotNumber if the
+// value is not a number, ErrNotInteger if it is not written as an integer (a
+// fractional part or exponent notation; see Number.Int64), and ErrOutOfRange if
+// it does not fit an int.
+func (r Record) IntE(fieldName string) (int, error) {
+	i, err := r.Int64E(fieldName)
+	if err != nil {
+		return 0, err
+	}
+	if int64(int(i)) != i {
+		return 0, ErrOutOfRange
+	}
+	return int(i), nil
+}
+
+// Int returns the field value as an int. The field needs to be a number field
+// holding a value in integer notation; any other value, including a fraction,
+// is not truncated but yields 0. Errors are ignored; use IntE to detect them.
 func (r Record) Int(fieldName string) int {
 	i, _ := r.IntE(fieldName)
 	return i
 }
 
-// Int64E behaves like Int64 but returns ErrNotNumber if the value is not a number.
+// Int64E behaves like Int64 but returns an error instead of 0: ErrNotNumber if
+// the value is not a number, ErrNotInteger if it is not written as an integer
+// (a fractional part or exponent notation; see Number.Int64), and ErrOutOfRange
+// if it does not fit an int64.
 func (r Record) Int64E(fieldName string) (int64, error) {
-	if val, ok := r.Get(fieldName).(float64); ok {
-		return int64(val), nil
+	n, err := r.NumberE(fieldName)
+	if err != nil {
+		return 0, err
 	}
-	return 0, ErrNotNumber
+	return n.Int64()
 }
 
-// Int64 returns the field value as an int64. The field needs to be a number field.
+// Int64 returns the field value as an int64, exactly. The field needs to be a
+// number field holding a value in integer notation; any other value, including
+// a fraction, is not truncated but yields 0. Errors are ignored; use Int64E to
+// detect them.
 func (r Record) Int64(fieldName string) int64 {
 	i, _ := r.Int64E(fieldName)
 	return i
 }
 
-// Float64E behaves like Float64 but returns ErrNotNumber if the value is not a number.
+// Float64E behaves like Float64 but returns an error instead of 0: ErrNotNumber
+// if the value is not a number, and ErrOutOfRange if its magnitude is beyond
+// float64.
 func (r Record) Float64E(fieldName string) (float64, error) {
-	if val, ok := r.Get(fieldName).(float64); ok {
-		return val, nil
+	n, err := r.NumberE(fieldName)
+	if err != nil {
+		return 0, err
 	}
-	return 0, ErrNotNumber
+	return n.Float64()
 }
 
-// Float64 returns the field value as a float64. The field needs to be a number field.
+// Float64 returns the field value as the nearest float64, which is exact only up
+// to 15 significant digits; use Number to keep longer values exact.
+// The field needs to be a number field. Errors are ignored; use Float64E to
+// detect them.
 func (r Record) Float64(fieldName string) float64 {
 	f, _ := r.Float64E(fieldName)
 	return f
@@ -255,8 +302,8 @@ func (r Record) Bool(fieldName string) bool {
 	switch val := r.Get(fieldName).(type) {
 	case string:
 		return len(val) > 0
-	case float64:
-		return val > 0
+	case Number:
+		return val.positive()
 	}
 	return false
 }
@@ -377,7 +424,7 @@ func parseFMDuration(s string) (time.Duration, error) {
 // string) is not itself supported.
 //
 // Supported field types: string, int, int8, int16, int32, int64, float32,
-// float64, bool, time.Duration, time.Time, *time.Time.
+// float64, Number, bool, time.Duration, time.Time, *time.Time.
 func (r Record) Decode(obj any) error {
 	v := reflect.ValueOf(obj)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
@@ -408,6 +455,8 @@ func (r Record) Decode(obj any) error {
 			field.SetInt(r.Int64(tag))
 		case float32, float64:
 			field.SetFloat(r.Float64(tag))
+		case Number:
+			field.SetString(string(r.Number(tag)))
 		case bool:
 			field.SetBool(r.Bool(tag))
 		case time.Duration:

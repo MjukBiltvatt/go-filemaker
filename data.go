@@ -3,12 +3,15 @@ package filemaker
 import (
 	"bytes"
 	"context"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"reflect"
+	"strconv"
 	"time"
 )
 
@@ -397,13 +400,10 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 
 // SetGlobalFields sets the values of global fields in the database. Fields must
 // use fully qualified names (Table::FieldName); values follow the same rules as
-// regular field data (string for text/date/timestamp/time, float64 for number).
-// Global fields persist for the duration of the session.
+// regular field data (see FieldData). Global fields persist for the duration of
+// the session.
 func (c *Client) SetGlobalFields(ctx context.Context, fields FieldData) (SetGlobalFieldsResponse, error) {
-	if fields == nil {
-		fields = FieldData{}
-	}
-	body, err := json.Marshal(map[string]any{"globalFields": fields})
+	body, err := json.Marshal(map[string]any{"globalFields": wireFields(fields, nil)})
 	if err != nil {
 		return SetGlobalFieldsResponse{}, fmt.Errorf("filemaker: failed to marshal global fields: %w", err)
 	}
@@ -435,30 +435,19 @@ func marshalDuplicateBody(p params) ([]byte, error) {
 // nil fields map becomes an empty object so the host applies defaults on create
 // and leaves the record's own fields untouched on a portal-only edit.
 //
-// When format is non-nil, Date/Timestamp wrapper values are rewritten to that
-// format and a "dateformats" parameter is added so the host interprets the input
-// accordingly; when nil, no parameter is sent — the host applies its default
-// format (US) and the wrappers self-marshal in US to match (works on any server).
+// Field and portal values go through wireValue, which sends numbers with their
+// exact digits. When format is non-nil, Date/Timestamp wrapper values are also
+// rewritten to that format and a "dateformats" parameter is added so the host
+// interprets the input accordingly; when nil, no parameter is sent — the host
+// applies its default format (US) and the wrappers self-marshal in US to match
+// (works on any server).
 //
 // The body is assembled as a map so the script directives (whose keys carry dots,
 // e.g. "script.param") share one source of truth with the Delete query string:
 // both read params.scripts.
 func marshalRecordBody(fields FieldData, p params, format *DateFormat) ([]byte, error) {
-	if fields == nil {
-		fields = FieldData{}
-	}
-	portals := p.portalData
-
-	var dateFormats *int
-	if format != nil {
-		fields = applyDateFormat(fields, *format)
-		portals = applyDateFormatPortals(portals, *format)
-		v := int(*format)
-		dateFormats = &v
-	}
-
-	body := map[string]any{"fieldData": fields}
-	if len(portals) > 0 {
+	body := map[string]any{"fieldData": wireFields(fields, format)}
+	if portals := wirePortals(p.portalData, format); len(portals) > 0 {
 		body["portalData"] = portals
 	}
 	if p.modID != "" {
@@ -470,8 +459,8 @@ func marshalRecordBody(fields FieldData, p params, format *DateFormat) ([]byte, 
 	for _, kv := range p.scripts() {
 		body[kv[0]] = kv[1]
 	}
-	if dateFormats != nil {
-		body["dateformats"] = *dateFormats
+	if format != nil {
+		body["dateformats"] = int(*format)
 	}
 
 	out, err := json.Marshal(body)
@@ -479,6 +468,48 @@ func marshalRecordBody(fields FieldData, p params, format *DateFormat) ([]byte, 
 		return nil, fmt.Errorf("filemaker: failed to marshal field data: %w", err)
 	}
 	return out, nil
+}
+
+// wireValue prepares one field value for a request body.
+//
+// Integers of any Go integer kind, including defined types such as
+// `type CustomerID int64`, and json.Number values are sent as a JSON string of
+// their exact digits. The host parses a JSON-number input as a double before
+// storing it, which is exact only up to 15 significant digits, but converts a
+// string input itself and stores it exactly (see Number). Floats stay JSON numbers:
+// a float64 holds no more digits than the host's double keeps. A non-nil
+// pointer is followed to its value.
+//
+// Date and Timestamp wrappers are rewritten to format when it is non-nil (see
+// formatDateValue). Every value that encodes itself — Number, the other
+// wrappers, and any caller type implementing json.Marshaler or
+// encoding.TextMarshaler — is left to do so, as is every other value.
+func wireValue(v any, format *DateFormat) any {
+	switch val := v.(type) {
+	case nil:
+		return nil
+	case Date, Timestamp:
+		if format != nil {
+			return formatDateValue(v, *format)
+		}
+		return v
+	case json.Number:
+		return Number(val) // validated when it marshals, as json.Number is
+	case json.Marshaler, encoding.TextMarshaler:
+		return v
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(rv.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(rv.Uint(), 10)
+	case reflect.Pointer:
+		if !rv.IsNil() {
+			return wireValue(rv.Elem().Interface(), format)
+		}
+	}
+	return v
 }
 
 // formatDateValue rewrites a Date/Timestamp wrapper to its string form in the
@@ -504,19 +535,20 @@ func formatDateValue(v any, format DateFormat) any {
 	}
 }
 
-// applyDateFormat returns a copy of fields with Date/Timestamp values rewritten
-// in the given format. The caller's map is never mutated.
-func applyDateFormat(fields FieldData, format DateFormat) FieldData {
+// wireFields returns a copy of fields with each value prepared by wireValue. The
+// caller's map is never mutated, and a nil map yields an empty one, which
+// marshals as {}.
+func wireFields(fields FieldData, format *DateFormat) FieldData {
 	out := make(FieldData, len(fields))
 	for k, v := range fields {
-		out[k] = formatDateValue(v, format)
+		out[k] = wireValue(v, format)
 	}
 	return out
 }
 
-// applyDateFormatPortals does the same as applyDateFormat but for portal rows,
-// deep-copying so the caller's data is never mutated.
-func applyDateFormatPortals(portals PortalData, format DateFormat) PortalData {
+// wirePortals does the same as wireFields but for portal rows, deep-copying so
+// the caller's data is never mutated. A nil map yields nil.
+func wirePortals(portals PortalData, format *DateFormat) PortalData {
 	if portals == nil {
 		return nil
 	}
@@ -524,11 +556,7 @@ func applyDateFormatPortals(portals PortalData, format DateFormat) PortalData {
 	for name, rows := range portals {
 		newRows := make([]map[string]any, len(rows))
 		for i, row := range rows {
-			nr := make(map[string]any, len(row))
-			for k, v := range row {
-				nr[k] = formatDateValue(v, format)
-			}
-			newRows[i] = nr
+			newRows[i] = wireFields(row, format)
 		}
 		out[name] = newRows
 	}

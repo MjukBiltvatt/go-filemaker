@@ -101,7 +101,7 @@ func TestFindWithPortalData(t *testing.T) {
 	if got := orders[0]["Orders::Item"]; got != "Widget" {
 		t.Errorf("Orders[0] Item = %v, want Widget", got)
 	}
-	if got := orders[0]["Orders::Qty"]; got != float64(3) {
+	if got := orders[0]["Orders::Qty"]; got != Number("3") {
 		t.Errorf("Orders[0] Qty = %v, want 3", got)
 	}
 	if got := orders[1]["Orders::Item"]; got != "Gadget" {

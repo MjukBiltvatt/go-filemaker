@@ -14,19 +14,30 @@ func testRecord() Record {
 		layout: "People",
 		fieldData: map[string]any{
 			"string":              "string",
-			"int":                 float64(100),
-			"int8":                float64(8),
-			"int16":               float64(16),
-			"int32":               float64(32),
-			"int64":               float64(64),
-			"float32":             float64(32.32),
-			"float64":             float64(64.64),
+			"int":                 Number("100"),
+			"int8":                Number("8"),
+			"int16":               Number("16"),
+			"int32":               Number("32"),
+			"int64":               Number("64"),
+			"float32":             Number("32.32"),
+			"float64":             Number("64.64"),
+			"int_big":             Number("9007199254740993"), // 2^53 + 1: past float64
+			"fraction":            Number("3.7"),
+			"huge":                Number("1.2345678901234568e+29"),
+			"beyond_int64":        Number("123456789012345678901234567890"),
+			"exponent_whole":      Number("1e3"),
+			"number_text":         "abc", // text a user typed into a number field
 			"bool_true_txt_test":  "test",
 			"bool_true_txt_false": "false",
 			"bool_false_txt":      "",
-			"bool_true_num_1":     float64(1),
-			"bool_true_num_123":   float64(123),
-			"bool_false_num_0":    float64(0),
+			"bool_true_num_1":     Number("1"),
+			"bool_true_num_123":   Number("123"),
+			"bool_false_num_0":    Number("0"),
+			"bool_false_num_neg":  Number("-1"),
+			"bool_true_num_small": Number("0.001"),
+			"bool_false_zeros":    Number("0.000"),
+			"bool_false_zero_exp": Number("0e5"),
+			"bool_false_neg_zero": Number("-0"),
 			"date_1":              "01/02/2006",
 			"date_2":              "2006-01-02",
 			"timestamp_1":         "01/02/2006 15:04:05",
@@ -50,9 +61,9 @@ func TestFieldsAndPortalsAreFaithfulCopies(t *testing.T) {
 		{"nil", Record{}},
 		{"empty", Record{fieldData: map[string]any{}, portalData: map[string][]map[string]any{}, portalInfo: map[string]PortalDataInfo{}}},
 		{"populated", Record{
-			fieldData: map[string]any{"Name": "Mark", "Age": float64(42), "Note": ""},
+			fieldData: map[string]any{"Name": "Mark", "Age": Number("42"), "Note": ""},
 			portalData: map[string][]map[string]any{
-				"Lines":   {{"Item": "Widget", "Qty": float64(3)}, {"Item": "Gadget", "Qty": float64(0)}},
+				"Lines":   {{"Item": "Widget", "Qty": Number("3")}, {"Item": "Gadget", "Qty": Number("0")}},
 				"Empty":   {},
 				"NilRows": nil,
 			},
@@ -180,8 +191,46 @@ func TestRecordGetters(t *testing.T) {
 		if got := r.Int64("int64"); got != 64 {
 			t.Errorf("Int64 = %d", got)
 		}
-		if _, err := r.IntE("string"); !errors.Is(err, ErrNotNumber) {
-			t.Errorf("IntE(string) err = %v, want ErrNotNumber", err)
+		if got := r.Int64("int_big"); got != 9007199254740993 {
+			t.Errorf("Int64(int_big) = %d, want 9007199254740993 (exact)", got)
+		}
+		cases := []struct {
+			field   string
+			wantErr error
+		}{
+			{"string", ErrNotNumber},
+			{"number_text", ErrNotNumber},
+			{"list_empty", ErrNotNumber},
+			{"missing", ErrNotNumber},
+			{"fraction", ErrNotInteger},
+			{"exponent_whole", ErrNotInteger}, // whole, but not integer notation
+			{"huge", ErrNotInteger},
+			{"beyond_int64", ErrOutOfRange},
+		}
+		for _, c := range cases {
+			if got, err := r.IntE(c.field); !errors.Is(err, c.wantErr) || got != 0 {
+				t.Errorf("IntE(%q) = %d, %v; want 0, %v", c.field, got, err, c.wantErr)
+			}
+			if got, err := r.Int64E(c.field); !errors.Is(err, c.wantErr) || got != 0 {
+				t.Errorf("Int64E(%q) = %d, %v; want 0, %v", c.field, got, err, c.wantErr)
+			}
+			if got := r.Int(c.field); got != 0 {
+				t.Errorf("Int(%q) = %d, want 0", c.field, got)
+			}
+		}
+	})
+
+	t.Run("number", func(t *testing.T) {
+		if got := r.Number("int_big"); got != "9007199254740993" {
+			t.Errorf("Number(int_big) = %q, want the exact digits", got)
+		}
+		if got, err := r.NumberE("huge"); err != nil || got != "1.2345678901234568e+29" {
+			t.Errorf("NumberE(huge) = %q, %v", got, err)
+		}
+		for _, field := range []string{"string", "number_text", "list_empty", "missing"} {
+			if got, err := r.NumberE(field); !errors.Is(err, ErrNotNumber) || got != "" {
+				t.Errorf("NumberE(%q) = %q, %v; want \"\", ErrNotNumber", field, got, err)
+			}
 		}
 	})
 
@@ -189,19 +238,33 @@ func TestRecordGetters(t *testing.T) {
 		if got := r.Float64("float64"); got != 64.64 {
 			t.Errorf("Float64 = %v", got)
 		}
-		if _, err := r.Float64E("string"); !errors.Is(err, ErrNotNumber) {
-			t.Errorf("Float64E(string) err = %v, want ErrNotNumber", err)
+		if got := r.Float64("fraction"); got != 3.7 {
+			t.Errorf("Float64(fraction) = %v, want 3.7", got)
+		}
+		if got := r.Float64("huge"); got != 1.2345678901234568e+29 {
+			t.Errorf("Float64(huge) = %v", got)
+		}
+		for _, field := range []string{"string", "number_text", "missing"} {
+			if _, err := r.Float64E(field); !errors.Is(err, ErrNotNumber) {
+				t.Errorf("Float64E(%q) err = %v, want ErrNotNumber", field, err)
+			}
 		}
 	})
 
 	t.Run("bool", func(t *testing.T) {
 		cases := map[string]bool{
-			"bool_true_txt_test": true,
-			"bool_false_txt":     false,
-			"bool_true_num_1":    true,
-			"bool_true_num_123":  true,
-			"bool_false_num_0":   false,
-			"missing":            false,
+			"bool_true_txt_test":  true,
+			"bool_false_txt":      false,
+			"bool_true_num_1":     true,
+			"bool_true_num_123":   true,
+			"bool_false_num_0":    false,
+			"bool_false_num_neg":  false,
+			"bool_true_num_small": true,
+			"bool_false_zeros":    false,
+			"bool_false_zero_exp": false,
+			"bool_false_neg_zero": false,
+			"huge":                true,
+			"missing":             false,
 		}
 		for field, want := range cases {
 			if got := r.Bool(field); got != want {
@@ -263,6 +326,7 @@ type testRecordStruct struct {
 	Int8        int8       `fm:"int8"`
 	Int64       int64      `fm:"int64"`
 	Float64     float64    `fm:"float64"`
+	Number      Number     `fm:"int_big"`
 	BoolText    bool       `fm:"bool_true_txt_test"`
 	BoolNumZero bool       `fm:"bool_false_num_0"`
 	Date        time.Time  `fm:"date_1"`
@@ -294,6 +358,7 @@ func TestRecordDecode(t *testing.T) {
 		{"int8", value.Int8 == 8},
 		{"int64", value.Int64 == 64},
 		{"float64", value.Float64 == 64.64},
+		{"number", value.Number == "9007199254740993"},
 		{"bool_text", value.BoolText},
 		{"bool_num_zero", !value.BoolNumZero},
 		{"date", value.Date.Equal(time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC))},

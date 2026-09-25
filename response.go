@@ -1,8 +1,12 @@
 package filemaker
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"strconv"
+	"time"
 )
 
 // responseBody mirrors the envelope every Data API call returns. The wire form
@@ -41,14 +45,47 @@ type responseBody struct {
 
 // recordWire is the wire shape of a "data" item. Record's field and portal maps
 // are unexported (so records are immutable), which encoding/json cannot set, so
-// the response decodes into this exported-field struct and Find builds Records
-// from it.
+// the response decodes into this exported-field struct and the read endpoints
+// build Records from it with record.
 type recordWire struct {
 	ID             string                      `json:"recordId"`
 	ModID          string                      `json:"modId"`
 	FieldData      map[string]any              `json:"fieldData"`
 	PortalData     map[string][]map[string]any `json:"portalData"`
 	PortalDataInfo []portalDataInfoWire        `json:"portalDataInfo"`
+}
+
+// record builds the Record a "data" item describes, read through layout and
+// stamped with the client's location. Its number values become Number (see
+// exactNumbers).
+func (w recordWire) record(layout string, loc *time.Location) Record {
+	for _, rows := range w.PortalData {
+		for _, row := range rows {
+			exactNumbers(row)
+		}
+	}
+	return Record{
+		id:         w.ID,
+		modID:      w.ModID,
+		layout:     layout,
+		fieldData:  exactNumbers(w.FieldData),
+		portalData: w.PortalData,
+		portalInfo: w.portalInfo(),
+		loc:        loc,
+	}
+}
+
+// exactNumbers replaces each json.Number in a decoded field map with the Number
+// holding the same digits, in place, and returns the map. The response is
+// decoded with UseNumber, so number fields arrive as json.Number rather than
+// rounded to float64; Number is the type records expose them as.
+func exactNumbers(fields map[string]any) map[string]any {
+	for k, v := range fields {
+		if n, ok := v.(json.Number); ok {
+			fields[k] = Number(n)
+		}
+	}
+	return fields
 }
 
 // portalDataInfoWire is one "portalDataInfo" entry. The host adds
@@ -76,6 +113,25 @@ func (w recordWire) portalInfo() map[string]PortalDataInfo {
 		info[name] = p.PortalDataInfo
 	}
 	return info
+}
+
+// decode parses a response body into rb. Numbers decode as json.Number, keeping
+// the host's exact digits: FileMaker numbers carry more than a float64 holds,
+// and json.Unmarshal would round them. Like json.Unmarshal, it rejects data after
+// the JSON value.
+func (rb *responseBody) decode(body []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if err := dec.Decode(rb); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		if err == nil {
+			err = errors.New("invalid data after top-level value")
+		}
+		return err
+	}
+	return nil
 }
 
 // scriptOutcomes assembles the per-phase script results the host reported. The

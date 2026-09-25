@@ -958,7 +958,7 @@ func TestDownloadFromContainerNotAURL(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", fieldData: map[string]any{"Age": float64(42), "Photo": ""}}
+	rec := Record{layout: "People", fieldData: map[string]any{"Age": Number("42"), "Photo": ""}}
 
 	_, err := c.DownloadFromContainer(context.Background(), rec, "Age")
 	if !errors.Is(err, ErrNotString) || errors.Is(err, ErrEmptyContainer) {
@@ -1324,5 +1324,117 @@ func TestFieldDataWithTypedValues(t *testing.T) {
 	want := `{"fieldData":{"Active":1,"Created":"06/23/2026 14:05:00","DOB":"06/23/1990","Name":"Mark"}}`
 	if string(body) != want {
 		t.Errorf("got:  %s\nwant: %s", body, want)
+	}
+}
+
+type testCustomerID int64
+
+// TestMarshalRecordBodyNumbers checks that integers and exact-digit numbers are
+// sent as JSON strings — the host stores a JSON-number input as a double,
+// exact only up to 15 significant digits, but converts a string input itself
+// and keeps every digit — in field data and portal rows, while floats and every other value are
+// sent as before.
+func TestMarshalRecordBodyNumbers(t *testing.T) {
+	big := int64(9007199254740993)
+	fields := FieldData{
+		"Int":        7,
+		"Int64":      int64(20260924123456789),
+		"Uint8":      uint8(200),
+		"Uint64":     uint64(18446744073709551615),
+		"Defined":    testCustomerID(9007199254740993),
+		"Pointer":    &big,
+		"NilPointer": (*int64)(nil),
+		"JSONNumber": json.Number("12345678901234.567"),
+		"Number":     Number("123456789012345678901234567890"),
+		"Float":      3.5,
+		"Bool":       Bool(true),
+		"Text":       "7",
+		"Nil":        nil,
+	}
+	p := params{portalData: PortalData{"Lines": {{"recordId": "5", "Lines::Qty": int64(20260924123456789)}}}}
+
+	body, err := marshalRecordBody(fields, p, nil)
+	if err != nil {
+		t.Fatalf("marshalRecordBody: %v", err)
+	}
+	want := `{"fieldData":{"Bool":1,"Defined":"9007199254740993","Float":3.5,"Int":"7","Int64":"20260924123456789",` +
+		`"JSONNumber":"12345678901234.567","Nil":null,"NilPointer":null,"Number":"123456789012345678901234567890",` +
+		`"Pointer":"9007199254740993","Text":"7","Uint64":"18446744073709551615","Uint8":"200"},` +
+		`"portalData":{"Lines":[{"Lines::Qty":"20260924123456789","recordId":"5"}]}}`
+	if string(body) != want {
+		t.Errorf("got:  %s\nwant: %s", body, want)
+	}
+	if fields["Int"] != 7 || p.portalData["Lines"][0]["Lines::Qty"] != int64(20260924123456789) {
+		t.Error("marshalRecordBody mutated the caller's field or portal data")
+	}
+}
+
+// TestMarshalRecordBodyInvalidNumber checks that a json.Number that is not a
+// number is refused, as json.Marshal refuses it, rather than being sent as text.
+func TestMarshalRecordBodyInvalidNumber(t *testing.T) {
+	if _, err := marshalRecordBody(FieldData{"Qty": json.Number("abc")}, params{}, nil); err == nil {
+		t.Error("marshalRecordBody(invalid json.Number) = nil error, want an error")
+	}
+}
+
+// TestUpdateRoundTripKeepsDigits reads a record and writes its portal rows back
+// unchanged: every number must go back with the digits it came with.
+func TestUpdateRoundTripKeepsDigits(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeJSON(w, `{"response":{"data":[{"recordId":"42","modId":"3",
+				"fieldData":{"Id":9007199254740993},
+				"portalData":{"Lines":[{"recordId":"5","modId":"1","Lines::Qty":20260924123456789,"Lines::Price":12345678901234.567}]}
+			}]},"messages":[{"code":"0","message":"OK"}]}`)
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = string(b)
+		mu.Unlock()
+		writeJSON(w, `{"response":{"modId":"4"},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	got, err := c.GetByID(context.Background(), "People", "42")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	rec := got.Record
+	if _, err := c.Update(context.Background(), rec, FieldData{"Id": rec.Get("Id")}, WithPortalData(rec.Portals())); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	mu.Lock()
+	body := gotBody
+	mu.Unlock()
+	want := `{"fieldData":{"Id":"9007199254740993"},"portalData":{"Lines":[{"Lines::Price":"12345678901234.567","Lines::Qty":"20260924123456789","modId":"1","recordId":"5"}]}}`
+	if body != want {
+		t.Errorf("body:\n got: %s\nwant: %s", body, want)
+	}
+}
+
+func TestSetGlobalFieldsNumbers(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+	}))
+	defer srv.Close()
+
+	_, err := testClient(srv).SetGlobalFields(context.Background(), FieldData{
+		"Contacts::gCount":  int64(20260924123456789),
+		"Contacts::gAmount": Number("12345678901234.567"),
+	})
+	if err != nil {
+		t.Fatalf("SetGlobalFields: %v", err)
+	}
+	want := `{"globalFields":{"Contacts::gAmount":"12345678901234.567","Contacts::gCount":"20260924123456789"}}`
+	if gotBody != want {
+		t.Errorf("body = %s, want %s", gotBody, want)
 	}
 }
