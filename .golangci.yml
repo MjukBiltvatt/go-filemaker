@@ -6,16 +6,20 @@ run:
     - integration
 
 linters:
-  settings:
-    errcheck:
-      # Calls whose errors are deliberately ignored. errcheck stays on
-      # everywhere else, test files included.
-      exclude-functions:
-        # Closing a response body: there is nothing useful to do on failure.
-        - (io.Closer).Close
-        # Debug output (debug.go) and httptest handler bodies: a failed write
-        # must not fail the request, and in tests it surfaces as a failed
-        # assertion anyway.
-        - fmt.Fprint
-        - fmt.Fprintf
-        - (net/http.ResponseWriter).Write
+  exclusions:
+    # Errors deliberately ignored at known call sites. Each rule is scoped to
+    # its site, so errcheck still reports the same calls anywhere else. A rule
+    # that stops matching (e.g. after a rename) makes lint report the call,
+    # never silently allow a new one.
+    rules:
+      # Closing an HTTP response body: nothing useful to do on failure.
+      - linters: [errcheck]
+        source: '^\s*defer res\.Body\.Close\(\)$'
+      # Debug output must not fail the request it describes.
+      - path: debug\.go$
+        linters: [errcheck]
+        text: '`fmt\.Fprintf`'
+      # httptest handler bodies: a failed write surfaces as a failed assertion.
+      - path: _test\.go$
+        linters: [errcheck]
+        text: '`(w\.Write|fmt\.Fprint)`'

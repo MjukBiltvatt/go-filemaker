@@ -60,10 +60,14 @@ jobs:
       with:
         persist-credentials: false
 
+    # Pinned, not `stable`: golangci-lint can only analyze code for Go versions
+    # up to the one its binary was built with (v2.14.0 is built with Go 1.27),
+    # so a new Go release would break this job without any source change.
+    # Dependabot does not bump either version; bump them together.
     - name: Set up Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
-        go-version: stable
+        go-version: '1.27'
         cache: false
 
     - name: gofmt
@@ -76,9 +80,7 @@ jobs:
           exit 1
         fi
 
-    # golangci-lint can only analyze code for Go versions up to the one its
-    # binary was built with. When `stable` moves to a new Go release, bump this
-    # to a golangci-lint release built with it.
+    # Bump together with the lint job's go-version above.
     - name: golangci-lint
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
