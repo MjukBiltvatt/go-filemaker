@@ -146,6 +146,8 @@ var p struct {
 if err := rec.Decode(&p); err != nil { /* … */ }
 ```
 
+It fills every field it can and returns one error naming each field it could not — a value of the wrong type, or a field the record lacks (tag it `fm:"Notes,optional"` if it may be absent).
+
 ## Writing field values
 
 Build a `FieldData` map. Strings and Go numbers need no wrapper: integers are sent with their exact digits, and a `float64` is stored as the value it holds, which is exact for decimals of up to 15 significant digits. For a decimal that needs more, or an integer beyond `int64`, use `filemaker.Number`, which carries its exact decimal text. The other optional wrappers render Go types in FileMaker's expected formats:

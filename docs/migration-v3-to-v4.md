@@ -250,14 +250,27 @@ The time zone that was the second argument to `Map` is now a client-level settin
 - **Login timing.** A bad host/credential failed at `New` in v3; in v4 it
   surfaces on the first operation (or on an explicit `Authenticate(ctx)`).
 - **`Decode` is flat**, not recursive (see above).
-- **`Decode` rejects `fm` tags it cannot honour.** v3's `Map` returned nothing and
-  skipped any field type it did not handle. v4 returns an error naming every
-  `fm`-tagged field whose type is unsupported — an unsigned or slice field, a
-  nested struct, or a defined type over a supported one (`type Status string` is
-  not `string`). The check is on the struct definition, so it surfaces on the
-  first decode; fields that do decode are still populated. Untagged and `fm:"-"`
-  fields are unaffected. Supported types: `string`, `int`, `int8`, `int16`,
-  `int32`, `int64`, `float32`, `float64`, `Number`, `bool`, `time.Duration`, `time.Time`,
+- **`Decode` reports every field it cannot fill.** v3's `Map` returned nothing
+  and left such fields at their zero value. v4 returns one error naming each
+  `fm`-tagged field it could not fill, and the record:
+  - a tag naming a field the record does not have — usually a typo, or a field
+    not on the layout — wraps `ErrMissingField`; tag the field
+    `fm:"Name,optional"` if it may be absent;
+  - a value that does not convert wraps the accessor's error: `ErrNotNumber`
+    (text in a number field), `ErrNotInteger` (`3.7`, `7.0` or `1e3` into an
+    `int`), `ErrOutOfRange` (`300` into an `int8`), `ErrUnknownFormat` (a date
+    that does not parse);
+  - a field whose type is unsupported — an unsigned or slice field, a nested
+    struct, or a defined type over a supported one (`type Status string` is not
+    `string`) — or an unknown tag option. This depends on the struct alone, so
+    it surfaces on the first decode.
+
+  Empty fields still decode to the zero value without error, every field that
+  can be filled still is, and a number field decodes into a `string` field as
+  its exact text. Test for a cause with `errors.Is`. To keep v3's leniency, log
+  the error and use the struct. Untagged and `fm:"-"` fields are unaffected.
+  Supported types: `string`, `int`, `int8`, `int16`, `int32`, `int64`,
+  `float32`, `float64`, `Number`, `bool`, `time.Duration`, `time.Time`,
   `*time.Time`.
 - **Raw number values are `filemaker.Number`, not `float64`.** `Get`, `Fields`,
   and `Portals` return number fields as `Number`, so a type assertion or switch
@@ -271,8 +284,8 @@ The time zone that was the second argument to `Map` is now a client-level settin
   result. So does a whole number the host sends in another notation — `7.0` or
   `1e3`, which v3 read as 7 and 1000. The host sends the text as it was typed
   into FileMaker, so such entries do occur; read them with `Float64`, or parse
-  `rec.Number(field)` yourself. `Decode` fills `int` fields through `Int64`, so
-  these values decode to `0`.
+  `rec.Number(field)` yourself. `Decode` reports these values for `int` fields
+  as errors too (see above).
 - **Integers are written as strings.** `FieldData{"Qty": 7}` is sent as
   `"Qty":"7"`, and `Number` values likewise, because the host rounds a
   JSON-number input to a double before storing it but stores a numeric string

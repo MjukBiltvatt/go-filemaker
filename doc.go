@@ -52,10 +52,11 @@
 // host reports nothing ([SetGlobalFieldsResponse]), so a value the host adds
 // later arrives as a new field rather than a changed signature.
 //
-// FieldData is marshaled faithfully — string and number values are sent as-is.
-// The optional wrappers [Bool], [Date], [Timestamp], [Time], and [Duration]
-// render Go values in the formats FileMaker expects and slot directly into the
-// map.
+// FieldData is marshaled faithfully: strings and floats are sent as-is, and Go
+// integers with their exact digits. [Number] carries exact numbers beyond
+// float64, and the optional wrappers [Bool], [Date], [Timestamp], [Time], and
+// [Duration] render Go values in the formats FileMaker expects; all slot
+// directly into the map.
 //
 //	created, err := c.Create(ctx, "People", filemaker.FieldData{
 //	    "Firstname": "Mark",
@@ -93,6 +94,12 @@
 // operation that addresses a single record by layout and ID names both in any
 // error from the request itself, wrapping the underlying error so errors.Is and
 // errors.As still reach it.
+//
+// Reading a value is not a request, and its errors are sentinels: a typed
+// accessor's …E form reports [ErrNotNumber], [ErrNotInteger], [ErrOutOfRange],
+// and so on. [Record.Decode] reports every struct field it cannot fill in one
+// error — naming each field, and the record — that matches each cause,
+// including [ErrMissingField], with errors.Is.
 //
 // A request that never reached those semantics — a proxy or gateway answered, the
 // body would not decode, or the container streaming endpoint refused it — returns

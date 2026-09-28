@@ -409,19 +409,34 @@ func parseFMDuration(s string) (time.Duration, error) {
 // migration notes.)
 //
 // Only fields with a non-empty `fm` tag are touched; untagged fields and fields
-// tagged `fm:"-"` are left as-is. Decoding is lenient per field: a missing or
-// empty field leaves the struct field at its zero value. time.Time fields use
-// the record's configured location; a *time.Time field is set to a pointer when
-// the value parses to a non-zero time, and to nil otherwise (clearing any value
-// from a previous Decode).
+// tagged `fm:"-"` are left as-is. Each tagged field is set from this record
+// alone: it starts from its zero value, so nothing from an earlier Decode into
+// the same struct lingers.
 //
-// An error is returned only for structural misuse: obj is not a non-nil pointer
-// to a struct, or an `fm`-tagged field has a type outside the supported list
-// below. The second case depends on the struct definition alone, not on the
-// record's data, so it surfaces on the first decode rather than for some records
-// only; every offending field is reported, and the fields that do decode are
-// still populated. Note that a defined type over a supported type (type Status
-// string) is not itself supported.
+//   - An empty field (which the host sends as "" whatever its type) decodes to
+//     the zero value — nil for *time.Time — without error.
+//   - A field the record does not have is an error wrapping ErrMissingField,
+//     unless the tag carries the optional option (`fm:"Notes,optional"`), in
+//     which case it decodes to the zero value.
+//   - A value that cannot be converted to the field's type is an error wrapping
+//     the accessor's error: ErrNotNumber, ErrNotInteger, ErrOutOfRange (also
+//     for a value that overflows int8…int32 or float32), ErrUnknownFormat for a
+//     date, time or duration that does not parse. The field is left at its zero
+//     value.
+//   - A number field decodes into a string field as its exact text.
+//
+// time.Time fields use the record's configured location; bool fields follow
+// Bool, which accepts any value.
+//
+// Decode fills every field it can and reports all the fields it cannot in one
+// error, in struct field order, alongside any struct-definition faults: an
+// `fm`-tagged field whose type is not supported (which depends on the struct
+// alone, so it surfaces on the first decode) or an unknown tag option. Each
+// failure names the struct field and its tag, and the error matches each cause
+// with errors.Is. For a record returned by the host, the error also names the
+// record and its layout. A caller that prefers leniency can log the error and
+// use the struct, which holds everything that decoded. Note that a defined type
+// over a supported type (type Status string) is not itself supported.
 //
 // Supported field types: string, int, int8, int16, int32, int64, float32,
 // float64, Number, bool, time.Duration, time.Time, *time.Time.
@@ -442,54 +457,169 @@ func (r Record) Decode(obj any) error {
 		if !field.CanSet() {
 			continue
 		}
-
-		tag := vType.Field(i).Tag.Get("fm")
+		sf := vType.Field(i)
+		tag := sf.Tag.Get("fm")
 		if tag == "" || tag == "-" {
 			continue
 		}
-
-		switch field.Interface().(type) {
-		case string:
-			field.SetString(r.String(tag))
-		case int, int8, int16, int32, int64:
-			field.SetInt(r.Int64(tag))
-		case float32, float64:
-			field.SetFloat(r.Float64(tag))
-		case Number:
-			field.SetString(string(r.Number(tag)))
-		case bool:
-			field.SetBool(r.Bool(tag))
-		case time.Duration:
-			// A distinct named type (underlying int64), so it is matched here
-			// rather than by the integer case above.
-			field.Set(reflect.ValueOf(r.Duration(tag)))
-		case time.Time:
-			field.Set(reflect.ValueOf(r.Time(tag)))
-		case *time.Time:
-			// Assign unconditionally so the field reflects this record: a
-			// fresh pointer for a parseable value, nil otherwise (clearing any
-			// value left by a previous Decode).
-			if parsed := r.Time(tag); !parsed.IsZero() {
-				field.Set(reflect.ValueOf(&parsed))
-			} else {
-				field.Set(reflect.Zero(field.Type()))
-			}
-		default:
-			errs = append(errs, unsupportedFieldError(vType.Field(i), tag))
+		if err := r.decodeField(field, tag); err != nil {
+			errs = append(errs, &fieldError{field: sf.Name, tag: tag, err: err})
 		}
 	}
-	return errors.Join(errs...)
+	if len(errs) == 0 {
+		return nil
+	}
+	err := &decodeError{errs: errs}
+	if r.id == "" {
+		// Not a record the host returned (a zero or hand-built Record): there
+		// is no record to name.
+		return err
+	}
+	return recordErr(err, r.layout, r.id)
 }
 
-// unsupportedFieldError reports an `fm`-tagged struct field that Decode cannot
-// populate. The fault is in the struct definition rather than the record — it is
-// the same for every record — so it is reported rather than skipped.
-func unsupportedFieldError(sf reflect.StructField, tag string) error {
+// decodeField sets one struct field from the record field its `fm` tag names
+// (see Decode for the rules), returning why it could not.
+func (r Record) decodeField(field reflect.Value, tag string) error {
+	name, opts, _ := strings.Cut(tag, ",")
+	optional := false
+	if opts != "" {
+		for _, opt := range strings.Split(opts, ",") {
+			if opt != "optional" {
+				return fmt.Errorf("unknown tag option %q", opt)
+			}
+			optional = true
+		}
+	}
+	if !decodable(field.Type()) {
+		return unsupportedTypeError(field.Type())
+	}
+
+	field.Set(reflect.Zero(field.Type()))
+	val, ok := r.fieldData[name]
+	switch {
+	case !ok && optional:
+		return nil
+	case !ok:
+		return ErrMissingField
+	case val == "":
+		return nil
+	}
+
+	switch field.Interface().(type) {
+	case string:
+		if n, ok := val.(Number); ok {
+			field.SetString(string(n))
+			return nil
+		}
+		s, err := r.StringE(name)
+		if err != nil {
+			return err
+		}
+		field.SetString(s)
+	case int, int8, int16, int32, int64:
+		i, err := r.Int64E(name)
+		if err != nil {
+			return err
+		}
+		if field.OverflowInt(i) {
+			return ErrOutOfRange
+		}
+		field.SetInt(i)
+	case float32, float64:
+		f, err := r.Float64E(name)
+		if err != nil {
+			return err
+		}
+		if field.OverflowFloat(f) {
+			return ErrOutOfRange
+		}
+		field.SetFloat(f)
+	case Number:
+		n, err := r.NumberE(name)
+		if err != nil {
+			return err
+		}
+		field.SetString(string(n))
+	case bool:
+		field.SetBool(r.Bool(name))
+	case time.Duration:
+		// A distinct named type (underlying int64), so it is matched here
+		// rather than by the integer case above.
+		d, err := r.DurationE(name)
+		if err != nil {
+			return err
+		}
+		field.Set(reflect.ValueOf(d))
+	case time.Time:
+		t, err := r.TimeE(name)
+		if err != nil {
+			return err
+		}
+		field.Set(reflect.ValueOf(t))
+	case *time.Time:
+		t, err := r.TimeE(name)
+		if err != nil {
+			return err
+		}
+		field.Set(reflect.ValueOf(&t))
+	}
+	return nil
+}
+
+// decodable reports whether Decode supports struct fields of type t: exactly
+// the types decodeField's switch handles, so a defined type over one of them is
+// not decodable.
+func decodable(t reflect.Type) bool {
+	switch reflect.Zero(t).Interface().(type) {
+	case string, int, int8, int16, int32, int64, float32, float64, Number, bool,
+		time.Duration, time.Time, *time.Time:
+		return true
+	}
+	return false
+}
+
+// unsupportedTypeError reports an `fm`-tagged struct field type that Decode
+// cannot populate. The fault is in the struct definition rather than the record
+// — it is the same for every record — so it is reported rather than skipped.
+func unsupportedTypeError(t reflect.Type) error {
 	hint := ""
-	if k := sf.Type.Kind(); k == reflect.Struct ||
-		(k == reflect.Pointer && sf.Type.Elem().Kind() == reflect.Struct) {
+	if k := t.Kind(); k == reflect.Struct || (k == reflect.Pointer && t.Elem().Kind() == reflect.Struct) {
 		hint = "; Decode is not recursive — call Decode on the nested struct itself"
 	}
-	return fmt.Errorf("filemaker: decode: field %s has unsupported type %s for tag %q%s",
-		sf.Name, sf.Type, tag, hint)
+	return fmt.Errorf("unsupported type %s%s", t, hint)
 }
+
+// fieldError is one struct field Decode could not fill: the field, its `fm`
+// tag, and why. Its message drops the wrapped error's package prefix, which
+// decodeError carries once for all its fields.
+type fieldError struct {
+	field, tag string
+	err        error
+}
+
+func (e *fieldError) Error() string {
+	return fmt.Sprintf("%s (fm:%q): %s", e.field, e.tag, strings.TrimPrefix(e.err.Error(), "filemaker: "))
+}
+
+func (e *fieldError) Unwrap() error { return e.err }
+
+// decodeError is the error Decode returns: every field it could not fill, in
+// struct field order. Its message is a single line — the fields joined by "; "
+// rather than errors.Join's newlines — so it stays whole in a log line or an
+// error tracker's title, and it unwraps to each field's error so errors.Is
+// matches any of their causes. It is unexported because the field list is for
+// people reading the message; code branches on what it wraps.
+type decodeError struct {
+	errs []error
+}
+
+func (e *decodeError) Error() string {
+	parts := make([]string, len(e.errs))
+	for i, err := range e.errs {
+		parts[i] = err.Error()
+	}
+	return "filemaker: decode: " + strings.Join(parts, "; ")
+}
+
+func (e *decodeError) Unwrap() []error { return e.errs }

@@ -35,6 +35,12 @@ var (
 	// with Record.Number to keep its exact digits.
 	ErrOutOfRange = errors.New("filemaker: value is out of range")
 
+	// ErrMissingField is returned (wrapped) by Record.Decode when an `fm` tag
+	// names a field the record does not have — usually a typo in the tag, or a
+	// field that is not on the layout (or on the response layout). Tag the field
+	// `fm:"Name,optional"` to allow it to be absent.
+	ErrMissingField = errors.New("filemaker: field is not in the record")
+
 	// ErrEmptyContainer is returned (wrapped) by DownloadFromContainer when the
 	// container field holds nothing. An empty container is a normal state, not a
 	// fault, so it has its own sentinel: test for it with errors.Is to skip

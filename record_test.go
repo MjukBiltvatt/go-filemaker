@@ -331,9 +331,9 @@ type testRecordStruct struct {
 	BoolNumZero bool       `fm:"bool_false_num_0"`
 	Date        time.Time  `fm:"date_1"`
 	Timestamp   time.Time  `fm:"timestamp_1"`
-	TimeInvalid time.Time  `fm:"time_invalid"`
+	TimeEmpty   time.Time  `fm:"list_empty"`
 	TimePointer *time.Time `fm:"timestamp_1"`
-	TimePtrZero *time.Time `fm:"time_invalid"`
+	TimePtrZero *time.Time `fm:"list_empty"`
 
 	Untagged string       // no fm tag: must be left untouched
 	Skipped  string       `fm:"-"` // explicitly skipped
@@ -363,7 +363,7 @@ func TestRecordDecode(t *testing.T) {
 		{"bool_num_zero", !value.BoolNumZero},
 		{"date", value.Date.Equal(time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC))},
 		{"timestamp", value.Timestamp.Equal(wantTS)},
-		{"time_invalid", value.TimeInvalid.IsZero()},
+		{"time_empty", value.TimeEmpty.IsZero()},
 		{"time_pointer", value.TimePointer != nil && value.TimePointer.Equal(wantTS)},
 		{"time_pointer_zero", value.TimePtrZero == nil},
 		{"untagged_untouched", value.Untagged == "keep"},
@@ -586,5 +586,174 @@ func TestDecodeDuration(t *testing.T) {
 	}
 	if want := 37*time.Hour + 30*time.Minute; got.Worked != want {
 		t.Errorf("Worked = %v, want %v", got.Worked, want)
+	}
+}
+
+// TestRecordDecodeDataErrors checks that a value Decode cannot convert is
+// reported rather than left silently at its zero value: every failing field is
+// named in one single-line error that matches each cause with errors.Is, each
+// failing field is reset to its zero value, and the fields that can decode are
+// still populated.
+func TestRecordDecodeDataErrors(t *testing.T) {
+	r := Record{fieldData: map[string]any{
+		"name":     "Mark",
+		"fraction": Number("3.7"),
+		"big":      Number("300"),
+		"float":    Number("1e39"),
+		"text":     "abc",
+		"bad_time": "january 1 2006 15 pm",
+		"bad_dur":  "37 hours",
+	}}
+	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	value := struct {
+		Name     string        `fm:"name"`
+		Fraction int           `fm:"fraction"`
+		Big      int8          `fm:"big"`
+		Float    float32       `fm:"float"`
+		Text     int64         `fm:"text"`
+		TextNum  Number        `fm:"text"`
+		BadTime  time.Time     `fm:"bad_time"`
+		BadPtr   *time.Time    `fm:"bad_time"`
+		BadDur   time.Duration `fm:"bad_dur"`
+		Missing  string        `fm:"nope"`
+	}{
+		// Stale values from an earlier decode: each failing field must be reset.
+		Fraction: 1, Big: 1, Float: 1, Text: 1, TextNum: "1",
+		BadTime: past, BadPtr: &past, BadDur: 1, Missing: "stale",
+	}
+
+	err := r.Decode(&value)
+	if err == nil {
+		t.Fatal("Decode = nil error, want one naming every failing field")
+	}
+	for _, want := range []error{ErrNotInteger, ErrOutOfRange, ErrNotNumber, ErrUnknownFormat, ErrMissingField} {
+		if !errors.Is(err, want) {
+			t.Errorf("errors.Is(err, %v) = false; err = %v", want, err)
+		}
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "\n") {
+		t.Errorf("error spans several lines: %q", msg)
+	}
+	if !strings.HasPrefix(msg, "filemaker: decode: ") {
+		t.Errorf("error = %q, want the filemaker: decode: prefix", msg)
+	}
+	if n := strings.Count(msg, "filemaker:"); n != 1 {
+		t.Errorf("error names the package %d times, want once: %q", n, msg)
+	}
+	for _, part := range []string{
+		`Fraction (fm:"fraction")`, `Big (fm:"big")`, `Float (fm:"float")`, `Text (fm:"text")`,
+		`TextNum (fm:"text")`, `BadTime (fm:"bad_time")`, `BadPtr (fm:"bad_time")`,
+		`BadDur (fm:"bad_dur")`, `Missing (fm:"nope")`,
+	} {
+		if !strings.Contains(msg, part) {
+			t.Errorf("error does not name %s: %q", part, msg)
+		}
+	}
+	if strings.Contains(msg, "Name") {
+		t.Errorf("error names the field that decoded: %q", msg)
+	}
+	// Failures are listed in struct field order, so a record gives the same
+	// message on every run.
+	if strings.Index(msg, "Fraction") > strings.Index(msg, "Missing") {
+		t.Errorf("failures are not in struct field order: %q", msg)
+	}
+
+	if value.Name != "Mark" {
+		t.Errorf("Name = %q, want Mark: decodable fields must still be set", value.Name)
+	}
+	if value.Fraction != 0 || value.Big != 0 || value.Float != 0 || value.Text != 0 || value.TextNum != "" ||
+		!value.BadTime.IsZero() || value.BadPtr != nil || value.BadDur != 0 || value.Missing != "" {
+		t.Errorf("failing fields were not reset to their zero values: %+v", value)
+	}
+}
+
+// TestRecordDecodeEmptyValues checks that an empty field — which the host sends
+// as "" whatever the field's type — decodes to the zero value without error,
+// clearing any value left by an earlier decode.
+func TestRecordDecodeEmptyValues(t *testing.T) {
+	r := Record{fieldData: map[string]any{"e": ""}}
+	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	value := struct {
+		String   string        `fm:"e"`
+		Int      int           `fm:"e"`
+		Int8     int8          `fm:"e"`
+		Float    float64       `fm:"e"`
+		Number   Number        `fm:"e"`
+		Bool     bool          `fm:"e"`
+		Duration time.Duration `fm:"e"`
+		Time     time.Time     `fm:"e"`
+		TimePtr  *time.Time    `fm:"e"`
+	}{"x", 1, 1, 1, "1", true, 1, past, &past}
+
+	if err := r.Decode(&value); err != nil {
+		t.Fatalf("Decode(empty values) = %v, want nil", err)
+	}
+	if value.String != "" || value.Int != 0 || value.Int8 != 0 || value.Float != 0 || value.Number != "" ||
+		value.Bool || value.Duration != 0 || !value.Time.IsZero() || value.TimePtr != nil {
+		t.Errorf("empty values did not decode to zero values: %+v", value)
+	}
+}
+
+// TestRecordDecodeOptional checks that the optional tag option allows a field
+// to be absent — decoded to its zero value without error — while a present
+// optional field decodes normally, and that an unknown tag option is reported.
+func TestRecordDecodeOptional(t *testing.T) {
+	r := Record{fieldData: map[string]any{"name": "Mark"}}
+	value := struct {
+		Name  string `fm:"name,optional"`
+		Notes string `fm:"notes,optional"`
+	}{Notes: "stale"}
+
+	if err := r.Decode(&value); err != nil {
+		t.Fatalf("Decode = %v, want nil for an absent optional field", err)
+	}
+	if value.Name != "Mark" {
+		t.Errorf("Name = %q, want Mark", value.Name)
+	}
+	if value.Notes != "" {
+		t.Errorf("Notes = %q, want it reset to empty", value.Notes)
+	}
+
+	var typo struct {
+		Name string `fm:"name,omitempty"`
+	}
+	err := r.Decode(&typo)
+	if err == nil || !strings.Contains(err.Error(), "omitempty") {
+		t.Errorf("Decode(unknown tag option) = %v, want an error naming the option", err)
+	}
+}
+
+// TestRecordDecodeNumberIntoString checks that a number field decodes into a
+// string field as its exact text, the common case of a numeric ID read as a
+// string.
+func TestRecordDecodeNumberIntoString(t *testing.T) {
+	r := Record{fieldData: map[string]any{"id": Number("9007199254740993")}}
+	var value struct {
+		ID string `fm:"id"`
+	}
+	if err := r.Decode(&value); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if value.ID != "9007199254740993" {
+		t.Errorf("ID = %q, want the exact digits", value.ID)
+	}
+}
+
+// TestRecordDecodeErrorNamesRecord checks that a decode error from a record the
+// host returned names that record and its layout, like the errors from
+// record-addressed calls.
+func TestRecordDecodeErrorNamesRecord(t *testing.T) {
+	r := Record{id: "9", layout: "People", fieldData: map[string]any{"qty": Number("3.7")}}
+	var value struct {
+		Qty int `fm:"qty"`
+	}
+	err := r.Decode(&value)
+	want := `filemaker: record "9" in layout "People": decode: Qty (fm:"qty"): value is not written as an integer`
+	if err == nil || err.Error() != want {
+		t.Errorf("Decode error = %v\nwant %s", err, want)
+	}
+	if !errors.Is(err, ErrNotInteger) {
+		t.Errorf("errors.Is(err, ErrNotInteger) = false for %v", err)
 	}
 }
