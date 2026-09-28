@@ -95,7 +95,7 @@ func TestGet(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{id: "7", layout: "People"}
+	rec := readBy(c, Record{id: "7", layout: "People"})
 	resp, err := c.Get(context.Background(), rec)
 	if err != nil {
 		t.Fatalf("Get: %v", err)

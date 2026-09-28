@@ -1,7 +1,9 @@
 package filemaker
 
 import (
+	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"slices"
 	"strings"
@@ -755,5 +757,80 @@ func TestRecordDecodeErrorNamesRecord(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotInteger) {
 		t.Errorf("errors.Is(err, ErrNotInteger) = false for %v", err)
+	}
+}
+
+// failTransport fails the test on any request, for checks that must reject a
+// call before it reaches the host.
+type failTransport struct{ t *testing.T }
+
+func (f failTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+	return nil, errors.New("unexpected request")
+}
+
+func TestCheckRecord(t *testing.T) {
+	c := &Client{host: "https://fm.example", database: "Sales"}
+	stamped := func(host, database string) Record {
+		return Record{layout: "People", id: "9", host: host, database: database}
+	}
+
+	cases := []struct {
+		name string
+		rec  Record
+		ok   bool
+	}{
+		{"same file", stamped("https://fm.example", "Sales"), true},
+		{"same file, spelled differently", stamped("https://FM.example:443", "sales"), true},
+		{"other database", stamped("https://fm.example", "Payroll"), false},
+		{"other host", stamped("https://other.example", "Sales"), false},
+		{"other port", stamped("https://fm.example:8443", "Sales"), false},
+		{"no origin", Record{layout: "People", id: "9"}, false},
+		{"no ID", Record{layout: "People", host: "https://fm.example", database: "Sales"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.checkRecord(tc.rec); (err == nil) != tc.ok {
+				t.Errorf("checkRecord = %v, want ok=%v", err, tc.ok)
+			}
+		})
+	}
+}
+
+func TestRecordFromAnotherDatabase(t *testing.T) {
+	c := &Client{
+		httpClient: &http.Client{Transport: failTransport{t}},
+		host:       "https://fm.example",
+		database:   "Sales",
+		token:      "tok",
+		authSem:    make(chan struct{}, 1),
+	}
+	// Read from another file on the same host: its layout and ID must not be
+	// sent to c's database, where they could name an unrelated record.
+	rec := Record{layout: "People", id: "9", modID: "3", host: "https://fm.example", database: "Payroll"}
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"Get": func() error { _, err := c.Get(ctx, rec); return err },
+		"Update": func() error {
+			_, err := c.Update(ctx, rec, FieldData{"Name": "x"}, IfUnchanged())
+			return err
+		},
+		"Delete":    func() error { _, err := c.Delete(ctx, rec); return err },
+		"Duplicate": func() error { _, err := c.Duplicate(ctx, rec); return err },
+		"UploadToContainer": func() error {
+			_, err := c.UploadToContainer(ctx, rec, "Photo", "f.png", strings.NewReader("x"))
+			return err
+		},
+	}
+	for name, call := range calls {
+		err := call()
+		if err == nil {
+			t.Errorf("%s: expected an error for a record from another database", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), `"Payroll"`) || !strings.Contains(err.Error(), `"Sales"`) {
+			t.Errorf("%s: error %q should name both databases", name, err)
+		}
 	}
 }

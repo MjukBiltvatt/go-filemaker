@@ -58,10 +58,22 @@ type PortalDataInfo struct {
 // (String, Int, …, Decode, Fields, Portals, PortalDataInfo) — so a returned
 // record cannot be mutated. Writes are performed by passing field data to the
 // Client's Create/Update methods.
+//
+// A record remembers the host and database it was read from. The methods that
+// take a Record (Get, Update, Delete, Duplicate, UploadToContainer) reject one
+// read from a different database, where its layout and ID could name an
+// unrelated record; any client connected to the same database accepts it.
 type Record struct {
 	id     string
 	modID  string
 	layout string
+
+	// host and database identify the file the record was read from, stamped by
+	// the reading client. A layout and ID only name a record within one file, so
+	// the endpoints that address a record through a Record refuse one read from
+	// another file (see checkRecord).
+	host     string
+	database string
 
 	fieldData  map[string]any
 	portalData map[string][]map[string]any
@@ -70,6 +82,24 @@ type Record struct {
 	// loc is the time zone used to interpret date/timestamp fields. It is set
 	// by the client from its WithLocation option; nil means UTC.
 	loc *time.Location
+}
+
+// checkRecord reports why rec cannot address a record through c, or nil if it
+// can: it must carry an ID, and it must have been read from c's file. Another
+// client's record would otherwise be sent with c's database and token, and its
+// layout and ID would silently address whatever record holds them in c's file.
+// Two clients on the same file (say, different accounts) can share records; the
+// host is compared as an origin (see sameOrigin) and the database name
+// case-insensitively, so spelling either differently is not a mismatch.
+func (c *Client) checkRecord(rec Record) error {
+	if rec.id == "" {
+		return errors.New("filemaker: record has no ID; create or find it first")
+	}
+	if !sameOrigin(c.host, rec.host) || !strings.EqualFold(c.database, rec.database) {
+		return fmt.Errorf("filemaker: record %q in layout %q was read from database %q on %s, not this client's database %q on %s",
+			rec.id, rec.layout, rec.database, rec.host, c.database, c.host)
+	}
+	return nil
 }
 
 // ID returns the record's internal FileMaker record ID, assigned by the host.

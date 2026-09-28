@@ -94,14 +94,15 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 // Update writes the given field data to the record, identified by rec, and
 // returns the new mod ID. fields is a patch: only the named fields are written,
 // and the rest of the record is left unchanged on the host. rec is used solely
-// to address the record (its Layout and ID); its own field values are not sent.
+// to address the record (its Layout and ID), and must have been read from the
+// client's database; its own field values are not sent.
 // Writes are unconditional by default; pass IfUnchanged for optimistic
 // concurrency against the record's ModID, WithPortalData to edit related records,
 // or WithScript and friends to run scripts, in the same request; script outcomes
 // are returned in the UpdateResponse.
 func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
-	if rec.id == "" {
-		return UpdateResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	if err := c.checkRecord(rec); err != nil {
+		return UpdateResponse{}, err
 	}
 	// IfUnchanged is record-relative, so resolve it here (UpdateByID has no record
 	// to read a ModID from) and append the resolved lock as an explicit WithModID.
@@ -154,8 +155,8 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 // run scripts with the request; their outcomes are returned in the
 // DeleteResponse.
 func (c *Client) Delete(ctx context.Context, rec Record, opts ...DeleteOption) (DeleteResponse, error) {
-	if rec.id == "" {
-		return DeleteResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	if err := c.checkRecord(rec); err != nil {
+		return DeleteResponse{}, err
 	}
 	return c.DeleteByID(ctx, rec.layout, rec.id, opts...)
 }
@@ -193,8 +194,8 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...Dele
 // record's ID and mod ID. Pass WithScript and friends to run scripts with the
 // request; their outcomes are returned in the DuplicateResponse.
 func (c *Client) Duplicate(ctx context.Context, rec Record, opts ...DuplicateOption) (DuplicateResponse, error) {
-	if rec.id == "" {
-		return DuplicateResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	if err := c.checkRecord(rec); err != nil {
+		return DuplicateResponse{}, err
 	}
 	return c.DuplicateByID(ctx, rec.layout, rec.id, opts...)
 }
@@ -234,8 +235,8 @@ func (c *Client) DuplicateByID(ctx context.Context, layout, id string, opts ...D
 // current mod ID. The record's new mod ID is returned in the UploadResponse. As
 // with UploadToContainerByID, data is buffered in memory.
 func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader, opts ...UploadOption) (UploadResponse, error) {
-	if rec.id == "" {
-		return UploadResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	if err := c.checkRecord(rec); err != nil {
+		return UploadResponse{}, err
 	}
 	// IfUnchanged is record-relative, so resolve it here against rec and append
 	// the resolved lock as an explicit WithModID, then delegate — mirroring

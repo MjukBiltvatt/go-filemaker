@@ -384,7 +384,7 @@ func TestUpdateByRecord(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9"}
+	rec := readBy(c, Record{layout: "People", id: "9"})
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestUpdateIfUnchanged(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9", modID: "3"}
+	rec := readBy(c, Record{layout: "People", id: "9", modID: "3"})
 
 	lastBody := func() string {
 		mu.Lock()
@@ -475,7 +475,7 @@ func TestWithModIDEmpty(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9", modID: "3"}
+	rec := readBy(c, Record{layout: "People", id: "9", modID: "3"})
 
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "x"}, WithModID("")); err == nil {
 		t.Error("Update: expected error for WithModID(\"\")")
@@ -507,7 +507,7 @@ func TestIfUnchangedErrors(t *testing.T) {
 
 	// IfUnchanged on a record without a ModID must error, not silently degrade to
 	// an unconditional write.
-	if _, err := c.Update(context.Background(), Record{layout: "People", id: "9"}, FieldData{"Name": "x"}, IfUnchanged()); err == nil {
+	if _, err := c.Update(context.Background(), readBy(c, Record{layout: "People", id: "9"}), FieldData{"Name": "x"}, IfUnchanged()); err == nil {
 		t.Error("Update: expected error for IfUnchanged on a record without a ModID")
 	}
 
@@ -531,7 +531,7 @@ func TestUpdateDoesNotMutateCallerOpts(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9", modID: "3"}
+	rec := readBy(c, Record{layout: "People", id: "9", modID: "3"})
 
 	// A slice with spare capacity (len 1, cap 2) whose extra slot holds a sentinel.
 	// If Update appends its resolved WithModID into the caller's array instead of a
@@ -667,7 +667,7 @@ func TestUpdateByRecordPortalDataWithIfUnchanged(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9", modID: "3"}
+	rec := readBy(c, Record{layout: "People", id: "9", modID: "3"})
 	portals := PortalData{"Orders": {{"Orders::Item": "Widget"}}}
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}, WithPortalData(portals), IfUnchanged()); err != nil {
 		t.Fatalf("Update: %v", err)
@@ -788,7 +788,7 @@ func TestUploadToContainerIfUnchanged(t *testing.T) {
 
 	c := testClient(srv)
 	// IfUnchanged locks against the record's own ModID, sourced here from rec.
-	rec := Record{layout: "People", id: "1", modID: "5"}
+	rec := readBy(c, Record{layout: "People", id: "1", modID: "5"})
 	if _, err := c.UploadToContainer(context.Background(), rec, "Photo", "pic.png", strings.NewReader("x"), IfUnchanged()); err != nil {
 		t.Fatalf("UploadToContainer: %v", err)
 	}
@@ -813,7 +813,7 @@ func TestUploadIfUnchangedErrors(t *testing.T) {
 		t.Error("UploadToContainerByID: expected error for IfUnchanged without a record")
 	}
 	// IfUnchanged on a record without a ModID must error, not silently degrade.
-	if _, err := c.UploadToContainer(context.Background(), Record{layout: "People", id: "1"}, "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
+	if _, err := c.UploadToContainer(context.Background(), readBy(c, Record{layout: "People", id: "1"}), "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
 		t.Error("UploadToContainer: expected error for IfUnchanged on a record without a ModID")
 	}
 }
@@ -1141,7 +1141,7 @@ func TestDuplicateByRecord(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9"}
+	rec := readBy(c, Record{layout: "People", id: "9"})
 	if _, err := c.Duplicate(context.Background(), rec); err != nil {
 		t.Fatalf("Duplicate: %v", err)
 	}

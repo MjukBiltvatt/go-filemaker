@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"strconv"
-	"time"
 )
 
 // responseBody mirrors the envelope every Data API call returns. The wire form
@@ -55,10 +54,10 @@ type recordWire struct {
 	PortalDataInfo []portalDataInfoWire        `json:"portalDataInfo"`
 }
 
-// record builds the Record a "data" item describes, read through layout and
-// stamped with the client's location. Its number values become Number (see
-// exactNumbers).
-func (w recordWire) record(layout string, loc *time.Location) Record {
+// record builds the Record a "data" item describes, read by c through layout
+// and stamped with c's file (see checkRecord) and location. Its number values
+// become Number (see exactNumbers).
+func (w recordWire) record(c *Client, layout string) Record {
 	for _, rows := range w.PortalData {
 		for _, row := range rows {
 			exactNumbers(row)
@@ -68,10 +67,12 @@ func (w recordWire) record(layout string, loc *time.Location) Record {
 		id:         w.ID,
 		modID:      w.ModID,
 		layout:     layout,
+		host:       c.host,
+		database:   c.database,
 		fieldData:  exactNumbers(w.FieldData),
 		portalData: w.PortalData,
 		portalInfo: w.portalInfo(),
-		loc:        loc,
+		loc:        c.location,
 	}
 }
 

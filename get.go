@@ -21,8 +21,8 @@ type GetResponse struct {
 // WithScript and friends to run scripts with the request; script outcomes are
 // returned in the GetResponse.
 func (c *Client) Get(ctx context.Context, rec Record, opts ...GetOption) (GetResponse, error) {
-	if rec.id == "" {
-		return GetResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	if err := c.checkRecord(rec); err != nil {
+		return GetResponse{}, err
 	}
 	return c.GetByID(ctx, rec.layout, rec.id, opts...)
 }
@@ -57,7 +57,7 @@ func (c *Client) GetByID(ctx context.Context, layout, id string, opts ...GetOpti
 		return GetResponse{}, recordErr(errors.New("filemaker: get returned no record data"), layout, id)
 	}
 	w := rb.Response.Data[0]
-	record := w.record(layout, c.location)
+	record := w.record(c, layout)
 	return GetResponse{Record: record, Scripts: rb.scriptOutcomes()}, nil
 }
 
@@ -132,7 +132,7 @@ func (c *Client) GetRange(ctx context.Context, layout string, opts ...GetRangeOp
 
 	records := make([]Record, len(rb.Response.Data))
 	for i, w := range rb.Response.Data {
-		records[i] = w.record(layout, c.location)
+		records[i] = w.record(c, layout)
 	}
 	return GetRangeResponse{Records: records, DataInfo: rb.Response.DataInfo, Scripts: rb.scriptOutcomes()}, nil
 }
