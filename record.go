@@ -550,7 +550,7 @@ func (r Record) decodeField(field reflect.Value, tag string) error {
 		if err != nil {
 			return err
 		}
-		field.Set(reflect.ValueOf(d))
+		field.SetInt(int64(d))
 	case time.Time:
 		t, err := r.TimeE(name)
 		if err != nil {
