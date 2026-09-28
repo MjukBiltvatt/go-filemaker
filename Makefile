@@ -39,9 +39,9 @@ test-all: test integration
 
 # Loads .env into the environment, then runs the integration-tagged suite.
 # Tests skip (rather than fail) when the required FM_* variables are absent.
-# -count=1 disables Go's test cache: results depend on the live host and on the
+# -count 1 disables Go's test cache: results depend on the live host and on the
 # FM_* environment, neither of which is part of the cache key, so without it a
 # stale cached run (e.g. a prior all-skipped run) would be replayed.
 integration:
 	@set -a; [ -f .env ] && . ./.env; set +a; \
-		go test -tags=integration -run '$(RUN)' -v -count=1 ./...
+		go test -tags integration -run '$(RUN)' -v -count 1 ./...
