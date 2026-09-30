@@ -52,6 +52,7 @@ The package name is `filemaker` in both versions.
 | `rec.CommitToContainer("F", "f.pdf", buf)` | `c.UploadToContainer(ctx, rec, "F", "f.pdf", buf)` |
 | `rec.CommitFileToContainer("F", path)` | open the file yourself → `c.UploadToContainer(ctx, rec, "F", name, f)` |
 | `rec.ID` (field) | `rec.ID()` (method) |
+| `rec.String("F")` / `rec.StringE("F")` (and the other getter pairs) | `rec.String("F")` — one getter, returning `(string, error)` |
 | `rec.Reset()` | _removed_ — records are immutable; nothing to revert |
 | `rec.Map(&v, time.Local)` | `rec.Decode(&v)` — no location arg; **not recursive** |
 
@@ -200,10 +201,28 @@ host's media type in `ContentType`.
 
 ### Reading values & `Map` → `Decode`
 
-The common getters carry over: `String`/`StringE`, `Int`/`IntE`,
-`Int64`/`Int64E`, `Float64`/`Float64E`, `Bool`, `Time`/`TimeE`, and `Get`. Two
-changes:
+The common getters carry over by name — `String`, `Int`, `Int64`, `Float64`,
+`Bool`, `Time`, and `Get` — with these changes:
 
+- **Each getter returns an error; the `…E` forms are gone.** v3 paired a silent
+  getter, which returned the zero value on any failure, with an `…E` form that
+  returned an error. v4 has one getter under the plain name, with the `…E`
+  form's signature: `rec.Int("Age")` returns `(int, error)`. Replace `IntE` with
+  `Int`. Where v3 code used the silent form, handle the error, or discard it
+  with `n, _ := rec.Int("Age")` to keep v3's behavior visibly.
+- **An absent field is `ErrMissingField`, and an empty field is not an error.**
+  Every getter now reads a field the record does not have — typically a typo, or
+  a field that is not on the layout — as `ErrMissingField`, where v3 reported a
+  type error (`ErrNotNumber`, `ErrNotString`) or `ErrUnknownFormat`. An empty
+  field reads as the zero value with a nil error, as it does in `Decode`, where
+  v3's `IntE` or `TimeE` reported one. Use `rec.Get(f) == ""` to tell an empty
+  field from a stored zero. `Bool` now returns an error too, for an absent field
+  only.
+- **Getter errors name the field and the record.** A failed read reads
+  `filemaker: record "9" in layout "People": field "Age": value is not a number`
+  rather than the bare sentinel, and still matches it with `errors.Is`.
+- **`TimeE(field, loc)` is `TimeIn(field, loc)`.** `Time(field)` uses the
+  client's `WithLocation` (see below).
 - **Sized integer/float accessors were removed.** `Int8`, `Int16`, `Int32`, and
   `Float32` (and their `…E` forms) are gone — the sizes added surface without
   value. Use `Int`, `Int64`, or `Float64`, or the new `Number` for the exact
@@ -212,6 +231,11 @@ changes:
   host's exact decimal text, instead of `float64`: `Int64` on a 17-digit ID
   returns that ID rather than a neighbour of it. See *Behavior changes to watch*.
 - **`record.ID` is now `rec.ID()`** (a method, like all record fields).
+- **Portal rows read through the same getters.** v3 had no portal support. In
+  v4, `rec.Portal("Lines")` returns the portal's rows as `PortalRow` values with
+  `String`, `Int`, …, `Decode`, and the row's `ID()`/`ModID()`, keyed by
+  qualified field names (`"Lines::Qty"`). Write rows with `WithPortalData`,
+  each a `PortalRowData` carrying the row's `ID` (and `ModID` to lock the edit).
 
 `Map` is renamed `Decode` and its contract changed:
 
@@ -272,15 +296,14 @@ The time zone that was the second argument to `Map` is now a client-level settin
   Supported types: `string`, `int`, `int8`, `int16`, `int32`, `int64`,
   `float32`, `float64`, `Number`, `bool`, `time.Duration`, `time.Time`,
   `*time.Time`.
-- **Raw number values are `filemaker.Number`, not `float64`.** `Get`, `Fields`,
-  and `Portals` return number fields as `Number`, so a type assertion or switch
+- **Raw number values are `filemaker.Number`, not `float64`.** `Get` and
+  `Fields` return number fields as `Number`, so a type assertion or switch
   on `float64` — or a comparison such as `rec.Get("Qty") == 7.0` — compiles but
   no longer matches. Read values through the accessors, or assert `Number`. A
   number field holding text a user typed into it is a `string`, as before.
 - **`Int`/`Int64` read only integer notation, and no longer truncate or
   overflow.** A value written with a fractional part (`3.7`) returns
-  `ErrNotInteger` from `IntE`/`Int64E` and `0` from `Int`/`Int64`, rather than
-  `3`; a value beyond the type returns `ErrOutOfRange` rather than an undefined
+  `ErrNotInteger` (and `0`) rather than `3`; a value beyond the type returns `ErrOutOfRange` rather than an undefined
   result. So does a whole number the host sends in another notation — `7.0` or
   `1e3`, which v3 read as 7 and 1000. The host sends the text as it was typed
   into FileMaker, so such entries do occur; read them with `Float64`, or parse
@@ -306,7 +329,8 @@ The time zone that was the second argument to `Map` is now a client-level settin
 
 Beyond the migration, v4 adds capabilities v3 lacked: `Get`/`GetByID` and
 `GetRange`, `Duplicate`, script execution (`RunScript` and `WithScript` on any
-operation), database/layout/script metadata, `SetGlobalFields`, container
+operation), related records through portals (`Record.Portal`,
+`WithPortalData`), database/layout/script metadata, `SetGlobalFields`, container
 downloads, opt-in optimistic concurrency (`IfUnchanged`/`WithModID`), the
 `Bool`/`Date`/`Timestamp`/`Time`/`Duration` write-value wrappers, exact numbers
 beyond `float64` precision (`Number`), ISO date I/O

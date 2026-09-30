@@ -78,6 +78,9 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 	if err != nil {
 		return CreateResponse{}, err
 	}
+	if err := p.portalData.check(true); err != nil {
+		return CreateResponse{}, err
+	}
 
 	body, err := marshalRecordBody(fields, p, c.dateFormat)
 	if err != nil {
@@ -117,7 +120,7 @@ func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts 
 		// Full-slice expression so the append never mutates the caller's array.
 		opts = append(opts[:len(opts):len(opts)], WithModID(p.modID))
 	}
-	return c.UpdateByID(ctx, rec.layout, rec.id, fields, opts...)
+	return c.UpdateByID(ctx, rec.layout, rec.recordID, fields, opts...)
 }
 
 // UpdateByID writes the given field data to an existing record addressed by
@@ -158,7 +161,7 @@ func (c *Client) Delete(ctx context.Context, rec Record, opts ...DeleteOption) (
 	if err := c.checkRecord(rec); err != nil {
 		return DeleteResponse{}, err
 	}
-	return c.DeleteByID(ctx, rec.layout, rec.id, opts...)
+	return c.DeleteByID(ctx, rec.layout, rec.recordID, opts...)
 }
 
 // DeleteByID removes a record addressed by layout and id. Pass WithScript and
@@ -197,7 +200,7 @@ func (c *Client) Duplicate(ctx context.Context, rec Record, opts ...DuplicateOpt
 	if err := c.checkRecord(rec); err != nil {
 		return DuplicateResponse{}, err
 	}
-	return c.DuplicateByID(ctx, rec.layout, rec.id, opts...)
+	return c.DuplicateByID(ctx, rec.layout, rec.recordID, opts...)
 }
 
 // DuplicateByID creates a copy of an existing record addressed by layout and
@@ -249,7 +252,7 @@ func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filen
 		// Full-slice expression so the append never mutates the caller's array.
 		opts = append(opts[:len(opts):len(opts)], WithModID(p.modID))
 	}
-	return c.UploadToContainerByID(ctx, rec.layout, rec.id, field, filename, data, opts...)
+	return c.UploadToContainerByID(ctx, rec.layout, rec.recordID, field, filename, data, opts...)
 }
 
 // UploadToContainerByID uploads data to a container field of an existing record
@@ -310,19 +313,17 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 // the record identified by rec. The field must hold a container streaming URL
 // (the value FileMaker returns for a container field). A container with nothing
 // in it is returned as ErrEmptyContainer, so a caller walking many records can
-// skip those without an attachment; a field absent from rec, or one holding a
-// non-string value (ErrNotString), is reported as an error too. As with
-// DownloadFromContainerByURL, the contents are buffered in memory.
+// skip those without an attachment; a field absent from rec (ErrMissingField),
+// or one holding a number (ErrNotString), is reported as an error too, naming
+// the field and record as rec.String does. As with DownloadFromContainerByURL,
+// the contents are buffered in memory.
 func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) (DownloadResponse, error) {
-	if !rec.Has(field) {
-		return DownloadResponse{}, fmt.Errorf("filemaker: record has no field %q", field)
-	}
-	u, err := rec.StringE(field)
+	u, err := rec.String(field)
 	if err != nil {
-		return DownloadResponse{}, fmt.Errorf("%w (field %q)", err, field)
+		return DownloadResponse{}, err
 	}
 	if u == "" {
-		return DownloadResponse{}, fmt.Errorf("%w (field %q)", ErrEmptyContainer, field)
+		return DownloadResponse{}, rec.fieldErr(field, ErrEmptyContainer)
 	}
 	return c.DownloadFromContainerByURL(ctx, u)
 }
@@ -547,19 +548,29 @@ func wireFields(fields FieldData, format *DateFormat) FieldData {
 	return out
 }
 
-// wirePortals does the same as wireFields but for portal rows, deep-copying so
-// the caller's data is never mutated. A nil map yields nil.
-func wirePortals(portals PortalData, format *DateFormat) PortalData {
+// wirePortals renders portal rows as the host's row objects: each row's values
+// prepared by wireFields, plus the plain "recordId" and "modId" keys that
+// address and lock an existing related record, which the host expects
+// unqualified among the table-occurrence-qualified field names. The caller's
+// data is never mutated. A nil map yields nil.
+func wirePortals(portals PortalData, format *DateFormat) map[string][]FieldData {
 	if portals == nil {
 		return nil
 	}
-	out := make(PortalData, len(portals))
+	out := make(map[string][]FieldData, len(portals))
 	for name, rows := range portals {
-		newRows := make([]map[string]any, len(rows))
+		wireRows := make([]FieldData, len(rows))
 		for i, row := range rows {
-			newRows[i] = wireFields(row, format)
+			w := wireFields(row.Fields, format)
+			if row.ID != "" {
+				w["recordId"] = row.ID
+			}
+			if row.ModID != "" {
+				w["modId"] = row.ModID
+			}
+			wireRows[i] = w
 		}
-		out[name] = newRows
+		out[name] = wireRows
 	}
 	return out
 }

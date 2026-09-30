@@ -64,15 +64,16 @@ func (w recordWire) record(c *Client, layout string) Record {
 		}
 	}
 	return Record{
-		id:         w.ID,
+		fields: fields{
+			origin: origin{layout: layout, recordID: w.ID},
+			data:   exactNumbers(w.FieldData),
+			loc:    c.location,
+		},
 		modID:      w.ModID,
-		layout:     layout,
 		host:       c.host,
 		database:   c.database,
-		fieldData:  exactNumbers(w.FieldData),
 		portalData: w.PortalData,
 		portalInfo: w.portalInfo(),
-		loc:        c.location,
 	}
 }
 

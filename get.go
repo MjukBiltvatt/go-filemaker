@@ -24,7 +24,7 @@ func (c *Client) Get(ctx context.Context, rec Record, opts ...GetOption) (GetRes
 	if err := c.checkRecord(rec); err != nil {
 		return GetResponse{}, err
 	}
-	return c.GetByID(ctx, rec.layout, rec.id, opts...)
+	return c.GetByID(ctx, rec.layout, rec.recordID, opts...)
 }
 
 // GetByID fetches a single record addressed by layout and id. See Get for the
