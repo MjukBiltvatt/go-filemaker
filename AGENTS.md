@@ -19,6 +19,12 @@ An endpoint with no Data API body (the container stream) still returns `<Method>
 
 `Authenticate` and `Logout` return only `error`: they manage the client's session rather than return data to the caller, and the session token stays private. Local accessors such as `LastActivity` make no request and are not endpoint methods.
 
+## Request shape
+
+Responses regroup for the caller; requests keep the Data API's structure. Each part of a request gets one type or option, named after it, in the host's own terms — its **faithful form**: `FieldData` is `fieldData`, `PortalData` is `portalData`, a `FindRequest` is one `query` entry, `WithEntryMode` is `options.entrymode`. Offsets stay 1-based, host defaults stay the host's, find criteria stay FileMaker find syntax, and `deleteRelated` stays in `FieldData` where the API puts it. The library hides only how a part is sent: wire key spellings (`recordId`/`modId` in a portal row, `limit.<name>` in a find body versus `_limit.<name>` in a query string) and value encodings (exact-digit numbers, date formats).
+
+Convenience is a layer on top of the faithful form, built from a value the caller has read: `Update(rec)` over `UpdateByID`, `IfUnchanged()` over `WithModID(rec.ModID())`, `Asc`/`Desc` over `SortRule`. The faithful form stays usable on its own beside each shortcut. Options are named `With…` or `If…`, and a sub-part of one request — a portal row — is a value passed to its option, the way a `SortRule` is passed to `WithSort`.
+
 ## Record identity in errors
 
 An endpoint that addresses a record by layout and ID returns every failure after its argument checks through `recordErr` in `errors.go`, so the error names the record. The helper holds the rule and its reasoning. A new record-addressed endpoint calls `recordErr`; change the rule there, in one place. Reading a value is covered the same way: the field accessors shared by `Record` and `PortalRow` live on the embedded `fields` type in `record.go`, and route their errors through `origin.identify`, which calls `recordErr` (or `portalRowErr` for a portal row). A new accessor goes on `fields` and uses `read`.
