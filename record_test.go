@@ -738,10 +738,11 @@ func TestRecordDecodeDataErrors(t *testing.T) {
 		BadPtr   *time.Time    `fm:"bad_time"`
 		BadDur   time.Duration `fm:"bad_dur"`
 		Missing  string        `fm:"nope"`
+		NoBool   bool          `fm:"nope_bool"`
 	}{
 		// Stale values from an earlier decode: each failing field must be reset.
 		Fraction: 1, Big: 1, Float: 1, Text: 1, TextNum: "1",
-		BadTime: past, BadPtr: &past, BadDur: 1, Missing: "stale",
+		BadTime: past, BadPtr: &past, BadDur: 1, Missing: "stale", NoBool: true,
 	}
 
 	err := r.Decode(&value)
@@ -766,7 +767,7 @@ func TestRecordDecodeDataErrors(t *testing.T) {
 	for _, part := range []string{
 		`Fraction (fm:"fraction")`, `Big (fm:"big")`, `Float (fm:"float")`, `Text (fm:"text")`,
 		`TextNum (fm:"text")`, `BadTime (fm:"bad_time")`, `BadPtr (fm:"bad_time")`,
-		`BadDur (fm:"bad_dur")`, `Missing (fm:"nope")`,
+		`BadDur (fm:"bad_dur")`, `Missing (fm:"nope")`, `NoBool (fm:"nope_bool")`,
 	} {
 		if !strings.Contains(msg, part) {
 			t.Errorf("error does not name %s: %q", part, msg)
@@ -785,7 +786,7 @@ func TestRecordDecodeDataErrors(t *testing.T) {
 		t.Errorf("Name = %q, want Mark: decodable fields must still be set", value.Name)
 	}
 	if value.Fraction != 0 || value.Big != 0 || value.Float != 0 || value.Text != 0 || value.TextNum != "" ||
-		!value.BadTime.IsZero() || value.BadPtr != nil || value.BadDur != 0 || value.Missing != "" {
+		!value.BadTime.IsZero() || value.BadPtr != nil || value.BadDur != 0 || value.Missing != "" || value.NoBool {
 		t.Errorf("failing fields were not reset to their zero values: %+v", value)
 	}
 }

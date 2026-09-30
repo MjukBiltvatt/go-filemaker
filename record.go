@@ -181,9 +181,9 @@ func (p PortalRow) ModID() string { return p.modID }
 // nothing: a Record built in the package rather than returned by the host.
 type origin struct {
 	layout   string // the layout the record was read through
-	recordID string // the record, or for a portal row the record whose portal holds it
+	recordID string // the record; for a portal row, the parent record whose portal holds it
 	portal   string // for a portal row, the portal's name
-	rowID    string // for a portal row, the related record's ID
+	rowID    string // for a portal row, the row's own record ID, in the portal's table
 }
 
 // identify adds o's identity to err (see recordErr and portalRowErr). It
@@ -202,6 +202,10 @@ func (o origin) identify(err error) error {
 // is embedded in Record and PortalRow, so its accessors are theirs: a portal row
 // reads exactly as a record does. The accessors' rules are documented on
 // Record.
+//
+// It holds only what those accessors need: the values, the time zone, and the
+// origin their errors name. The embedding types keep their other state — such
+// as each one's mod ID, which no accessor reads — themselves.
 type fields struct {
 	origin
 
@@ -637,7 +641,10 @@ func (f fields) decodeField(field reflect.Value, tag string) error {
 		}
 		field.SetString(string(n))
 	case bool:
-		b, _ := toBool(val) // never fails: any present value is a bool
+		b, err := toBool(val)
+		if err != nil {
+			return err
+		}
 		field.SetBool(b)
 	case time.Duration:
 		// A distinct named type (underlying int64), so it is matched here
