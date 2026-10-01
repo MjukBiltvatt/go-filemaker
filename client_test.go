@@ -33,6 +33,13 @@ func testClient(srv *httptest.Server) *Client {
 	}
 }
 
+// readBy stamps rec as read by c, the way the read endpoints stamp the records
+// they return, so the record-addressed endpoints accept it.
+func readBy(c *Client, rec Record) Record {
+	rec.host, rec.database = c.host, c.database
+	return rec
+}
+
 // redirectGuarded installs the redirect policy New sets on its client, so the
 // test client follows redirects exactly as a real one does.
 func redirectGuarded(hc *http.Client, host string) *http.Client {

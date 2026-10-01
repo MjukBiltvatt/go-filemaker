@@ -16,6 +16,8 @@
 .PHONY: test integration test-all vet lint
 
 # -run regexp for the integration suite; defaults to every TestIntegration*.
+# The recipe reads it with $(value RUN), so a regexp's $ reaches go test as
+# written instead of being expanded by make ('TestIntegrationPortal$|…' works).
 RUN ?= Integration
 
 test:
@@ -39,9 +41,9 @@ test-all: test integration
 
 # Loads .env into the environment, then runs the integration-tagged suite.
 # Tests skip (rather than fail) when the required FM_* variables are absent.
-# -count=1 disables Go's test cache: results depend on the live host and on the
+# -count 1 disables Go's test cache: results depend on the live host and on the
 # FM_* environment, neither of which is part of the cache key, so without it a
 # stale cached run (e.g. a prior all-skipped run) would be replayed.
 integration:
 	@set -a; [ -f .env ] && . ./.env; set +a; \
-		go test -tags=integration -run '$(RUN)' -v -count=1 ./...
+		go test -tags integration -run '$(value RUN)' -v -count 1 ./...

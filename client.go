@@ -154,9 +154,9 @@ func WithDebug(w io.Writer) Option {
 }
 
 // WithLocation sets the time zone used to interpret FileMaker date and timestamp
-// fields (which carry no zone) when reading them back through a record's
-// Time/TimeE methods or Decode. Records returned by the client carry this
-// location. Defaults to UTC.
+// fields (which carry no zone) when reading them back through a record's Time
+// method or Decode. Records returned by the client, and their portal rows, carry
+// this location. Defaults to UTC.
 func WithLocation(loc *time.Location) Option {
 	return func(c *config) {
 		c.location = loc

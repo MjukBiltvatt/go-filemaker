@@ -89,30 +89,30 @@ func TestFindWithPortalData(t *testing.T) {
 		t.Fatalf("records = %d, want 1", len(resp.Records))
 	}
 
-	portals := resp.Records[0].Portals()
+	rec := resp.Records[0]
 
-	orders := portals["Orders"]
+	orders := rec.Portal("Orders")
 	if len(orders) != 2 {
 		t.Fatalf("Orders rows = %d, want 2", len(orders))
 	}
-	if got := orders[0]["recordId"]; got != "10" {
-		t.Errorf("Orders[0] recordId = %v, want 10", got)
+	if got := orders[0].ID(); got != "10" {
+		t.Errorf("Orders[0] ID = %v, want 10", got)
 	}
-	if got := orders[0]["Orders::Item"]; got != "Widget" {
+	if got := orders[0].Get("Orders::Item"); got != "Widget" {
 		t.Errorf("Orders[0] Item = %v, want Widget", got)
 	}
-	if got := orders[0]["Orders::Qty"]; got != Number("3") {
+	if got := orders[0].Get("Orders::Qty"); got != Number("3") {
 		t.Errorf("Orders[0] Qty = %v, want 3", got)
 	}
-	if got := orders[1]["Orders::Item"]; got != "Gadget" {
+	if got := orders[1].Get("Orders::Item"); got != "Gadget" {
 		t.Errorf("Orders[1] Item = %v, want Gadget", got)
 	}
 
-	notes := portals["Notes"]
+	notes := rec.Portal("Notes")
 	if len(notes) != 1 {
 		t.Fatalf("Notes rows = %d, want 1", len(notes))
 	}
-	if got := notes[0]["Notes::Body"]; got != "first note" {
+	if got := notes[0].Get("Notes::Body"); got != "first note" {
 		t.Errorf("Notes[0] Body = %v, want \"first note\"", got)
 	}
 }
@@ -149,7 +149,7 @@ func TestFindWithPortalDataInfo(t *testing.T) {
 	if got := rec.PortalDataInfo(); !reflect.DeepEqual(got, want) {
 		t.Errorf("PortalDataInfo() = %+v, want %+v", got, want)
 	}
-	for name := range rec.Portals() {
+	for name := range rec.portalData {
 		if _, ok := rec.PortalDataInfo()[name]; !ok {
 			t.Errorf("portal %q has rows but no PortalDataInfo entry", name)
 		}
@@ -303,7 +303,11 @@ func TestFindStampsLocation(t *testing.T) {
 	if len(resp.Records) != 1 {
 		t.Fatalf("records = %d, want 1", len(resp.Records))
 	}
-	if got := resp.Records[0].Time("Created").Location(); got != loc {
+	created, err := resp.Records[0].Time("Created")
+	if err != nil {
+		t.Fatalf("Time(Created): %v", err)
+	}
+	if got := created.Location(); got != loc {
 		t.Errorf("record time location = %v, want %v", got, loc)
 	}
 }

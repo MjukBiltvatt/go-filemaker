@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -95,7 +96,7 @@ func TestGet(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{id: "7", layout: "People"}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "7"}}})
 	resp, err := c.Get(context.Background(), rec)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -558,12 +559,30 @@ func TestGetByIDExactNumbers(t *testing.T) {
 	if got := rec.Fields(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Fields() = %#v, want %#v", got, want)
 	}
-	wantPortals := PortalData{"Lines": {{"recordId": "5", "modId": "1", "Lines::Qty": Number("20260924123456789")}}}
-	if got := rec.Portals(); !reflect.DeepEqual(got, wantPortals) {
-		t.Errorf("Portals() = %#v, want %#v", got, wantPortals)
+	if got, err := rec.Int64("Id"); err != nil || got != 9007199254740993 {
+		t.Errorf("Int64(Id) = %d, %v; want 9007199254740993", got, err)
 	}
-	if got := rec.Int64("Id"); got != 9007199254740993 {
-		t.Errorf("Int64(Id) = %d, want 9007199254740993", got)
+
+	// The portal row reads through the same accessors, with its record and mod
+	// IDs lifted out of its field values.
+	rows := rec.Portal("Lines")
+	if len(rows) != 1 {
+		t.Fatalf("Portal(Lines) = %d rows, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.ID() != "5" || row.ModID() != "1" {
+		t.Errorf("row ID, ModID = %q, %q; want 5, 1", row.ID(), row.ModID())
+	}
+	if row.Has("recordId") || row.Has("modId") {
+		t.Errorf("row fields = %v, want recordId and modId lifted out", row.Fields())
+	}
+	if got, err := row.Int64("Lines::Qty"); err != nil || got != 20260924123456789 {
+		t.Errorf("row Int64(Lines::Qty) = %d, %v; want 20260924123456789", got, err)
+	}
+	_, err = row.String("Lines::Qty")
+	wantErr := `filemaker: portal "Lines" row "5" of record "42" in layout "People": field "Lines::Qty": value is not a string`
+	if err == nil || err.Error() != wantErr || !errors.Is(err, ErrNotString) {
+		t.Errorf("row String(Lines::Qty) err = %v\nwant %s", err, wantErr)
 	}
 }
 
