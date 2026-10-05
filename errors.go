@@ -25,7 +25,7 @@ var (
 
 	// ErrNotInteger is returned when a number that is not written as an integer —
 	// it has a fractional part, or uses exponent notation — is read with an
-	// integer accessor (Number.Int64, Record.IntE, Record.Int64E). The value is a
+	// integer accessor (Number.Int64, Record.Int, Record.Int64). The value is a
 	// number, so it is not ErrNotNumber: read it with Float64, or parse Number
 	// for other notations.
 	ErrNotInteger = errors.New("filemaker: value is not written as an integer")
@@ -34,6 +34,13 @@ var (
 	// as: an integer beyond int64 (or int), or a magnitude beyond float64. Read it
 	// with Record.Number to keep its exact digits.
 	ErrOutOfRange = errors.New("filemaker: value is out of range")
+
+	// ErrMissingField is returned (wrapped) by the typed accessors (Record.String,
+	// Record.Int, …) for a field the record does not have, and by Record.Decode
+	// when an `fm` tag names one — usually a typo in the name, or a field that is
+	// not on the layout (or on the response layout). Tag a struct field
+	// `fm:"Name,optional"` to allow it to be absent, or check Record.Has first.
+	ErrMissingField = errors.New("filemaker: field is not in the record")
 
 	// ErrEmptyContainer is returned (wrapped) by DownloadFromContainer when the
 	// container field holds nothing. An empty container is a normal state, not a
@@ -81,11 +88,13 @@ var (
 )
 
 // recordErr names the record an operation addressed, and it is the one place an
-// error gains that identity: every endpoint addressing a record by layout and
-// ID passes each failure after its argument checks through it — host, transport,
-// and decode errors alike — the way os.Open names the path on every failure. An
-// error is usually logged or reported far from the call that produced it, where
-// the caller's layout and ID are no longer in scope, so the error carries them.
+// error gains that identity (portalRowErr is its form for a portal row): every
+// endpoint addressing a record by layout and ID passes each failure after its
+// argument checks through it — host, transport, and decode errors alike — the
+// way os.Open names the path on every failure, and so does every failed read of
+// a value from a record the host returned (see origin in record.go). An error is
+// usually logged or reported far from the call that produced it, where the
+// caller's layout and ID are no longer in scope, so the error carries them.
 // Argument-check errors ("no record id specified") skip it: there is no record
 // to name yet.
 //
@@ -99,19 +108,36 @@ func recordErr(err error, layout, id string) error {
 	return &recordError{layout: layout, id: id, err: err}
 }
 
-// recordError is the error recordErr returns. Its message keeps the package
+// portalRowErr is recordErr for a value read from a portal row (a PortalRow
+// accessor or Decode): the row's own ID says little without the portal it sits
+// in and the record whose portal that is, so the error names all three, reading
+// `filemaker: portal "Lines" row "5" of record "9" in layout "Invoices": …`.
+// Like recordErr it wraps err, and returns nil for a nil err.
+func portalRowErr(err error, layout, id, portal, row string) error {
+	if err == nil {
+		return nil
+	}
+	return &recordError{layout: layout, id: id, portal: portal, row: row, err: err}
+}
+
+// recordError is the error recordErr and portalRowErr return. Its message keeps the package
 // prefix at the front and drops the wrapped error's own copy of it, so it reads
 // `filemaker: record "9" in layout "People": Record is missing (101)` rather
 // than naming the package twice. It is unexported because the identity is for
 // people reading the message; code branches on what it wraps.
 type recordError struct {
-	layout, id string
-	err        error
+	layout, id  string
+	portal, row string // set only by portalRowErr
+	err         error
 }
 
 func (e *recordError) Error() string {
-	return fmt.Sprintf("filemaker: record %q in layout %q: %s",
-		e.id, e.layout, strings.TrimPrefix(e.err.Error(), "filemaker: "))
+	msg := strings.TrimPrefix(e.err.Error(), "filemaker: ")
+	if e.portal != "" {
+		return fmt.Sprintf("filemaker: portal %q row %q of record %q in layout %q: %s",
+			e.portal, e.row, e.id, e.layout, msg)
+	}
+	return fmt.Sprintf("filemaker: record %q in layout %q: %s", e.id, e.layout, msg)
 }
 
 func (e *recordError) Unwrap() error { return e.err }

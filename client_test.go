@@ -33,6 +33,13 @@ func testClient(srv *httptest.Server) *Client {
 	}
 }
 
+// readBy stamps rec as read by c, the way the read endpoints stamp the records
+// they return, so the record-addressed endpoints accept it.
+func readBy(c *Client, rec Record) Record {
+	rec.host, rec.database = c.host, c.database
+	return rec
+}
+
 // redirectGuarded installs the redirect policy New sets on its client, so the
 // test client follows redirects exactly as a real one does.
 func redirectGuarded(hc *http.Client, host string) *http.Client {
@@ -54,12 +61,18 @@ func TestNormalizeHost(t *testing.T) {
 		{in: "HTTP://localhost:8080", wantErr: true},
 		{in: "ftp://my.host.com", wantErr: true},
 		{in: "ftp://my.host.com", allowInsecure: true, wantErr: true},
+		{in: "https://user:secret@my.host.com", wantErr: true},
+		{in: "user:secret@my.host.com", wantErr: true},
+		{in: "https://user@my.host.com", wantErr: true},
+		{in: "https://my.host.com@evil.example", wantErr: true},
 	}
 	for _, c := range cases {
 		got, err := normalizeHost(c.in, c.allowInsecure)
 		if c.wantErr {
 			if err == nil {
 				t.Errorf("normalizeHost(%q, %v) = %q, want error", c.in, c.allowInsecure, got)
+			} else if strings.Contains(err.Error(), "secret") {
+				t.Errorf("normalizeHost(%q) error %q reveals the password", c.in, err)
 			}
 			continue
 		}
@@ -95,6 +108,27 @@ func TestSameOrigin(t *testing.T) {
 	for _, c := range cases {
 		if got := sameOrigin(base, c.raw); got != c.want {
 			t.Errorf("sameOrigin(%q, %q) = %v, want %v (%s)", base, c.raw, got, c.want, c.desc)
+		}
+	}
+}
+
+func TestSameServer(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+		desc string
+	}{
+		{"https://gw.example/tenant-a", "https://gw.example/tenant-a", true, "same base path"},
+		{"https://gw.example/tenant-a", "https://GW.example:443/tenant-a/", true, "origin spelled differently, trailing slash"},
+		{"https://fms.example.com", "https://fms.example.com/", true, "no path and a bare slash"},
+		{"https://gw.example/tenant-a", "https://gw.example/tenant-b", false, "two servers behind one gateway"},
+		{"https://gw.example/tenant-a", "https://gw.example", false, "path versus none"},
+		{"https://gw.example/tenant-a", "https://gw.example/Tenant-A", false, "path case differs"},
+		{"https://gw.example/tenant-a", "https://other.example/tenant-a", false, "same path, other origin"},
+	}
+	for _, c := range cases {
+		if got := sameServer(c.a, c.b); got != c.want {
+			t.Errorf("sameServer(%q, %q) = %v, want %v (%s)", c.a, c.b, got, c.want, c.desc)
 		}
 	}
 }

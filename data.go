@@ -23,10 +23,35 @@ type CreateResponse struct {
 	Scripts  ScriptOutcomes
 }
 
-// UpdateResponse is the host's acknowledgement of an Update.
+// UpdateResponse is the host's acknowledgement of an Update. NewPortalRecords
+// lists the related records the Update created from portal rows without an ID
+// (see PortalRowData), one per such row in the order they were sent (see
+// NewPortalRecordInfo); it is nil when the Update added none.
 type UpdateResponse struct {
-	ModID   string
-	Scripts ScriptOutcomes
+	ModID            string
+	NewPortalRecords []NewPortalRecordInfo
+	Scripts          ScriptOutcomes
+}
+
+// NewPortalRecordInfo is a related record an Update created from a portal row:
+// the table occurrence it was added to, and its record and mod IDs.
+//
+// UpdateResponse.NewPortalRecords lists one entry per row without an ID, in the
+// order the rows were sent: portals in name order, which is how WithPortalData
+// sends them, and within a portal in slice order. Rows with an ID are edits and
+// get no entry. So the i-th entry belongs to the i-th added row, which is what
+// tells rows apart when two portals show the same table occurrence: the host
+// reports the table occurrence even for a row written under a portal's object
+// name. (Observed against FileMaker Server with unsorted portals; the Data API
+// guide does not document the key.)
+//
+// In testing against FileMaker Server, a Create did not report these entries,
+// so CreateResponse has no such field; read the record back for the IDs of the
+// related records a Create added.
+type NewPortalRecordInfo struct {
+	Table    string `json:"tableName"`
+	RecordID string `json:"recordId"`
+	ModID    string `json:"modId"`
 }
 
 // DeleteResponse is the host's acknowledgement of a Delete. The delete returns
@@ -78,6 +103,9 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 	if err != nil {
 		return CreateResponse{}, err
 	}
+	if err := p.portalData.check(true); err != nil {
+		return CreateResponse{}, err
+	}
 
 	body, err := marshalRecordBody(fields, p, c.dateFormat)
 	if err != nil {
@@ -94,14 +122,15 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 // Update writes the given field data to the record, identified by rec, and
 // returns the new mod ID. fields is a patch: only the named fields are written,
 // and the rest of the record is left unchanged on the host. rec is used solely
-// to address the record (its Layout and ID); its own field values are not sent.
+// to address the record (its Layout and ID), and must have been read from the
+// client's database; its own field values are not sent.
 // Writes are unconditional by default; pass IfUnchanged for optimistic
 // concurrency against the record's ModID, WithPortalData to edit related records,
 // or WithScript and friends to run scripts, in the same request; script outcomes
 // are returned in the UpdateResponse.
 func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
-	if rec.id == "" {
-		return UpdateResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	if err := c.checkRecord(rec); err != nil {
+		return UpdateResponse{}, err
 	}
 	// IfUnchanged is record-relative, so resolve it here (UpdateByID has no record
 	// to read a ModID from) and append the resolved lock as an explicit WithModID.
@@ -116,7 +145,7 @@ func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts 
 		// Full-slice expression so the append never mutates the caller's array.
 		opts = append(opts[:len(opts):len(opts)], WithModID(p.modID))
 	}
-	return c.UpdateByID(ctx, rec.layout, rec.id, fields, opts...)
+	return c.UpdateByID(ctx, rec.layout, rec.recordID, fields, opts...)
 }
 
 // UpdateByID writes the given field data to an existing record addressed by
@@ -137,6 +166,9 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 	if err != nil {
 		return UpdateResponse{}, err
 	}
+	if err := p.portalData.check(false); err != nil {
+		return UpdateResponse{}, err
+	}
 
 	body, err := marshalRecordBody(fields, p, c.dateFormat)
 	if err != nil {
@@ -147,17 +179,17 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 	if err := c.do(ctx, http.MethodPatch, c.recordURL(layout, id), body, &rb); err != nil {
 		return UpdateResponse{}, recordErr(err, layout, id)
 	}
-	return UpdateResponse{ModID: rb.Response.ModID, Scripts: rb.scriptOutcomes()}, nil
+	return UpdateResponse{ModID: rb.Response.ModID, NewPortalRecords: rb.Response.NewPortalRecordInfo, Scripts: rb.scriptOutcomes()}, nil
 }
 
 // Delete removes the record identified by rec. Pass WithScript and friends to
 // run scripts with the request; their outcomes are returned in the
 // DeleteResponse.
 func (c *Client) Delete(ctx context.Context, rec Record, opts ...DeleteOption) (DeleteResponse, error) {
-	if rec.id == "" {
-		return DeleteResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	if err := c.checkRecord(rec); err != nil {
+		return DeleteResponse{}, err
 	}
-	return c.DeleteByID(ctx, rec.layout, rec.id, opts...)
+	return c.DeleteByID(ctx, rec.layout, rec.recordID, opts...)
 }
 
 // DeleteByID removes a record addressed by layout and id. Pass WithScript and
@@ -193,10 +225,10 @@ func (c *Client) DeleteByID(ctx context.Context, layout, id string, opts ...Dele
 // record's ID and mod ID. Pass WithScript and friends to run scripts with the
 // request; their outcomes are returned in the DuplicateResponse.
 func (c *Client) Duplicate(ctx context.Context, rec Record, opts ...DuplicateOption) (DuplicateResponse, error) {
-	if rec.id == "" {
-		return DuplicateResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	if err := c.checkRecord(rec); err != nil {
+		return DuplicateResponse{}, err
 	}
-	return c.DuplicateByID(ctx, rec.layout, rec.id, opts...)
+	return c.DuplicateByID(ctx, rec.layout, rec.recordID, opts...)
 }
 
 // DuplicateByID creates a copy of an existing record addressed by layout and
@@ -234,8 +266,8 @@ func (c *Client) DuplicateByID(ctx context.Context, layout, id string, opts ...D
 // current mod ID. The record's new mod ID is returned in the UploadResponse. As
 // with UploadToContainerByID, data is buffered in memory.
 func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filename string, data io.Reader, opts ...UploadOption) (UploadResponse, error) {
-	if rec.id == "" {
-		return UploadResponse{}, errors.New("filemaker: record has no ID; create or find it first")
+	if err := c.checkRecord(rec); err != nil {
+		return UploadResponse{}, err
 	}
 	// IfUnchanged is record-relative, so resolve it here against rec and append
 	// the resolved lock as an explicit WithModID, then delegate — mirroring
@@ -248,7 +280,7 @@ func (c *Client) UploadToContainer(ctx context.Context, rec Record, field, filen
 		// Full-slice expression so the append never mutates the caller's array.
 		opts = append(opts[:len(opts):len(opts)], WithModID(p.modID))
 	}
-	return c.UploadToContainerByID(ctx, rec.layout, rec.id, field, filename, data, opts...)
+	return c.UploadToContainerByID(ctx, rec.layout, rec.recordID, field, filename, data, opts...)
 }
 
 // UploadToContainerByID uploads data to a container field of an existing record
@@ -309,19 +341,17 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 // the record identified by rec. The field must hold a container streaming URL
 // (the value FileMaker returns for a container field). A container with nothing
 // in it is returned as ErrEmptyContainer, so a caller walking many records can
-// skip those without an attachment; a field absent from rec, or one holding a
-// non-string value (ErrNotString), is reported as an error too. As with
-// DownloadFromContainerByURL, the contents are buffered in memory.
+// skip those without an attachment; a field absent from rec (ErrMissingField),
+// or one holding a number (ErrNotString), is reported as an error too, naming
+// the field and record as rec.String does. As with DownloadFromContainerByURL,
+// the contents are buffered in memory.
 func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) (DownloadResponse, error) {
-	if !rec.Has(field) {
-		return DownloadResponse{}, fmt.Errorf("filemaker: record has no field %q", field)
-	}
-	u, err := rec.StringE(field)
+	u, err := rec.String(field)
 	if err != nil {
-		return DownloadResponse{}, fmt.Errorf("%w (field %q)", err, field)
+		return DownloadResponse{}, err
 	}
 	if u == "" {
-		return DownloadResponse{}, fmt.Errorf("%w (field %q)", ErrEmptyContainer, field)
+		return DownloadResponse{}, rec.fieldErr(field, ErrEmptyContainer)
 	}
 	return c.DownloadFromContainerByURL(ctx, u)
 }
@@ -546,19 +576,29 @@ func wireFields(fields FieldData, format *DateFormat) FieldData {
 	return out
 }
 
-// wirePortals does the same as wireFields but for portal rows, deep-copying so
-// the caller's data is never mutated. A nil map yields nil.
-func wirePortals(portals PortalData, format *DateFormat) PortalData {
+// wirePortals renders portal rows as the host's row objects: each row's values
+// prepared by wireFields, plus the plain "recordId" and "modId" keys that
+// address and lock an existing related record, which the host expects
+// unqualified among the table-occurrence-qualified field names. The caller's
+// data is never mutated. A nil map yields nil.
+func wirePortals(portals PortalData, format *DateFormat) map[string][]FieldData {
 	if portals == nil {
 		return nil
 	}
-	out := make(PortalData, len(portals))
+	out := make(map[string][]FieldData, len(portals))
 	for name, rows := range portals {
-		newRows := make([]map[string]any, len(rows))
+		wireRows := make([]FieldData, len(rows))
 		for i, row := range rows {
-			newRows[i] = wireFields(row, format)
+			w := wireFields(row.Fields, format)
+			if row.ID != "" {
+				w["recordId"] = row.ID
+			}
+			if row.ModID != "" {
+				w["modId"] = row.ModID
+			}
+			wireRows[i] = w
 		}
-		out[name] = newRows
+		out[name] = wireRows
 	}
 	return out
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"strconv"
-	"time"
 )
 
 // responseBody mirrors the envelope every Data API call returns. The wire form
@@ -22,6 +21,9 @@ type responseBody struct {
 		Databases   []Database   `json:"databases"`
 		Scripts     []Script     `json:"scripts"`
 		Layouts     []Layout     `json:"layouts"`
+
+		// Related records an Update created from portal rows.
+		NewPortalRecordInfo []NewPortalRecordInfo `json:"newPortalRecordInfo"`
 
 		// Script outcomes, one result/error pair per phase. The keys carry dots,
 		// which Go json tags handle verbatim. Absent when no script ran.
@@ -55,23 +57,26 @@ type recordWire struct {
 	PortalDataInfo []portalDataInfoWire        `json:"portalDataInfo"`
 }
 
-// record builds the Record a "data" item describes, read through layout and
-// stamped with the client's location. Its number values become Number (see
-// exactNumbers).
-func (w recordWire) record(layout string, loc *time.Location) Record {
+// record builds the Record a "data" item describes, read by c through layout
+// and stamped with c's file (see checkRecord) and location. Its number values
+// become Number (see exactNumbers).
+func (w recordWire) record(c *Client, layout string) Record {
 	for _, rows := range w.PortalData {
 		for _, row := range rows {
 			exactNumbers(row)
 		}
 	}
 	return Record{
-		id:         w.ID,
+		fields: fields{
+			origin: origin{layout: layout, recordID: w.ID},
+			data:   exactNumbers(w.FieldData),
+			loc:    c.location,
+		},
 		modID:      w.ModID,
-		layout:     layout,
-		fieldData:  exactNumbers(w.FieldData),
+		host:       c.host,
+		database:   c.database,
 		portalData: w.PortalData,
 		portalInfo: w.portalInfo(),
-		loc:        loc,
 	}
 }
 

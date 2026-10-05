@@ -154,9 +154,9 @@ func WithDebug(w io.Writer) Option {
 }
 
 // WithLocation sets the time zone used to interpret FileMaker date and timestamp
-// fields (which carry no zone) when reading them back through a record's
-// Time/TimeE methods or Decode. Records returned by the client carry this
-// location. Defaults to UTC.
+// fields (which carry no zone) when reading them back through a record's Time
+// method or Decode. Records returned by the client, and their portal rows, carry
+// this location. Defaults to UTC.
 func WithLocation(loc *time.Location) Option {
 	return func(c *config) {
 		c.location = loc
@@ -193,7 +193,8 @@ func WithDateFormat(format DateFormat) Option {
 //
 // The host may include a scheme; if it does not, https is assumed. Plaintext
 // http is rejected unless WithInsecureHTTP is passed, and any scheme other than
-// http or https is rejected outright.
+// http or https is rejected outright. The host must not carry credentials
+// ("https://user:pass@host"); pass them as username and password.
 func New(host, database, username, password string, opts ...Option) (*Client, error) {
 	if host == "" {
 		return nil, errors.New("filemaker: no host specified")
@@ -249,7 +250,11 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 
 // normalizeHost defaults the scheme to https when none is present, then
 // validates it: plaintext http is allowed only when allowInsecureHTTP is set,
-// and any scheme other than http or https is rejected outright.
+// and any scheme other than http or https is rejected outright. A host carrying
+// userinfo ("https://user:pass@host") is rejected too: New takes the
+// credentials separately, the host is printed in errors where a password would
+// leak, and sameOrigin refuses such a URL, so the client could not use the
+// records it reads.
 func normalizeHost(host string, allowInsecureHTTP bool) (string, error) {
 	if !strings.Contains(host, "://") {
 		host = "https://" + host
@@ -258,6 +263,10 @@ func normalizeHost(host string, allowInsecureHTTP bool) (string, error) {
 	u, err := url.Parse(host)
 	if err != nil {
 		return "", fmt.Errorf("filemaker: invalid host %q: %w", host, err)
+	}
+	if u.User != nil {
+		// The message leaves the host out: it carries the credentials.
+		return "", errors.New("filemaker: host must not include a username or password; pass them to New")
 	}
 
 	switch u.Scheme {
@@ -289,6 +298,25 @@ func sameOrigin(base, raw string) bool {
 	}
 	// url.Parse lowercases the scheme but leaves the host as written.
 	return u.Scheme == b.Scheme && strings.EqualFold(originHost(u), originHost(b))
+}
+
+// sameServer reports whether two client hosts address the same FileMaker
+// Server: the same origin (see sameOrigin) and the same base path. The client
+// keeps the host's path in every request URL, so a gateway can expose several
+// servers under one origin by path ("https://gw/tenant-a", "https://gw/tenant-b"),
+// and two paths are two servers. Trailing slashes are ignored; the path is
+// otherwise compared exactly, so two spellings that might reach one server are
+// treated as different, which refuses a record rather than misroutes it.
+func sameServer(a, b string) bool {
+	if !sameOrigin(a, b) {
+		return false
+	}
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return strings.TrimRight(ua.Path, "/") == strings.TrimRight(ub.Path, "/")
 }
 
 // sameOriginRedirects returns a CheckRedirect policy that refuses any redirect

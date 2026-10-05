@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,7 +90,7 @@ func TestCreateWithPortalData(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	portals := PortalData{"Orders": {{"Orders::Item": "Widget"}}}
+	portals := PortalData{"Orders": {{Fields: FieldData{"Orders::Item": "Widget"}}}}
 	if _, err := c.Create(context.Background(), "People", FieldData{"Name": "Mark"}, WithPortalData(portals)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -384,7 +385,7 @@ func TestUpdateByRecord(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9"}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}})
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -404,7 +405,7 @@ func TestRecordWriteNoID(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People"} // no ID
+	rec := Record{fields: fields{origin: origin{layout: "People"}}} // no ID
 
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "x"}); err == nil {
 		t.Error("Update: expected error for record without ID")
@@ -430,7 +431,7 @@ func TestUpdateIfUnchanged(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9", modID: "3"}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}, modID: "3"})
 
 	lastBody := func() string {
 		mu.Lock()
@@ -475,7 +476,7 @@ func TestWithModIDEmpty(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9", modID: "3"}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}, modID: "3"})
 
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "x"}, WithModID("")); err == nil {
 		t.Error("Update: expected error for WithModID(\"\")")
@@ -507,7 +508,7 @@ func TestIfUnchangedErrors(t *testing.T) {
 
 	// IfUnchanged on a record without a ModID must error, not silently degrade to
 	// an unconditional write.
-	if _, err := c.Update(context.Background(), Record{layout: "People", id: "9"}, FieldData{"Name": "x"}, IfUnchanged()); err == nil {
+	if _, err := c.Update(context.Background(), readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}}), FieldData{"Name": "x"}, IfUnchanged()); err == nil {
 		t.Error("Update: expected error for IfUnchanged on a record without a ModID")
 	}
 
@@ -531,7 +532,7 @@ func TestUpdateDoesNotMutateCallerOpts(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9", modID: "3"}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}, modID: "3"})
 
 	// A slice with spare capacity (len 1, cap 2) whose extra slot holds a sentinel.
 	// If Update appends its resolved WithModID into the caller's array instead of a
@@ -568,13 +569,13 @@ func TestUpdateWithPortalData(t *testing.T) {
 	c := testClient(srv)
 	portals := PortalData{
 		"Orders": {
-			// An existing related record to edit. The record ID and mod ID are
-			// plain keys, not table-occurrence qualified like the field values:
-			// the host reads "Orders::recordId" as a field and rejects the edit
-			// (code 102). Field values stay qualified ("Orders::Qty").
-			{"recordId": "70", "modId": "4", "Orders::Qty": 3},
-			// A new related record to add (no recordId).
-			{"Orders::Item": "Widget"},
+			// An existing related record to edit. Its ID and mod ID go out as
+			// plain "recordId" and "modId" keys, not table-occurrence qualified
+			// like the field values: the host reads "Orders::recordId" as a field
+			// and rejects the edit (code 102).
+			{ID: "70", ModID: "4", Fields: FieldData{"Orders::Qty": 3}},
+			// A new related record to add (no ID).
+			{Fields: FieldData{"Orders::Item": "Widget"}},
 		},
 	}
 	if _, err := c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "Jane"}, WithPortalData(portals)); err != nil {
@@ -599,14 +600,141 @@ func TestUpdateWithPortalData(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("portalData[Orders] = %d rows, want 2 (body %q)", len(rows), body)
 	}
-	if rows[0]["recordId"] != "70" || rows[0]["modId"] != "4" {
-		t.Errorf("edit row = %v, want recordId 70 / modId 4", rows[0])
+	if rows[0]["recordId"] != "70" || rows[0]["modId"] != "4" || rows[0]["Orders::Qty"] != "3" {
+		t.Errorf("edit row = %v, want recordId 70 / modId 4 / Qty 3", rows[0])
 	}
 	if _, ok := rows[1]["recordId"]; ok {
 		t.Errorf("add row should carry no recordId, got %v", rows[1])
 	}
+	if _, ok := rows[1]["modId"]; ok {
+		t.Errorf("add row should carry no modId, got %v", rows[1])
+	}
 	if rows[1]["Orders::Item"] != "Widget" {
 		t.Errorf("add row = %v, want Item=Widget", rows[1])
+	}
+}
+
+// TestUpdateNewPortalRecords checks that the related records the host reports
+// creating from portal rows reach UpdateResponse in the order it lists them,
+// and that a response without them leaves NewPortalRecords nil.
+func TestUpdateNewPortalRecords(t *testing.T) {
+	body := `{"response":{"modId":"5","newPortalRecordInfo":[` +
+		`{"tableName":"Orders","recordId":"71","modId":"0"},{"tableName":"Orders","recordId":"72","modId":"0"}]},` +
+		`"messages":[{"code":"0","message":"OK"}]}`
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		writeJSON(w, body)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	portals := WithPortalData(PortalData{"Orders": {
+		{Fields: FieldData{"Orders::Item": "Widget"}},
+		{Fields: FieldData{"Orders::Item": "Gadget"}},
+	}})
+	res, err := c.UpdateByID(context.Background(), "People", "9", nil, portals)
+	if err != nil {
+		t.Fatalf("UpdateByID: %v", err)
+	}
+	want := []NewPortalRecordInfo{{Table: "Orders", RecordID: "71", ModID: "0"}, {Table: "Orders", RecordID: "72", ModID: "0"}}
+	if !reflect.DeepEqual(res.NewPortalRecords, want) {
+		t.Errorf("NewPortalRecords = %+v, want %+v", res.NewPortalRecords, want)
+	}
+
+	mu.Lock()
+	body = `{"response":{"modId":"6"},"messages":[{"code":"0","message":"OK"}]}`
+	mu.Unlock()
+	res, err = c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "Jane"})
+	if err != nil {
+		t.Fatalf("UpdateByID: %v", err)
+	}
+	if res.NewPortalRecords != nil {
+		t.Errorf("NewPortalRecords = %+v, want nil when the host reports none", res.NewPortalRecords)
+	}
+}
+
+// TestPortalDataRejectedRows checks the rows WithPortalData refuses before any
+// request is sent: a ModID without an ID, a Fields map carrying the host's own
+// "recordId" or "modId" key, and, on a Create, a row with an ID.
+func TestPortalDataRejectedRows(t *testing.T) {
+	c := &Client{
+		httpClient: &http.Client{Transport: failTransport{t}},
+		host:       "https://fm.example",
+		database:   "Sales",
+		token:      "tok",
+		authSem:    make(chan struct{}, 1),
+	}
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		row  PortalRowData
+		want string
+	}{
+		{"mod ID without ID", PortalRowData{ModID: "4", Fields: FieldData{"Orders::Qty": 3}}, "has a ModID but no ID"},
+		{"recordId field", PortalRowData{Fields: FieldData{"recordId": "70", "Orders::Qty": 3}}, `has a "recordId" field`},
+		{"modId field", PortalRowData{Fields: FieldData{"modId": "4", "Orders::Qty": 3}}, `has a "modId" field`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opt := WithPortalData(PortalData{"Orders": {{Fields: FieldData{"Orders::Item": "ok"}}, tc.row}})
+			_, errU := c.UpdateByID(ctx, "People", "9", nil, opt)
+			_, errC := c.Create(ctx, "People", nil, opt)
+			for call, err := range map[string]error{"UpdateByID": errU, "Create": errC} {
+				if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), `portal "Orders" row 1`) {
+					t.Errorf("%s err = %v, want one naming portal \"Orders\" row 1 and %q", call, err, tc.want)
+				}
+			}
+		})
+	}
+
+	// A row with an ID edits a related record, which only an Update can do.
+	edit := WithPortalData(PortalData{"Orders": {{ID: "70", Fields: FieldData{"Orders::Qty": 3}}}})
+	if _, err := c.Create(ctx, "People", nil, edit); err == nil || !strings.Contains(err.Error(), "Create adds every portal row") {
+		t.Errorf("Create(row with ID) err = %v, want a Create-specific error", err)
+	}
+}
+
+// roundTripFunc adapts a function to http.RoundTripper, for tests that answer a
+// request in memory rather than through a listening server.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestPortalDataLaterCallReplaces checks that a later WithPortalData replaces an
+// earlier one outright, an invalid earlier one included: the rows are checked
+// as the request is built, against the PortalData in effect.
+func TestPortalDataLaterCallReplaces(t *testing.T) {
+	var sent string
+	c := &Client{
+		httpClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			b, _ := io.ReadAll(r.Body)
+			sent = string(b)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"response":{"modId":"5"},"messages":[{"code":"0","message":"OK"}]}`)),
+				Request:    r,
+			}, nil
+		})},
+		host:     "https://fm.example",
+		database: "Sales",
+		token:    "tok",
+		authSem:  make(chan struct{}, 1),
+	}
+	ctx := context.Background()
+	bad := WithPortalData(PortalData{"Orders": {{ModID: "4", Fields: FieldData{"Orders::Qty": 3}}}})
+	good := WithPortalData(PortalData{"Orders": {{Fields: FieldData{"Orders::Item": "Widget"}}}})
+
+	if _, err := c.UpdateByID(ctx, "People", "9", nil, bad, good); err != nil {
+		t.Fatalf("UpdateByID(invalid, then valid WithPortalData) = %v, want the valid one used", err)
+	}
+	if !strings.Contains(sent, `"portalData":{"Orders":[{"Orders::Item":"Widget"}]}`) {
+		t.Errorf("body = %s, want the replacing portal data", sent)
+	}
+	if _, err := c.UpdateByID(ctx, "People", "9", nil, good, bad); err == nil || !strings.Contains(err.Error(), "has a ModID but no ID") {
+		t.Errorf("UpdateByID(valid, then invalid WithPortalData) = %v, want the invalid one rejected", err)
 	}
 }
 
@@ -639,7 +767,7 @@ func TestUpdatePortalDataOmittedAndPortalOnly(t *testing.T) {
 		t.Errorf("body = %q, want no portalData key when WithPortalData is not used", lastBody())
 	}
 
-	portals := PortalData{"Orders": {{"Orders::Item": "Widget"}}}
+	portals := PortalData{"Orders": {{Fields: FieldData{"Orders::Item": "Widget"}}}}
 	if _, err := c.UpdateByID(context.Background(), "People", "9", nil, WithPortalData(portals)); err != nil {
 		t.Fatalf("UpdateByID portal-only: %v", err)
 	}
@@ -667,8 +795,8 @@ func TestUpdateByRecordPortalDataWithIfUnchanged(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9", modID: "3"}
-	portals := PortalData{"Orders": {{"Orders::Item": "Widget"}}}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}, modID: "3"})
+	portals := PortalData{"Orders": {{Fields: FieldData{"Orders::Item": "Widget"}}}}
 	if _, err := c.Update(context.Background(), rec, FieldData{"Name": "Jane"}, WithPortalData(portals), IfUnchanged()); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -788,7 +916,7 @@ func TestUploadToContainerIfUnchanged(t *testing.T) {
 
 	c := testClient(srv)
 	// IfUnchanged locks against the record's own ModID, sourced here from rec.
-	rec := Record{layout: "People", id: "1", modID: "5"}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "1"}}, modID: "5"})
 	if _, err := c.UploadToContainer(context.Background(), rec, "Photo", "pic.png", strings.NewReader("x"), IfUnchanged()); err != nil {
 		t.Fatalf("UploadToContainer: %v", err)
 	}
@@ -813,7 +941,7 @@ func TestUploadIfUnchangedErrors(t *testing.T) {
 		t.Error("UploadToContainerByID: expected error for IfUnchanged without a record")
 	}
 	// IfUnchanged on a record without a ModID must error, not silently degrade.
-	if _, err := c.UploadToContainer(context.Background(), Record{layout: "People", id: "1"}, "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
+	if _, err := c.UploadToContainer(context.Background(), readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "1"}}}), "Photo", "f.png", strings.NewReader("x"), IfUnchanged()); err == nil {
 		t.Error("UploadToContainer: expected error for IfUnchanged on a record without a ModID")
 	}
 }
@@ -831,7 +959,7 @@ func TestDownloadFromContainer(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", fieldData: map[string]any{"Photo": srv.URL + "/Streaming/abc"}}
+	rec := Record{fields: fields{origin: origin{layout: "People"}, data: map[string]any{"Photo": srv.URL + "/Streaming/abc"}}}
 	res, err := c.DownloadFromContainer(context.Background(), rec, "Photo")
 	if err != nil {
 		t.Fatalf("DownloadFromContainer: %v", err)
@@ -958,7 +1086,7 @@ func TestDownloadFromContainerNotAURL(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", fieldData: map[string]any{"Age": Number("42"), "Photo": ""}}
+	rec := Record{fields: fields{origin: origin{layout: "People"}, data: map[string]any{"Age": Number("42"), "Photo": ""}}}
 
 	_, err := c.DownloadFromContainer(context.Background(), rec, "Age")
 	if !errors.Is(err, ErrNotString) || errors.Is(err, ErrEmptyContainer) {
@@ -1141,7 +1269,7 @@ func TestDuplicateByRecord(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People", id: "9"}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}})
 	if _, err := c.Duplicate(context.Background(), rec); err != nil {
 		t.Fatalf("Duplicate: %v", err)
 	}
@@ -1197,7 +1325,7 @@ func TestDuplicateNoID(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{layout: "People"} // no ID
+	rec := Record{fields: fields{origin: origin{layout: "People"}}} // no ID
 	if _, err := c.Duplicate(context.Background(), rec); err == nil {
 		t.Error("Duplicate: expected error for record without ID")
 	}
@@ -1351,7 +1479,7 @@ func TestMarshalRecordBodyNumbers(t *testing.T) {
 		"Text":       "7",
 		"Nil":        nil,
 	}
-	p := params{portalData: PortalData{"Lines": {{"recordId": "5", "Lines::Qty": int64(20260924123456789)}}}}
+	p := params{portalData: PortalData{"Lines": {{ID: "5", Fields: FieldData{"Lines::Qty": int64(20260924123456789)}}}}}
 
 	body, err := marshalRecordBody(fields, p, nil)
 	if err != nil {
@@ -1364,7 +1492,7 @@ func TestMarshalRecordBodyNumbers(t *testing.T) {
 	if string(body) != want {
 		t.Errorf("got:  %s\nwant: %s", body, want)
 	}
-	if fields["Int"] != 7 || p.portalData["Lines"][0]["Lines::Qty"] != int64(20260924123456789) {
+	if fields["Int"] != 7 || p.portalData["Lines"][0].Fields["Lines::Qty"] != int64(20260924123456789) || len(p.portalData["Lines"][0].Fields) != 1 {
 		t.Error("marshalRecordBody mutated the caller's field or portal data")
 	}
 }
@@ -1377,8 +1505,8 @@ func TestMarshalRecordBodyInvalidNumber(t *testing.T) {
 	}
 }
 
-// TestUpdateRoundTripKeepsDigits reads a record and writes its portal rows back
-// unchanged: every number must go back with the digits it came with.
+// TestUpdateRoundTripKeepsDigits reads a record and writes a portal row's values
+// back unchanged: every number must go back with the digits it came with.
 func TestUpdateRoundTripKeepsDigits(t *testing.T) {
 	var mu sync.Mutex
 	var gotBody string
@@ -1404,7 +1532,9 @@ func TestUpdateRoundTripKeepsDigits(t *testing.T) {
 		t.Fatalf("GetByID: %v", err)
 	}
 	rec := got.Record
-	if _, err := c.Update(context.Background(), rec, FieldData{"Id": rec.Get("Id")}, WithPortalData(rec.Portals())); err != nil {
+	line := rec.Portal("Lines")[0]
+	portals := PortalData{"Lines": {{ID: line.ID(), ModID: line.ModID(), Fields: line.Fields()}}}
+	if _, err := c.Update(context.Background(), rec, FieldData{"Id": rec.Get("Id")}, WithPortalData(portals)); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 

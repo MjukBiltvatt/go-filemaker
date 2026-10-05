@@ -55,7 +55,11 @@ func main() {
 		log.Fatal(err)
 	}
 	for _, rec := range res.Records {
-		fmt.Println(rec.ID(), rec.String("Firstname"), rec.Int("Age"))
+		name, err := rec.String("Firstname")
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(rec.ID(), name)
 	}
 
 	// Create returns the host's acknowledgement, not the new record.
@@ -122,18 +126,37 @@ Shape the result with `WithSort`, `WithLimit`, `WithOffset`, and the portal opti
 
 ## Reading field values
 
-Records are immutable values read through typed accessors. Each numeric/time accessor has a paired `…E` form returning an error instead of the zero value.
+Records are immutable values read through typed accessors. Each returns the value and an error: a field the record lacks is `ErrMissingField`, an empty field is the zero value with no error, and a value of the wrong kind is the accessor's own sentinel (`ErrNotNumber`, `ErrNotInteger`, …). The error names the field and the record.
 
 ```go
 rec.ID()                 // host record ID
 rec.ModID()              // modification ID (optimistic concurrency)
-rec.String("Firstname")
-rec.Int("Age")           // also Int64, Float64
+rec.String("Firstname")  // (string, error)
+rec.Int("Age")           // also Int64, Float64, Number
 rec.Bool("Active")
 rec.Time("Created")      // uses the client's WithLocation; TimeIn overrides
 rec.Has("Notes")         // distinguishes absent from present-but-empty
 rec.Fields()             // copy of all field values (FieldData)
-rec.Portals()            // deep copy of portal rows (PortalData)
+```
+
+`Portal` returns a portal's rows as `PortalRow` values, which read through the same accessors (and `Decode`) under their qualified field names:
+
+```go
+for _, line := range rec.Portal("Lines") {
+	qty, err := line.Int("Lines::Qty")
+	// line.ID() is the related record's ID
+}
+```
+
+To write related records, pass `WithPortalData` to `Create` or `Update`. A row with an `ID` edits that related record (add its `ModID` to lock the edit), and a row without one adds a new related record:
+
+```go
+_, err := c.Update(ctx, rec, nil, filemaker.WithPortalData(filemaker.PortalData{
+	"Lines": {
+		{ID: line.ID(), ModID: line.ModID(), Fields: filemaker.FieldData{"Lines::Qty": 5}},
+		{Fields: filemaker.FieldData{"Lines::Qty": 1}},
+	},
+}))
 ```
 
 `Decode` maps a record's `fm`-tagged fields onto a struct (it is **not** recursive — decode nested structs explicitly):
@@ -145,6 +168,8 @@ var p struct {
 }
 if err := rec.Decode(&p); err != nil { /* … */ }
 ```
+
+It fills every field it can and returns one error naming each field it could not — a value of the wrong type, or a field the record lacks (tag it `fm:"Notes,optional"` if it may be absent).
 
 ## Writing field values
 

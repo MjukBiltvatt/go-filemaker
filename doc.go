@@ -29,7 +29,9 @@
 // AND-ed within a request and OR-ed across requests. [Client.Get] fetches one
 // record by ID, and [Client.GetRange] pages through a layout. Each returns
 // [Record] values whose data is read through typed accessors — [Record.String],
-// [Record.Int], [Record.Time], [Record.Decode], and so on.
+// [Record.Int], [Record.Time], [Record.Decode], and so on — each returning the
+// value and an error. [Record.Portal] returns a portal's rows as [PortalRow]
+// values, which read through the same accessors.
 //
 //	res, err := c.Find(ctx, "People",
 //	    []filemaker.FindRequest{{Criteria: filemaker.Criteria{"Lastname": "==Johnson"}}},
@@ -37,7 +39,9 @@
 //	    filemaker.WithLimit(10),
 //	)
 //	for _, rec := range res.Records {
-//	    fmt.Println(rec.ID(), rec.String("Firstname"), rec.Int("Age"))
+//	    name, err := rec.String("Firstname")
+//	    if err != nil { … }
+//	    fmt.Println(rec.ID(), name)
 //	}
 //
 // # Writing (data-in / data-out)
@@ -52,10 +56,11 @@
 // host reports nothing ([SetGlobalFieldsResponse]), so a value the host adds
 // later arrives as a new field rather than a changed signature.
 //
-// FieldData is marshaled faithfully — string and number values are sent as-is.
-// The optional wrappers [Bool], [Date], [Timestamp], [Time], and [Duration]
-// render Go values in the formats FileMaker expects and slot directly into the
-// map.
+// FieldData is marshaled faithfully: strings and floats are sent as-is, and Go
+// integers with their exact digits. [Number] carries exact numbers beyond
+// float64, and the optional wrappers [Bool], [Date], [Timestamp], [Time], and
+// [Duration] render Go values in the formats FileMaker expects; all slot
+// directly into the map.
 //
 //	created, err := c.Create(ctx, "People", filemaker.FieldData{
 //	    "Firstname": "Mark",
@@ -93,6 +98,12 @@
 // operation that addresses a single record by layout and ID names both in any
 // error from the request itself, wrapping the underlying error so errors.Is and
 // errors.As still reach it.
+//
+// Reading a value is not a request, but its errors carry the same identity: a
+// typed accessor's error names the field and the record (or portal row) and
+// matches its cause — [ErrMissingField], [ErrNotNumber], [ErrNotInteger],
+// [ErrOutOfRange], and so on — with errors.Is. [Record.Decode] reports every
+// struct field it cannot fill in one such error.
 //
 // A request that never reached those semantics — a proxy or gateway answered, the
 // body would not decode, or the container streaming endpoint refused it — returns

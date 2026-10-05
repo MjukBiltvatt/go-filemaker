@@ -1,6 +1,10 @@
 package filemaker
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"sort"
+)
 
 // This file defines the option type lattice shared by the record-writing
 // endpoints.
@@ -149,6 +153,10 @@ func (o option) applyUpload(c *params)    { o(c) }
 // It sets a single mod ID; calling WithModID again keeps only the last value.
 // (Combining it with IfUnchanged is a documented exception, not a duplicate: the
 // explicit version from WithModID is used regardless of order.)
+//
+// It locks the record only. Portal rows written with WithPortalData are separate
+// related records with their own mod IDs, and each is written unconditionally
+// unless its PortalRowData carries a ModID.
 func WithModID(modID string) ConcurrencyOption {
 	return option(func(c *params) {
 		if modID == "" {
@@ -171,32 +179,91 @@ func WithModID(modID string) ConcurrencyOption {
 // without a ModID is likewise an error rather than a silent unconditional write.
 // Combining it with WithModID is redundant — the explicit version from WithModID
 // is used, regardless of order.
+//
+// It locks the record only. Portal rows written with WithPortalData are separate
+// related records with their own mod IDs, and each is written unconditionally
+// unless its PortalRowData carries a ModID.
 func IfUnchanged() ConcurrencyOption {
 	return option(func(c *params) {
 		c.conditional = true
 	})
 }
 
+// PortalData is the related-record data WithPortalData writes: a portal name
+// mapped to the rows to write through it. A portal is named as Record.Portal
+// names it — by its object name when it has one, otherwise by its
+// table-occurrence name. It mirrors the Data API's portalData object.
+type PortalData map[string][]PortalRowData
+
+// PortalRowData is one row of PortalData: a related record to add or edit
+// through a portal. Fields holds its values keyed by fully qualified name
+// ("TableOccurrence::FieldName"), with the same value types FieldData accepts.
+//
+// An empty ID adds a new related record; a non-empty ID edits the existing
+// related record with that ID, and only on an Update. ModID makes that edit
+// conditional, like WithModID does for the record: the host rejects the write
+// with ErrRecordModified if the related record changed since that mod ID was
+// read. It requires an ID. To edit a row read through Record.Portal, copy its
+// PortalRow.ID, and PortalRow.ModID to lock it.
+//
+// Unlike a record, whose ID is part of the request URL, a related record is
+// addressed inside the request body, so its ID travels with its values here.
+type PortalRowData struct {
+	ID     string
+	ModID  string
+	Fields FieldData
+}
+
+// check reports the first row that could not be sent as written: one with a
+// ModID but no ID, or one whose Fields carries the host's own "recordId" or
+// "modId" key, which ID and ModID set. create reports a row with an ID, which a
+// Create cannot edit.
+func (pd PortalData) check(create bool) error {
+	// Portals in name order, so a request with several faulty rows always
+	// reports the same one.
+	portals := make([]string, 0, len(pd))
+	for portal := range pd {
+		portals = append(portals, portal)
+	}
+	sort.Strings(portals)
+	for _, portal := range portals {
+		for i, row := range pd[portal] {
+			switch {
+			case create && row.ID != "":
+				return fmt.Errorf("filemaker: portal %q row %d has ID %q, but Create adds every portal row as a new related record", portal, i, row.ID)
+			case row.ModID != "" && row.ID == "":
+				return fmt.Errorf("filemaker: portal %q row %d has a ModID but no ID; only an edit of an existing related record can be conditional", portal, i)
+			}
+			for _, key := range []string{"recordId", "modId"} {
+				if _, ok := row.Fields[key]; ok {
+					return fmt.Errorf("filemaker: portal %q row %d has a %q field; set PortalRowData.ID and ModID instead", portal, i, key)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // WithPortalData attaches related-record data to a Create or Update, applied by
-// the host alongside the field-data patch. Pass the rows in the same shape
-// Record.Portals returns: a portal name mapped to its rows, each row's field
-// values keyed by fully qualified name ("TableOccurrence::FieldName").
+// the host alongside the field-data patch (see PortalData and PortalRowData).
+// On a Create every row is added as a new related record, so a row with an ID
+// is an error. On an Update a row with an ID edits that related record, and a
+// row without one adds a new related record.
 //
-// On a Create, every row is added as a new related record. On an Update a row
-// carrying a record ID (a plain "recordId" key) edits that existing related
-// record — add a plain "modId" for optimistic locking — and a row without one is
-// added as a new related record. Note the record ID is not table-occurrence
-// qualified like the field values are: the host reads "TableOccurrence::recordId"
-// as a field and rejects the edit with code 102 ("Field is missing").
-//
-// Only the named portal rows are touched; rows you omit are left unchanged. To
-// remove related records, set "deleteRelated" in the FieldData patch (e.g.
-// "Orders.3", or a slice for several): it is a field-data directive, not a portal
-// edit. To edit only portals and leave the record's own fields untouched, pass a
-// nil or empty FieldData. See the Claris Data API guide's "Edit record" page.
+// Only the listed rows are touched; rows you omit are left unchanged. To
+// remove related records, set "deleteRelated" in the FieldData patch to
+// "TableOccurrence.recordId" (e.g. "Orders.3", or a slice for several): it is a
+// field-data directive, not a portal edit. It names the table occurrence the
+// portal shows (PortalDataInfo.Table), even for a portal with an object name,
+// whose name the host refuses there with code 110 ("Related tables are
+// missing"). To edit only portals and leave the record's own fields untouched,
+// pass a nil or empty FieldData. See the Claris Data API guide's "Edit record"
+// page.
 //
 // It sets a single portal-data object; calling WithPortalData again replaces it
-// rather than merging — pass all the portals and rows in one call.
+// rather than merging — pass all the portals and rows in one call. The rows are
+// checked when the request is built, against the last PortalData passed, so a
+// replaced value cannot fail the write.
 func WithPortalData(portals PortalData) WriteOption {
 	return option(func(c *params) {
 		c.portalData = portals
@@ -299,7 +366,7 @@ func WithResponseLayout(layout string) ReadOption {
 }
 
 // WithPortals restricts which portals the result includes to the named ones;
-// portals not listed are omitted from both Record.Portals and
+// portals not listed are omitted from both Record.Portal and
 // Record.PortalDataInfo. A portal is named by its object name when it has one,
 // otherwise by its table-occurrence name — a portal with an object name does not
 // answer to its table occurrence. A name that matches no portal on the layout

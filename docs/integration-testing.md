@@ -82,6 +82,12 @@ the `ParentTable` occurrence:
   count, and the test seeds more rows than that to confirm both the cap and that
   an explicit `WithPortalLimit` overrides it. (Keep this in sync with the
   `portalRowHeight` constant in the test.)
+- *Optional:* add a **second portal** showing `ChildTable`, with `ChildText` in
+  it, and set its **object name to `NamedChildren`** (in the Inspector's
+  Position tab, "Name"). The host keys a named portal's data by its object name,
+  which `TestIntegrationPortalObjectName` checks; that test skips without it.
+  Its row count does not matter. Leave the first portal unnamed as described
+  above — the other portal tests read through that one.
 
 **`ParentTableResponse`** (the `itResponseLayout` constant) — a minimal layout
 used by `TestIntegrationWithResponseLayout` to confirm that `WithResponseLayout`
@@ -221,8 +227,9 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationFindNoMatch` | Empty result is a nil error, not `ErrNoRecords` |
 | `TestIntegrationContainer` | Container upload + download round-trip; the upload's mod ID matches the record's, and the download reports the host-inferred `text/plain` media type |
 | `TestIntegrationContainerDownloadError` | A container URL with a damaged object token fails as an `*HTTPError` with status 401 |
-| `TestIntegrationPortal` | Related-record add / edit / delete via portals |
+| `TestIntegrationPortal` | Related-record add / edit / delete via portals, with rows read back through `Record.Portal`; a row edit locked with a stale `ModID` fails with `ErrRecordModified`; `deleteRelated` removes one row by a single string and two by a list; an Update adding four rows around an edit reports each in `NewPortalRecords` in the order sent |
 | `TestIntegrationPortalPaging` | Portal row cap: default find returns at most the portal's configured row count; `WithPortalLimit` overrides it; `PortalDataInfo` reports every related row in `FoundCount` and the returned ones in `ReturnedCount` (needs the portal configured to 3 rows) |
+| `TestIntegrationPortalObjectName` | A named portal is read and written under its object name, while `deleteRelated` takes the table-occurrence name: the object name fails with code 110; rows added under both portal names in one Update come back in `NewPortalRecords` in the order sent, portals in name order (skips without the optional `NamedChildren` portal) |
 | `TestIntegrationUpdateWithModID` | Optimistic lock by mod ID; conflict → 306 |
 | `TestIntegrationUpdateIfUnchanged` | Record-relative optimistic lock; conflict → 306 |
 | `TestIntegrationScriptResults` | `WithScript` on Update and Find: echo-param round-trip, script error without request failure, missing script → `*APIError` code 104 (needs the `EchoParam` and `TriggerError` fixtures) |
@@ -280,8 +287,9 @@ In rough order of how often they bite:
    ProhibitModeScript should have been rejected" path instead of seeing code 201.
 5. **A field exists in the table but isn't on the `ParentTable` layout** — the
    Data API won't see it, so it won't round-trip.
-6. **The portal object has a custom name** — portal data comes back under that
-   name instead of `ChildTable`, so the portal test can't find its rows.
+6. **The `ChildTable` portal object has a custom name** — portal data comes back
+   under that name instead of `ChildTable`, so the portal test can't find its
+   rows. (The optional `NamedChildren` portal is a second, separate portal.)
 7. **Host configured with a non-US date format** — surfaced by
    `TestIntegrationDateTime` (by design; it confirms the wrappers' format against
    the live host).

@@ -131,13 +131,16 @@ const (
 	// Portal (related-record) addressing. portalName is the ChildTable table
 	// occurrence the layout's portal shows; the host keys portal data by it.
 	// Within a row, field values are fully qualified as "TableOccurrence::Field",
-	// but the row's own record ID is a plain "recordId" key — both when read back
-	// from a find response and when written to identify an existing row in an
-	// edit. (Namespacing it, "ChildTable::recordId", makes the host read it as a
-	// field and reject the edit with code 102 "Field is missing".)
-	portalName       = "ChildTable"
-	fieldChildText   = portalName + "::ChildText"
-	keyChildRecordID = "recordId"
+	// while the row's own record and mod IDs travel as plain "recordId" and
+	// "modId" keys, which Record.Portal and PortalRowData read and write.
+	portalName     = "ChildTable"
+	fieldChildText = portalName + "::ChildText"
+
+	// namedPortalName is the object name of the optional second ChildTable
+	// portal that TestIntegrationPortalObjectName looks for (see
+	// docs/integration-testing.md). The host keys a named portal's data by its
+	// object name rather than its table occurrence.
+	namedPortalName = "NamedChildren"
 
 	// portalRowHeight is the number of rows the ChildTable portal must be
 	// configured to display (see docs/integration-testing.md). A default find
@@ -530,12 +533,12 @@ func TestIntegrationCRUD(t *testing.T) {
 		t.Fatalf("Find returned %d records, want 1", len(found.Records))
 	}
 	rec := found.Records[0]
-	if got := rec.String(fieldText); got != marker {
-		t.Errorf("%s = %q, want %q", fieldText, got, marker)
+	if got, err := rec.String(fieldText); err != nil || got != marker {
+		t.Errorf("%s = %q, %v; want %q", fieldText, got, err, marker)
 	}
 	// FileMaker number fields decode as Number; Int() reads it as an int.
-	if got := rec.Int(fieldNumber); got != 7 {
-		t.Errorf("%s = %d, want 7", fieldNumber, got)
+	if got, err := rec.Int(fieldNumber); err != nil || got != 7 {
+		t.Errorf("%s = %d, %v; want 7", fieldNumber, got, err)
 	}
 
 	// Patch only the number field; every other field must be left untouched.
@@ -551,12 +554,12 @@ func TestIntegrationCRUD(t *testing.T) {
 		t.Fatalf("Find after update returned %d records, want 1", len(reFound.Records))
 	}
 	updated := reFound.Records[0]
-	if got := updated.Int(fieldNumber); got != 42 {
-		t.Errorf("%s after update = %d, want 42", fieldNumber, got)
+	if got, err := updated.Int(fieldNumber); err != nil || got != 42 {
+		t.Errorf("%s after update = %d, want 42 (err %v)", fieldNumber, got, err)
 	}
 	// A field absent from the patch must survive it unchanged.
-	if got := updated.String(fieldTextSecondary); got != secondaryText {
-		t.Errorf("%s after update = %q, want %q (patch should not clear fields it omits)", fieldTextSecondary, got, secondaryText)
+	if got, err := updated.String(fieldTextSecondary); err != nil || got != secondaryText {
+		t.Errorf("%s after update = %q, want %q (patch should not clear fields it omits) (err %v)", fieldTextSecondary, got, secondaryText, err)
 	}
 }
 
@@ -650,16 +653,16 @@ func TestIntegrationDateTime(t *testing.T) {
 	}
 	rec := found.Records[0]
 
-	gotDate, err := rec.TimeE(fieldDate)
+	gotDate, err := rec.Time(fieldDate)
 	if err != nil {
-		t.Errorf("TimeE(%s) = %v; stored value %q did not parse", fieldDate, err, rec.String(fieldDate))
+		t.Errorf("Time(%s) = %v; stored value %q did not parse", fieldDate, err, rec.Get(fieldDate))
 	} else if got, want := wallClock(gotDate), wallClock(date); got != want {
 		t.Errorf("%s round-trip = %s, want %s", fieldDate, got, want)
 	}
 
-	gotTS, err := rec.TimeE(fieldTimestamp)
+	gotTS, err := rec.Time(fieldTimestamp)
 	if err != nil {
-		t.Errorf("TimeE(%s) = %v; stored value %q did not parse", fieldTimestamp, err, rec.String(fieldTimestamp))
+		t.Errorf("Time(%s) = %v; stored value %q did not parse", fieldTimestamp, err, rec.Get(fieldTimestamp))
 	} else if got, want := wallClock(gotTS), wallClock(ts); got != want {
 		t.Errorf("%s round-trip = %s, want %s", fieldTimestamp, got, want)
 	}
@@ -711,9 +714,9 @@ func TestIntegrationDateTimeLocation(t *testing.T) {
 		t.Fatalf("Find returned %d records, want 1", len(found.Records))
 	}
 
-	got, err := found.Records[0].TimeE(fieldTimestamp)
+	got, err := found.Records[0].Time(fieldTimestamp)
 	if err != nil {
-		t.Fatalf("TimeE(%s): %v", fieldTimestamp, err)
+		t.Fatalf("Time(%s): %v", fieldTimestamp, err)
 	}
 	// The configured zone is attached on read-back...
 	if got.Location().String() != loc.String() {
@@ -858,7 +861,7 @@ func TestIntegrationContainerDownloadError(t *testing.T) {
 		t.Fatalf("UploadToContainerByID: %v", err)
 	}
 
-	raw, err := findParent(t, ctx, marker).StringE(fieldContainer)
+	raw, err := findParent(t, ctx, marker).String(fieldContainer)
 	if err != nil || raw == "" {
 		t.Fatalf("container field = %q, %v; want a streaming URL", raw, err)
 	}
@@ -890,9 +893,9 @@ func TestIntegrationContainerDownloadError(t *testing.T) {
 
 // findParent finds the single record carrying marker in TextField, failing if
 // the host returns anything other than exactly one.
-func findParent(t *testing.T, ctx context.Context, marker string) Record {
+func findParent(t *testing.T, ctx context.Context, marker string, opts ...FindOption) Record {
 	t.Helper()
-	found, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}})
+	found, err := itClient.Find(ctx, itLayout, []FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}}, opts...)
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
@@ -902,39 +905,88 @@ func findParent(t *testing.T, ctx context.Context, marker string) Record {
 	return found.Records[0]
 }
 
+// portalRow returns the ChildTable row whose ChildText is text, failing if there
+// is none.
+func portalRow(t *testing.T, rec Record, text string) PortalRow {
+	t.Helper()
+	for _, row := range rec.Portal(portalName) {
+		if got, _ := row.String(fieldChildText); got == text {
+			return row
+		}
+	}
+	t.Fatalf("no %s row with %s %q", portalName, fieldChildText, text)
+	return PortalRow{}
+}
+
 // portalRows maps each ChildTable row's ChildText to its record ID, which the
-// find response carries as the row's plain "recordId" key.
+// find response carries as the row's plain "recordId" key and Record.Portal
+// lifts into PortalRow.ID.
 func portalRows(t *testing.T, rec Record) map[string]string {
 	t.Helper()
-	rows := rec.Portals()[portalName]
+	rows := rec.Portal(portalName)
 	out := make(map[string]string, len(rows))
 	for _, row := range rows {
-		text, _ := row[fieldChildText].(string)
-		id, _ := row[keyChildRecordID].(string)
-		out[text] = id
+		text, err := row.String(fieldChildText)
+		if err != nil {
+			t.Fatalf("portal row: %v", err)
+		}
+		if row.ID() == "" {
+			t.Fatalf("portal row %q has no record ID", text)
+		}
+		out[text] = row.ID()
 	}
 	return out
 }
 
+// checkNewPortalRecords checks that got reports the rows added with the given
+// texts, in that order and in table: entry i must be the record that now holds
+// texts[i], found in rows (ChildText → record ID).
+func checkNewPortalRecords(t *testing.T, got []NewPortalRecordInfo, table string, texts []string, rows map[string]string) {
+	t.Helper()
+	want := make([]string, len(texts))
+	for i, text := range texts {
+		if rows[text] == "" {
+			t.Fatalf("added row %q missing after the write (%v)", text, rows)
+		}
+		want[i] = rows[text]
+	}
+	gotIDs := make([]string, len(got))
+	for i, info := range got {
+		gotIDs[i] = info.RecordID
+		if info.Table != table || info.ModID == "" {
+			t.Errorf("NewPortalRecords[%d] = %+v, want Table %q and a ModID", i, info, table)
+		}
+	}
+	if !slices.Equal(gotIDs, want) {
+		t.Errorf("NewPortalRecords record IDs = %v, want %v: the rows %v in the order they were sent", gotIDs, want, texts)
+	}
+}
+
 // TestIntegrationPortal exercises the related-record lifecycle the mocks cannot:
 // add rows at Create time through WithPortalData, read them back via
-// Record.Portals, edit an existing row by its record ID, and delete one through
-// the deleteRelated field-data directive. The edit and delete still go through
-// Update, since they address related records that already exist.
+// Record.Portal, edit an existing row by its record ID (locked against its mod
+// ID, which a repeat of the edit must then fail), and delete rows through the
+// deleteRelated field-data directive — one by a single "TO.recordId" string,
+// then two at once by a list of them. A last Update adds four rows around an
+// edit, and its NewPortalRecords must pair each entry with the row sent in that
+// position. The edit and deletes still go through Update, since they address
+// related records that already exist.
 func TestIntegrationPortal(t *testing.T) {
 	requireServer(t)
 	ctx := context.Background()
 
 	marker := "go-filemaker-it-portal-" + time.Now().UTC().Format("20060102T150405.000000000")
-	// Create the parent with two related rows in the same request; a row without
+	// Create the parent with four related rows in the same request; a row without
 	// a record ID is created.
 	created, err := itClient.Create(ctx, itLayout, FieldData{
 		fieldText:         marker,
 		fieldRequired:     "present",
 		fieldSoftRequired: "present",
 	}, WithPortalData(PortalData{portalName: {
-		{fieldChildText: "row-1"},
-		{fieldChildText: "row-2"},
+		{Fields: FieldData{fieldChildText: "row-1"}},
+		{Fields: FieldData{fieldChildText: "row-2"}},
+		{Fields: FieldData{fieldChildText: "row-3"}},
+		{Fields: FieldData{fieldChildText: "row-4"}},
 	}}))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -947,28 +999,37 @@ func TestIntegrationPortal(t *testing.T) {
 		}
 	})
 
-	rows := portalRows(t, findParent(t, ctx, marker))
-	if len(rows) != 2 {
-		t.Fatalf("after add: %d portal rows, want 2 (%v)", len(rows), rows)
+	// Four rows exceed the portal's three-row display, so every read raises the
+	// portal limit to see them all.
+	allRows := WithPortalLimit(portalName, 10)
+	rows := portalRows(t, findParent(t, ctx, marker, allRows))
+	if len(rows) != 4 {
+		t.Fatalf("after add: %d portal rows, want 4 (%v)", len(rows), rows)
+	}
+	for _, text := range []string{"row-1", "row-2", "row-3", "row-4"} {
+		if rows[text] == "" {
+			t.Fatalf("after add: %s missing or has no record ID (%v)", text, rows)
+		}
 	}
 	id1 := rows["row-1"]
-	if id1 == "" {
-		t.Fatalf("after add: row-1 missing or has no record ID (%v)", rows)
-	}
-	if _, ok := rows["row-2"]; !ok {
-		t.Fatalf("after add: row-2 missing (%v)", rows)
-	}
 
-	// Edit row-1 by its record ID. A portal-row edit identifies the existing
-	// related record with a plain "recordId" key (see keyChildRecordID).
+	// Edit row-1 by its record ID, locked against the mod ID it was read with.
+	line := portalRow(t, findParent(t, ctx, marker, allRows), "row-1")
+	if line.ID() != id1 || line.ModID() == "" {
+		t.Fatalf("row-1 = ID %q, ModID %q; want ID %q and a ModID", line.ID(), line.ModID(), id1)
+	}
 	editRow := WithPortalData(PortalData{portalName: {
-		{keyChildRecordID: id1, fieldChildText: "row-1-edited"},
+		{ID: line.ID(), ModID: line.ModID(), Fields: FieldData{fieldChildText: "row-1-edited"}},
 	}})
 	if _, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, nil, editRow); err != nil {
 		t.Fatalf("Update (edit row): %v", err)
 	}
+	// The edit changed row-1's mod ID, so the same locked edit is now stale.
+	if _, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, nil, editRow); !errors.Is(err, ErrRecordModified) {
+		t.Errorf("Update (stale row ModID) err = %v, want ErrRecordModified", err)
+	}
 
-	rows = portalRows(t, findParent(t, ctx, marker))
+	rows = portalRows(t, findParent(t, ctx, marker, allRows))
 	if _, ok := rows["row-1-edited"]; !ok {
 		t.Errorf("after edit: row-1-edited missing (%v)", rows)
 	}
@@ -977,23 +1038,54 @@ func TestIntegrationPortal(t *testing.T) {
 	}
 
 	// Delete row-2 via the deleteRelated directive ("TO.recordId" in fieldData).
-	id2 := rows["row-2"]
-	if id2 == "" {
-		t.Fatalf("after edit: row-2 has no record ID; cannot delete it (%v)", rows)
-	}
 	if _, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, FieldData{
-		"deleteRelated": portalName + "." + id2,
+		"deleteRelated": portalName + "." + rows["row-2"],
 	}); err != nil {
 		t.Fatalf("Update (deleteRelated): %v", err)
 	}
 
-	rows = portalRows(t, findParent(t, ctx, marker))
+	rows = portalRows(t, findParent(t, ctx, marker, allRows))
+	if len(rows) != 3 {
+		t.Fatalf("after delete: %d portal rows, want 3 (%v)", len(rows), rows)
+	}
+	if _, ok := rows["row-2"]; ok {
+		t.Errorf("after delete: row-2 still present (%v)", rows)
+	}
+
+	// Delete row-3 and row-4 in one request: deleteRelated also takes a list.
+	if _, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, FieldData{
+		"deleteRelated": []string{portalName + "." + rows["row-3"], portalName + "." + rows["row-4"]},
+	}); err != nil {
+		t.Fatalf("Update (deleteRelated list): %v", err)
+	}
+
+	rows = portalRows(t, findParent(t, ctx, marker, allRows))
 	if len(rows) != 1 {
-		t.Fatalf("after delete: %d portal rows, want 1 (%v)", len(rows), rows)
+		t.Fatalf("after list delete: %d portal rows, want 1 (%v)", len(rows), rows)
 	}
 	if _, ok := rows["row-1-edited"]; !ok {
-		t.Errorf("after delete: expected row-1-edited to remain (%v)", rows)
+		t.Errorf("after list delete: expected row-1-edited to remain (%v)", rows)
 	}
+
+	// Add four rows with an edit among them in one Update. The host reports one
+	// NewPortalRecordInfo per added row; the edit must neither be reported nor
+	// shift which entry belongs to which row.
+	added := []string{"new-a", "new-b", "new-c", "new-d"}
+	res, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, nil, WithPortalData(PortalData{portalName: {
+		{Fields: FieldData{fieldChildText: added[0]}},
+		{ID: id1, Fields: FieldData{fieldChildText: "row-1-again"}},
+		{Fields: FieldData{fieldChildText: added[1]}},
+		{Fields: FieldData{fieldChildText: added[2]}},
+		{Fields: FieldData{fieldChildText: added[3]}},
+	}}))
+	if err != nil {
+		t.Fatalf("Update (add rows around an edit): %v", err)
+	}
+	rows = portalRows(t, findParent(t, ctx, marker, allRows))
+	if _, ok := rows["row-1-again"]; !ok {
+		t.Errorf("after add: the edit among the added rows did not apply (%v)", rows)
+	}
+	checkNewPortalRecords(t, res.NewPortalRecords, portalName, added, rows)
 }
 
 // TestIntegrationPortalPaging exercises WithPortalLimit and WithPortalOffset
@@ -1010,9 +1102,9 @@ func TestIntegrationPortalPaging(t *testing.T) {
 	// Seed more child rows than the portal's configured height so the default cap
 	// is exercised and the override has rows to reveal.
 	const childRows = portalRowHeight + 2
-	rows := make([]map[string]any, childRows)
+	rows := make([]PortalRowData, childRows)
 	for i := range rows {
-		rows[i] = map[string]any{fieldChildText: "row-" + strconv.Itoa(i+1)}
+		rows[i] = PortalRowData{Fields: FieldData{fieldChildText: "row-" + strconv.Itoa(i+1)}}
 	}
 	marker := "go-filemaker-it-portalpage-" + time.Now().UTC().Format("20060102T150405.000000000")
 	created, err := itClient.Create(ctx, itLayout, FieldData{
@@ -1042,7 +1134,7 @@ func TestIntegrationPortalPaging(t *testing.T) {
 			t.Fatalf("Find returned %d records, want 1", len(found.Records))
 		}
 		rec := found.Records[0]
-		n := len(rec.Portals()[portalName])
+		n := len(rec.Portal(portalName))
 		info, ok := rec.PortalDataInfo()[portalName]
 		if !ok {
 			t.Fatalf("no PortalDataInfo for portal %q: %+v", portalName, rec.PortalDataInfo())
@@ -1069,6 +1161,105 @@ func TestIntegrationPortalPaging(t *testing.T) {
 	if n := countPortal(WithPortalOffset(portalName, 2), WithPortalLimit(portalName, 1000)); n != childRows-1 {
 		t.Errorf("offset 2: %d portal rows, want %d", n, childRows-1)
 	}
+}
+
+// TestIntegrationPortalObjectName pins down how the host names a portal that has
+// an object name. Its data is read and written under the object name, but
+// deleteRelated addresses related records by table occurrence: the object name
+// fails with code 110 ("Related tables are missing"), and the table-occurrence
+// name works even with the named portal on the layout. Rows added under both
+// portal names in one Update come back in NewPortalRecords in the order they
+// were sent — portals in name order, as the library sends them — all reporting
+// the same table occurrence. It skips unless the layout carries the optional
+// NamedChildren portal.
+func TestIntegrationPortalObjectName(t *testing.T) {
+	requireServer(t)
+	ctx := context.Background()
+
+	// Two seeded rows plus the one written below stay within the ChildTable
+	// portal's three-row cap, so portalRows sees every related record.
+	marker := "go-filemaker-it-portalname-" + time.Now().UTC().Format("20060102T150405.000000000")
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldText:         marker,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
+	}, WithPortalData(PortalData{portalName: {
+		{Fields: FieldData{fieldChildText: "seed-1"}},
+		{Fields: FieldData{fieldChildText: "seed-2"}},
+	}}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	// Read: the named portal is keyed by its object name and reports the table
+	// occurrence it shows.
+	rec := findParent(t, ctx, marker)
+	info, ok := rec.PortalDataInfo()[namedPortalName]
+	if !ok {
+		t.Skipf("layout %q has no portal named %q (portal data info: %+v); add it to run this test (see docs/integration-testing.md)",
+			itLayout, namedPortalName, rec.PortalDataInfo())
+	}
+	if info.Table != portalName {
+		t.Errorf("%s PortalDataInfo.Table = %q, want %q", namedPortalName, info.Table, portalName)
+	}
+	if n := len(rec.Portal(namedPortalName)); n != 2 {
+		t.Errorf("Portal(%s) = %d rows, want 2", namedPortalName, n)
+	}
+
+	// Write: portal data keyed by the object name adds the row.
+	if _, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, nil, WithPortalData(PortalData{namedPortalName: {
+		{Fields: FieldData{fieldChildText: "added-via-object-name"}},
+	}})); err != nil {
+		t.Fatalf("Update (portal data keyed by %s): %v", namedPortalName, err)
+	}
+	rows := portalRows(t, findParent(t, ctx, marker))
+	if _, ok := rows["added-via-object-name"]; !ok {
+		t.Fatalf("row written under %s missing (%v)", namedPortalName, rows)
+	}
+
+	// deleteRelated by object name is refused with code 110 and deletes nothing.
+	_, err = itClient.UpdateByID(ctx, itLayout, created.RecordID, FieldData{"deleteRelated": namedPortalName + "." + rows["seed-1"]})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code() != 110 {
+		t.Errorf("deleteRelated by object name: err = %v, want host code 110", err)
+	}
+	rows = portalRows(t, findParent(t, ctx, marker))
+	if _, ok := rows["seed-1"]; !ok {
+		t.Errorf("seed-1 deleted by a deleteRelated the host refused (%v)", rows)
+	}
+
+	// deleteRelated by table occurrence works with the named portal present.
+	if _, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, FieldData{"deleteRelated": portalName + "." + rows["seed-2"]}); err != nil {
+		t.Fatalf("deleteRelated by table occurrence: %v", err)
+	}
+	rows = portalRows(t, findParent(t, ctx, marker))
+	if _, ok := rows["seed-2"]; ok {
+		t.Errorf("seed-2 still present after deleteRelated by table occurrence (%v)", rows)
+	}
+
+	// Add rows under both portal names in one Update. The library sends portals
+	// in name order (encoding/json sorts map keys), and both report the same
+	// table occurrence, so an entry's position is all that pairs it with a row.
+	res, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, nil, WithPortalData(PortalData{
+		namedPortalName: {
+			{Fields: FieldData{fieldChildText: "named-1"}},
+			{Fields: FieldData{fieldChildText: "named-2"}},
+		},
+		portalName: {
+			{Fields: FieldData{fieldChildText: "plain-1"}},
+			{Fields: FieldData{fieldChildText: "plain-2"}},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Update (add rows under both portal names): %v", err)
+	}
+	rows = portalRows(t, findParent(t, ctx, marker, WithPortalLimit(portalName, 10)))
+	checkNewPortalRecords(t, res.NewPortalRecords, portalName, []string{"plain-1", "plain-2", "named-1", "named-2"}, rows)
 }
 
 // TestIntegrationUpdateWithModID exercises the WithModID optimistic-lock option
@@ -1109,8 +1300,8 @@ func TestIntegrationUpdateWithModID(t *testing.T) {
 	if res.ModID == "" || res.ModID == m0 {
 		t.Errorf("ModID after update = %q, want a new non-empty value (was %s)", res.ModID, m0)
 	}
-	if got := findParent(t, ctx, marker).Int(fieldNumber); got != 2 {
-		t.Errorf("%s = %d after update, want 2", fieldNumber, got)
+	if got, err := findParent(t, ctx, marker).Int(fieldNumber); err != nil || got != 2 {
+		t.Errorf("%s = %d after update, want 2 (err %v)", fieldNumber, got, err)
 	}
 
 	// Conflict: m0 is now stale (the host moved on), so the same conditional
@@ -1119,8 +1310,8 @@ func TestIntegrationUpdateWithModID(t *testing.T) {
 	if !errors.Is(err, ErrRecordModified) {
 		t.Errorf("UpdateByID WithModID(stale) error = %v, want ErrRecordModified", err)
 	}
-	if got := findParent(t, ctx, marker).Int(fieldNumber); got != 2 {
-		t.Errorf("%s = %d after rejected update, want 2 (write should not apply)", fieldNumber, got)
+	if got, err := findParent(t, ctx, marker).Int(fieldNumber); err != nil || got != 2 {
+		t.Errorf("%s = %d after rejected update, want 2 (write should not apply) (err %v)", fieldNumber, got, err)
 	}
 }
 
@@ -1164,8 +1355,8 @@ func TestIntegrationUpdateIfUnchanged(t *testing.T) {
 	if res.ModID == "" || res.ModID == recA.ModID() {
 		t.Errorf("ModID after update = %q, want a new non-empty value (was %s)", res.ModID, recA.ModID())
 	}
-	if got := findParent(t, ctx, marker).Int(fieldNumber); got != 2 {
-		t.Errorf("%s = %d after update, want 2", fieldNumber, got)
+	if got, err := findParent(t, ctx, marker).Int(fieldNumber); err != nil || got != 2 {
+		t.Errorf("%s = %d after update, want 2 (err %v)", fieldNumber, got, err)
 	}
 
 	// Conflict: recA is an immutable snapshot still holding the pre-update mod
@@ -1174,8 +1365,8 @@ func TestIntegrationUpdateIfUnchanged(t *testing.T) {
 	if !errors.Is(err, ErrRecordModified) {
 		t.Errorf("Update IfUnchanged (stale) error = %v, want ErrRecordModified", err)
 	}
-	if got := findParent(t, ctx, marker).Int(fieldNumber); got != 2 {
-		t.Errorf("%s = %d after rejected update, want 2 (write should not apply)", fieldNumber, got)
+	if got, err := findParent(t, ctx, marker).Int(fieldNumber); err != nil || got != 2 {
+		t.Errorf("%s = %d after rejected update, want 2 (write should not apply) (err %v)", fieldNumber, got, err)
 	}
 }
 
@@ -1280,10 +1471,15 @@ func TestIntegrationScriptResults(t *testing.T) {
 }
 
 // recNumbers returns the NumberField of each record, in order.
-func recNumbers(recs []Record) []int {
+func recNumbers(t *testing.T, recs []Record) []int {
+	t.Helper()
 	out := make([]int, len(recs))
 	for i, r := range recs {
-		out[i] = r.Int(fieldNumber)
+		n, err := r.Int(fieldNumber)
+		if err != nil {
+			t.Fatalf("record %s: %v", r.ID(), err)
+		}
+		out[i] = n
 	}
 	return out
 }
@@ -1329,7 +1525,7 @@ func TestIntegrationFindQuery(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Find: %v", err)
 		}
-		if got := recNumbers(res.Records); !slices.Equal(got, []int{4, 3, 2, 1}) {
+		if got := recNumbers(t, res.Records); !slices.Equal(got, []int{4, 3, 2, 1}) {
 			t.Errorf("descending order = %v, want [4 3 2 1]", got)
 		}
 	})
@@ -1342,7 +1538,7 @@ func TestIntegrationFindQuery(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Find: %v", err)
 		}
-		if got := recNumbers(res.Records); !slices.Equal(got, []int{1, 2}) {
+		if got := recNumbers(t, res.Records); !slices.Equal(got, []int{1, 2}) {
 			t.Errorf("ascending limit 2 = %v, want [1 2]", got)
 		}
 		// Limit caps the returned rows but not the found count.
@@ -1365,7 +1561,7 @@ func TestIntegrationFindQuery(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Find: %v", err)
 		}
-		if got := recNumbers(res.Records); !slices.Equal(got, []int{3, 4}) {
+		if got := recNumbers(t, res.Records); !slices.Equal(got, []int{3, 4}) {
 			t.Errorf("ascending limit 2 offset 3 = %v, want [3 4]", got)
 		}
 	})
@@ -1379,7 +1575,7 @@ func TestIntegrationFindQuery(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Find: %v", err)
 		}
-		got := recNumbers(res.Records)
+		got := recNumbers(t, res.Records)
 		sort.Ints(got)
 		if !slices.Equal(got, []int{2, 3, 4}) {
 			t.Errorf("omit NumberField 1 = %v, want [2 3 4]", got)
@@ -1398,7 +1594,7 @@ func TestIntegrationFindQuery(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Find: %v", err)
 		}
-		got := recNumbers(res.Records)
+		got := recNumbers(t, res.Records)
 		sort.Ints(got)
 		if !slices.Equal(got, []int{1, 4}) {
 			t.Errorf("NumberField 1 OR 4 = %v, want [1 4]", got)
@@ -1476,7 +1672,12 @@ func TestIntegrationFindMultiSort(t *testing.T) {
 
 	var got []string
 	for _, r := range res.Records {
-		got = append(got, strconv.Itoa(r.Int(fieldNumber))+r.String(fieldTextSecondary))
+		n, errN := r.Int(fieldNumber)
+		text, errT := r.String(fieldTextSecondary)
+		if err := errors.Join(errN, errT); err != nil {
+			t.Fatalf("record %s: %v", r.ID(), err)
+		}
+		got = append(got, strconv.Itoa(n)+text)
 	}
 	want := []string{"1a", "1b", "2a", "2b"}
 	if !slices.Equal(got, want) {
@@ -1581,11 +1782,11 @@ func TestIntegrationTimeOfDay(t *testing.T) {
 	})
 
 	rec := findParent(t, ctx, marker)
-	if got := rec.Time(fieldTime).Format("15:04:05"); got != "15:04:05" {
-		t.Errorf("Time(%s) clock = %s, want 15:04:05", fieldTime, got)
+	if got, err := rec.Time(fieldTime); err != nil || got.Format("15:04:05") != "15:04:05" {
+		t.Errorf("Time(%s) = %v, %v; want clock 15:04:05", fieldTime, got, err)
 	}
-	if got, want := rec.Duration(fieldTime), 15*time.Hour+4*time.Minute+5*time.Second; got != want {
-		t.Errorf("Duration(%s) = %v, want %v", fieldTime, got, want)
+	if got, err := rec.Duration(fieldTime); err != nil || got != 15*time.Hour+4*time.Minute+5*time.Second {
+		t.Errorf("Duration(%s) = %v, %v; want 15h4m5s", fieldTime, got, err)
 	}
 
 	// An elapsed duration over 24h, via the Duration wrapper.
@@ -1595,8 +1796,8 @@ func TestIntegrationTimeOfDay(t *testing.T) {
 		t.Fatalf("UpdateByID: %v", err)
 	}
 	rec = findParent(t, ctx, marker)
-	if got, want := rec.Duration(fieldTime), 37*time.Hour+30*time.Minute; got != want {
-		t.Errorf("Duration(%s) after update = %v, want %v", fieldTime, got, want)
+	if got, err := rec.Duration(fieldTime); err != nil || got != 37*time.Hour+30*time.Minute {
+		t.Errorf("Duration(%s) after update = %v, %v; want 37h30m", fieldTime, got, err)
 	}
 }
 
@@ -1631,11 +1832,11 @@ func TestIntegrationGet(t *testing.T) {
 	if got.Record.ID() != created.RecordID {
 		t.Errorf("ID = %q, want %q", got.Record.ID(), created.RecordID)
 	}
-	if got.Record.String(fieldText) != marker {
-		t.Errorf("%s = %q, want %q", fieldText, got.Record.String(fieldText), marker)
+	if text, err := got.Record.String(fieldText); err != nil || text != marker {
+		t.Errorf("%s = %q, %v; want %q", fieldText, text, err, marker)
 	}
-	if got.Record.Int(fieldNumber) != 99 {
-		t.Errorf("%s = %d, want 99", fieldNumber, got.Record.Int(fieldNumber))
+	if n, err := got.Record.Int(fieldNumber); err != nil || n != 99 {
+		t.Errorf("%s = %d, %v; want 99", fieldNumber, n, err)
 	}
 
 	// Get: same fetch through the record-based form.
@@ -1685,8 +1886,8 @@ func TestIntegrationGetRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID (sanity check): %v", err)
 	}
-	if got.Record.String(fieldText) != marker {
-		t.Errorf("sanity check: %s = %q, want %q", fieldText, got.Record.String(fieldText), marker)
+	if text, err := got.Record.String(fieldText); err != nil || text != marker {
+		t.Errorf("sanity check: %s = %q, %v; want %q", fieldText, text, err, marker)
 	}
 
 	// GetRange with limit 1 and sort descending on NumberField: the host should
@@ -1756,9 +1957,9 @@ func TestIntegrationSetGlobalFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if got.Record.String(fieldGlobal) != value {
-		t.Errorf("%s = %q, want %q (is GlobalField on the layout? see docs/integration-testing.md)",
-			fieldGlobal, got.Record.String(fieldGlobal), value)
+	if text, err := got.Record.String(fieldGlobal); err != nil || text != value {
+		t.Errorf("%s = %q, %v; want %q (is GlobalField on the layout? see docs/integration-testing.md)",
+			fieldGlobal, text, err, value)
 	}
 }
 
@@ -1797,10 +1998,10 @@ func TestIntegrationWithDateFormatISO(t *testing.T) {
 	// Read back through the default client: the value is unchanged by the write
 	// format (both parse to the same instant in UTC).
 	rec := findParent(t, ctx, marker)
-	if got, err := rec.TimeE(fieldDate); err != nil || !got.Equal(date) {
+	if got, err := rec.Time(fieldDate); err != nil || !got.Equal(date) {
 		t.Errorf("DateField round-trip = %v (err %v), want %v", got, err, date)
 	}
-	if got, err := rec.TimeE(fieldTimestamp); err != nil || !got.Equal(ts) {
+	if got, err := rec.Time(fieldTimestamp); err != nil || !got.Equal(ts) {
 		t.Errorf("TimestampField round-trip = %v (err %v), want %v", got, err, ts)
 	}
 
@@ -1816,10 +2017,10 @@ func TestIntegrationWithDateFormatISO(t *testing.T) {
 		t.Fatalf("UpdateByID with WithDateFormat(ISO): %v", err)
 	}
 	rec = findParent(t, ctx, marker)
-	if got, err := rec.TimeE(fieldDate); err != nil || !got.Equal(newDate) {
+	if got, err := rec.Time(fieldDate); err != nil || !got.Equal(newDate) {
 		t.Errorf("DateField after ISO edit = %v (err %v), want %v", got, err, newDate)
 	}
-	if got, err := rec.TimeE(fieldTimestamp); err != nil || !got.Equal(newTS) {
+	if got, err := rec.Time(fieldTimestamp); err != nil || !got.Equal(newTS) {
 		t.Errorf("TimestampField after ISO edit = %v (err %v), want %v", got, err, newTS)
 	}
 }
@@ -1932,11 +2133,11 @@ func TestIntegrationDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID(duplicate): %v", err)
 	}
-	if got := fetched.Record.String(fieldText); got != marker {
-		t.Errorf("duplicate %s = %q, want %q", fieldText, got, marker)
+	if got, err := fetched.Record.String(fieldText); err != nil || got != marker {
+		t.Errorf("duplicate %s = %q, want %q (err %v)", fieldText, got, marker, err)
 	}
-	if got := fetched.Record.Int(fieldNumber); got != 99 {
-		t.Errorf("duplicate %s = %d, want 99", fieldNumber, got)
+	if got, err := fetched.Record.Int(fieldNumber); err != nil || got != 99 {
+		t.Errorf("duplicate %s = %d, want 99 (err %v)", fieldNumber, got, err)
 	}
 }
 
@@ -2033,8 +2234,8 @@ func TestIntegrationWithProhibitModeScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID (prohibitmode=script): %v", err)
 	}
-	if got := res.Record.String(fieldAutoEnter); got != "manual" {
-		t.Errorf("prohibitmode=script: %s = %q, want \"manual\" (prohibition should be bypassed)", fieldAutoEnter, got)
+	if got, err := res.Record.String(fieldAutoEnter); err != nil || got != "manual" {
+		t.Errorf("prohibitmode=script: %s = %q, %v; want \"manual\" (prohibition should be bypassed)", fieldAutoEnter, got, err)
 	}
 }
 
@@ -2066,8 +2267,8 @@ func TestIntegrationWithResponseLayout(t *testing.T) {
 
 	check := func(t *testing.T, rec Record) {
 		t.Helper()
-		if got := rec.String(fieldText); got != marker {
-			t.Errorf("%s = %q, want %q", fieldText, got, marker)
+		if got, err := rec.String(fieldText); err != nil || got != marker {
+			t.Errorf("%s = %q, %v; want %q", fieldText, got, err, marker)
 		}
 		// NumberField is not on itResponseLayout; the host omits it entirely.
 		if rec.Has(fieldNumber) {
@@ -2136,8 +2337,8 @@ func TestIntegrationNumberPrecision(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetByID: %v", err)
 			}
-			if n := got.Record.Number(fieldNumber); n != tc.want {
-				t.Fatalf("%s after create = %q, want %q", fieldNumber, n, tc.want)
+			if n, err := got.Record.Number(fieldNumber); err != nil || n != tc.want {
+				t.Fatalf("%s after create = %q, %v; want %q", fieldNumber, n, err, tc.want)
 			}
 
 			// Write the value read back as-is: it must not lose digits either.
@@ -2148,8 +2349,8 @@ func TestIntegrationNumberPrecision(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetByID after update: %v", err)
 			}
-			if n := again.Record.Number(fieldNumber); n != tc.want {
-				t.Errorf("%s after write-back = %q, want %q", fieldNumber, n, tc.want)
+			if n, err := again.Record.Number(fieldNumber); err != nil || n != tc.want {
+				t.Errorf("%s after write-back = %q, want %q (err %v)", fieldNumber, n, tc.want, err)
 			}
 		})
 	}

@@ -24,7 +24,7 @@ func TestNilOptionsAreSkipped(t *testing.T) {
 
 	c := testClient(srv)
 	ctx := context.Background()
-	rec := Record{layout: "People", id: "7", modID: "3"}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "7"}}, modID: "3"})
 	fields := FieldData{"Name": "x"}
 
 	cases := []struct {

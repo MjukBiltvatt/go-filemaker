@@ -23,21 +23,6 @@ import (
 // are not sent as JSON numbers.
 type FieldData map[string]any
 
-// PortalData holds portal (related) records keyed by portal name, each value a
-// slice of rows. It is both what Record.Portals returns and what the
-// WithPortalData update option accepts, so portal data read from a record can be
-// edited and written back unchanged.
-//
-// Within a row, field values are keyed by their fully qualified name
-// ("TableOccurrence::FieldName"). When writing, a row that carries a record ID
-// (a plain "recordId" key, optionally with a plain "modId" for optimistic
-// locking) edits that existing related record; a row without one is added as a
-// new related record. The record ID is not table-occurrence qualified like the
-// field values are — "TableOccurrence::recordId" is read as a field and rejected
-// (code 102). See the Claris Data API guide's "Edit record" page for the wire
-// format.
-type PortalData map[string][]map[string]any
-
 // PortalDataInfo is the host's account of one portal on a returned record, as
 // reported by Record.PortalDataInfo: the table occurrence the portal shows, how
 // many related records it holds (FoundCount), and how many of those the
@@ -51,29 +36,71 @@ type PortalDataInfo struct {
 	ReturnedCount int    `json:"returnedCount"`
 }
 
-// Record is a single record returned by a read operation (Find). It is a plain,
-// immutable value: it holds no reference back to the Client and has no methods
-// that touch the host. All of its state is unexported and exposed through
-// read-only accessors — ID, ModID, Layout, and the field/portal accessors
-// (String, Int, …, Decode, Fields, Portals, PortalDataInfo) — so a returned
-// record cannot be mutated. Writes are performed by passing field data to the
-// Client's Create/Update methods.
+// Record is a single record returned by a read operation (Find, Get). It is a
+// plain, immutable value: it holds no reference back to the Client and has no
+// methods that touch the host. All of its state is unexported and exposed
+// through read-only accessors — ID, ModID, Layout, the field accessors (String,
+// Int, …, Decode, Fields) and the portal accessors (Portal, PortalDataInfo) — so
+// a returned record cannot be mutated. Writes are performed by passing field
+// data to the Client's Create/Update methods, and portal rows with
+// WithPortalData.
+//
+// Each typed field accessor reads one field as a Go type, by the same rules:
+//
+//   - A field the record does not have is ErrMissingField — usually a typo in
+//     the name, or a field that is not on the layout (or the response layout).
+//   - An empty field, which the host sends as "" whatever its type, reads as the
+//     zero value without error. Use Get to tell it from a stored zero.
+//   - A value the accessor cannot convert is the accessor's own error:
+//     ErrNotString, ErrNotNumber, ErrNotInteger, ErrOutOfRange or
+//     ErrUnknownFormat. The value returned with it is the zero value.
+//
+// Every error names the field and, for a record the host returned, the record
+// and its layout, and it matches its cause with errors.Is. Decode applies the
+// same rules to a whole struct, and PortalRow reads a portal's rows with the
+// same accessors.
+//
+// A record remembers the host and database it was read from. The methods that
+// take a Record (Get, Update, Delete, Duplicate, UploadToContainer) reject one
+// read from a different database, where its layout and ID could name an
+// unrelated record; any client connected to the same database accepts it.
 type Record struct {
-	id     string
-	modID  string
-	layout string
+	fields // the field values, and the layout and ID that name the record
 
-	fieldData  map[string]any
+	modID string
+
+	// host and database identify the file the record was read from, stamped by
+	// the reading client. A layout and ID only name a record within one file, so
+	// the endpoints that address a record through a Record refuse one read from
+	// another file (see checkRecord).
+	host     string
+	database string
+
 	portalData map[string][]map[string]any
 	portalInfo map[string]PortalDataInfo
+}
 
-	// loc is the time zone used to interpret date/timestamp fields. It is set
-	// by the client from its WithLocation option; nil means UTC.
-	loc *time.Location
+// checkRecord reports why rec cannot address a record through c, or nil if it
+// can: it must carry an ID, and it must have been read from c's file. Another
+// client's record would otherwise be sent with c's database and token, and its
+// layout and ID would silently address whatever record holds them in c's file.
+// Two clients on the same file (say, different accounts) can share records. The
+// host is compared by origin and base path (see sameServer), so two servers a
+// gateway exposes under different paths are different files, and the database
+// name is compared case-insensitively.
+func (c *Client) checkRecord(rec Record) error {
+	if rec.recordID == "" {
+		return errors.New("filemaker: record has no ID; create or find it first")
+	}
+	if !sameServer(c.host, rec.host) || !strings.EqualFold(c.database, rec.database) {
+		return fmt.Errorf("filemaker: record %q in layout %q was read from database %q on %s, not this client's database %q on %s",
+			rec.recordID, rec.layout, rec.database, rec.host, c.database, c.host)
+	}
+	return nil
 }
 
 // ID returns the record's internal FileMaker record ID, assigned by the host.
-func (r Record) ID() string { return r.id }
+func (r Record) ID() string { return r.recordID }
 
 // ModID returns the record's modification ID, which the host changes on every
 // edit. It is the basis for optimistic concurrency (see the Update IfUnchanged
@@ -84,30 +111,118 @@ func (r Record) ModID() string { return r.modID }
 // target for the record-based writes (Update, Delete, UploadToContainer).
 func (r Record) Layout() string { return r.layout }
 
-// Fields returns a copy of the record's raw field values, keyed by field name,
-// typed as FieldData describes (Number for numbers, string otherwise). The result is a copy — mutating it does not affect the record — and
-// is nil when the record carries no field data. Use the typed accessors
-// (String, Int, …) for individual fields.
-func (r Record) Fields() FieldData {
-	return cloneFields(r.fieldData)
-}
-
-// Portals returns a copy of the record's portal data, keyed by portal name,
-// each value a slice of rows. The result is a deep copy — mutating it (including
-// its rows) does not affect the record — and is nil when the record carries no
-// portal data.
-func (r Record) Portals() PortalData {
-	return clonePortalData(r.portalData)
+// Portal returns the rows of the named portal, in the order the host sent them.
+// A portal is named by its object name when it has one, otherwise by its
+// table-occurrence name; the keys of PortalDataInfo list the record's portals.
+// Each row reads its field values with the same accessors as the record. It is
+// nil when the record has no such portal (WithPortals can leave one out) and
+// empty for a portal with no rows.
+func (r Record) Portal(name string) []PortalRow {
+	rows, ok := r.portalData[name]
+	if !ok {
+		return nil
+	}
+	out := make([]PortalRow, len(rows))
+	for i, row := range rows {
+		// The host sends a row's record and mod IDs as plain "recordId" and
+		// "modId" keys among its field values, as strings. They become the
+		// row's ID and ModID rather than fields.
+		data := cloneFields(row)
+		id, _ := data["recordId"].(string)
+		modID, _ := data["modId"].(string)
+		delete(data, "recordId")
+		delete(data, "modId")
+		out[i] = PortalRow{
+			fields: fields{
+				origin: origin{layout: r.layout, recordID: r.recordID, portal: name, rowID: id},
+				data:   data,
+				loc:    r.loc,
+			},
+			modID: modID,
+		}
+	}
+	return out
 }
 
 // PortalDataInfo returns the host's account of each portal on the record, keyed
-// by the same portal names as Portals: the portal's object name when it has one,
+// by the same portal names as Portal: the portal's object name when it has one,
 // otherwise its table-occurrence name. It has an entry for exactly the portals
-// Portals has — WithPortals omits a portal from both — including a portal with
-// no rows. The result is a copy, and is nil when the host reports no portal
+// the record carries — WithPortals omits a portal from both — including a portal
+// with no rows. The result is a copy, and is nil when the host reports no portal
 // information.
 func (r Record) PortalDataInfo() map[string]PortalDataInfo {
 	return maps.Clone(r.portalInfo)
+}
+
+// PortalRow is one related record in a portal, as returned by Record.Portal. It
+// reads its field values with the same accessors, by the same rules, as a Record
+// (String, Int, …, Decode, Fields), with each field keyed by its fully qualified
+// name ("TableOccurrence::FieldName"). An error from any of them names the row,
+// its portal, and the record and layout it was read through.
+//
+// A PortalRow is not a Record, so it cannot be passed to the methods that
+// address a record (Update, Delete, …): its ID belongs to a record in the
+// portal's table, not the layout's. Edit it through the parent record's Update
+// with WithPortalData, as a PortalRowData carrying the row's ID (and its ModID to
+// lock the edit).
+type PortalRow struct {
+	fields // the field values, and the portal, row and record that name them
+
+	modID string
+}
+
+// ID returns the related record's internal FileMaker record ID.
+func (p PortalRow) ID() string { return p.rowID }
+
+// ModID returns the related record's modification ID.
+func (p PortalRow) ModID() string { return p.modID }
+
+// origin names the record or portal row a set of field values was read from,
+// so an error reading them can say which one it concerns. The zero value names
+// nothing: a Record built in the package rather than returned by the host.
+type origin struct {
+	layout   string // the layout the record was read through
+	recordID string // the record; for a portal row, the parent record whose portal holds it
+	portal   string // for a portal row, the portal's name
+	rowID    string // for a portal row, the row's own record ID, in the portal's table
+}
+
+// identify adds o's identity to err (see recordErr and portalRowErr). It
+// returns err unchanged when o names no record, and nil for a nil err.
+func (o origin) identify(err error) error {
+	switch {
+	case err == nil || o.recordID == "":
+		return err
+	case o.portal != "":
+		return portalRowErr(err, o.layout, o.recordID, o.portal, o.rowID)
+	}
+	return recordErr(err, o.layout, o.recordID)
+}
+
+// fields holds the field values of a record or portal row, and reads them. It
+// is embedded in Record and PortalRow, so its accessors are theirs: a portal row
+// reads exactly as a record does. The accessors' rules are documented on
+// Record.
+//
+// It holds only what those accessors need: the values, the time zone, and the
+// origin their errors name. The embedding types keep their other state — such
+// as each one's mod ID, which no accessor reads — themselves.
+type fields struct {
+	origin
+
+	data map[string]any
+
+	// loc is the time zone used to interpret date/timestamp fields. It is set
+	// by the client from its WithLocation option; nil means UTC.
+	loc *time.Location
+}
+
+// Fields returns a copy of the raw field values, keyed by field name, typed as
+// FieldData describes (Number for numbers, string otherwise). The result is a
+// copy — mutating it does not affect the record — and is nil when there is no
+// field data. Use the typed accessors (String, Int, …) for individual fields.
+func (f fields) Fields() FieldData {
+	return cloneFields(f.data)
 }
 
 // cloneFields returns a copy of a field map. Field values are immutable scalars
@@ -124,188 +239,79 @@ func cloneFields(src map[string]any) map[string]any {
 	return dst
 }
 
-// clonePortalData returns a deep copy of portal data: the outer map, each row
-// slice and each row map are rebuilt so mutating the result cannot reach the
-// record. The leaf values are immutable scalars and are shared. Nil maps and
-// slices are preserved as nil so the copy equals the original.
-func clonePortalData(src map[string][]map[string]any) PortalData {
-	if src == nil {
-		return nil
-	}
-	dst := make(PortalData, len(src))
-	for name, rows := range src {
-		if rows == nil {
-			dst[name] = nil
-			continue
-		}
-		rowsCopy := make([]map[string]any, len(rows))
-		for i, row := range rows {
-			rowsCopy[i] = cloneFields(row)
-		}
-		dst[name] = rowsCopy
-	}
-	return dst
-}
-
-// location resolves the record's configured time zone, defaulting to UTC.
-func (r Record) location() *time.Location {
-	if r.loc != nil {
-		return r.loc
+// location resolves the configured time zone, defaulting to UTC.
+func (f fields) location() *time.Location {
+	if f.loc != nil {
+		return f.loc
 	}
 	return time.UTC
 }
 
-// Has reports whether the record contains the named field. It distinguishes an
-// absent field from one present with a zero value (which the typed getters
-// cannot).
-func (r Record) Has(fieldName string) bool {
-	_, ok := r.fieldData[fieldName]
+// Has reports whether the named field is present, even if empty.
+func (f fields) Has(fieldName string) bool {
+	_, ok := f.data[fieldName]
 	return ok
 }
 
 // Get returns the raw value of a field, or nil if it is absent. Values are typed
-// as FieldData describes: Number for numbers, string otherwise.
-func (r Record) Get(fieldName string) any {
-	return r.fieldData[fieldName]
+// as FieldData describes: Number for numbers, string otherwise, and "" for an
+// empty field of any type.
+func (f fields) Get(fieldName string) any {
+	return f.data[fieldName]
 }
 
-// StringE behaves like String but returns ErrNotString if the value is not a string.
-func (r Record) StringE(fieldName string) (string, error) {
-	if val, ok := r.Get(fieldName).(string); ok {
-		return val, nil
-	}
-	return "", ErrNotString
+// String returns the value of a text field. A number field is ErrNotString;
+// read it with Number, whose String method gives its exact text.
+func (f fields) String(fieldName string) (string, error) {
+	return read(f, fieldName, toString)
 }
 
-// String returns the field value as a string. The field needs to be a text
-// field. Errors are ignored; use StringE to detect them.
-func (r Record) String(fieldName string) string {
-	s, _ := r.StringE(fieldName)
-	return s
-}
-
-// StringSliceE behaves like StringSlice but returns ErrNotString if the value
-// is not a string.
-func (r Record) StringSliceE(fieldName string) ([]string, error) {
-	val, err := r.StringE(fieldName)
-	if err != nil {
-		return nil, err
-	}
-	if val == "" {
-		return nil, nil
-	}
-	// Normalize CRLF and lone CR to LF, then trim a single trailing line
-	// break so a terminating newline does not yield an empty final element.
-	val = strings.ReplaceAll(val, "\r\n", "\n")
-	val = strings.ReplaceAll(val, "\r", "\n")
-	val = strings.TrimSuffix(val, "\n")
-	return strings.Split(val, "\n"), nil
-}
-
-// StringSlice returns the field value split on line breaks, treating the text
-// field as a newline-separated list of values. Carriage returns, line feeds and
+// StringSlice returns the value of a text field split on line breaks, treating
+// it as a newline-separated list of values. Carriage returns, line feeds and
 // CRLF pairs are all accepted as line breaks. Blank lines between values are
 // preserved as empty strings, but a single trailing line break is treated as a
 // terminator and does not produce a trailing empty element. An empty field
-// yields a nil slice. The field needs to be a text field. Errors are ignored;
-// use StringSliceE to detect them.
-func (r Record) StringSlice(fieldName string) []string {
-	s, _ := r.StringSliceE(fieldName)
-	return s
+// yields a nil slice. A number field is ErrNotString.
+func (f fields) StringSlice(fieldName string) ([]string, error) {
+	return read(f, fieldName, toStringSlice)
 }
 
-// NumberE behaves like Number but returns ErrNotNumber if the value is not a
-// number: text (including an empty field), or an absent field.
-func (r Record) NumberE(fieldName string) (Number, error) {
-	if val, ok := r.Get(fieldName).(Number); ok {
-		return val, nil
-	}
-	return "", ErrNotNumber
+// Number returns the value of a number field as a Number, with the host's exact
+// digits. Use it for values the other numeric accessors cannot hold exactly:
+// integers beyond int64 and decimals beyond float64's precision. Text, including
+// text a user typed into a number field, is ErrNotNumber.
+func (f fields) Number(fieldName string) (Number, error) {
+	return read(f, fieldName, toNumber)
 }
 
-// Number returns the field value as a Number, with the host's exact digits. Use
-// it for values the other numeric accessors cannot hold exactly: integers beyond
-// int64 and decimals beyond float64's precision. The field needs to be a number
-// field. Errors are ignored; use NumberE to detect them.
-func (r Record) Number(fieldName string) Number {
-	n, _ := r.NumberE(fieldName)
-	return n
+// Int returns the value of a number field as an int. It accepts only integer
+// notation: a value with a fractional part or an exponent is ErrNotInteger
+// rather than truncated (see Number.Int64), and one that does not fit an int is
+// ErrOutOfRange. Text is ErrNotNumber.
+func (f fields) Int(fieldName string) (int, error) {
+	return read(f, fieldName, toInt)
 }
 
-// IntE behaves like Int but returns an error instead of 0: ErrNotNumber if the
-// value is not a number, ErrNotInteger if it is not written as an integer (a
-// fractional part or exponent notation; see Number.Int64), and ErrOutOfRange if
-// it does not fit an int.
-func (r Record) IntE(fieldName string) (int, error) {
-	i, err := r.Int64E(fieldName)
-	if err != nil {
-		return 0, err
-	}
-	if int64(int(i)) != i {
-		return 0, ErrOutOfRange
-	}
-	return int(i), nil
+// Int64 returns the value of a number field as an int64, exactly. It accepts
+// only integer notation: a value with a fractional part or an exponent is
+// ErrNotInteger rather than truncated (see Number.Int64), and one beyond int64
+// is ErrOutOfRange. Text is ErrNotNumber.
+func (f fields) Int64(fieldName string) (int64, error) {
+	return read(f, fieldName, toInt64)
 }
 
-// Int returns the field value as an int. The field needs to be a number field
-// holding a value in integer notation; any other value, including a fraction,
-// is not truncated but yields 0. Errors are ignored; use IntE to detect them.
-func (r Record) Int(fieldName string) int {
-	i, _ := r.IntE(fieldName)
-	return i
+// Float64 returns the value of a number field as the nearest float64, which is
+// exact only up to 15 significant digits; use Number to keep longer values
+// exact. A magnitude beyond float64 is ErrOutOfRange, and text is ErrNotNumber.
+func (f fields) Float64(fieldName string) (float64, error) {
+	return read(f, fieldName, toFloat64)
 }
 
-// Int64E behaves like Int64 but returns an error instead of 0: ErrNotNumber if
-// the value is not a number, ErrNotInteger if it is not written as an integer
-// (a fractional part or exponent notation; see Number.Int64), and ErrOutOfRange
-// if it does not fit an int64.
-func (r Record) Int64E(fieldName string) (int64, error) {
-	n, err := r.NumberE(fieldName)
-	if err != nil {
-		return 0, err
-	}
-	return n.Int64()
-}
-
-// Int64 returns the field value as an int64, exactly. The field needs to be a
-// number field holding a value in integer notation; any other value, including
-// a fraction, is not truncated but yields 0. Errors are ignored; use Int64E to
-// detect them.
-func (r Record) Int64(fieldName string) int64 {
-	i, _ := r.Int64E(fieldName)
-	return i
-}
-
-// Float64E behaves like Float64 but returns an error instead of 0: ErrNotNumber
-// if the value is not a number, and ErrOutOfRange if its magnitude is beyond
-// float64.
-func (r Record) Float64E(fieldName string) (float64, error) {
-	n, err := r.NumberE(fieldName)
-	if err != nil {
-		return 0, err
-	}
-	return n.Float64()
-}
-
-// Float64 returns the field value as the nearest float64, which is exact only up
-// to 15 significant digits; use Number to keep longer values exact.
-// The field needs to be a number field. Errors are ignored; use Float64E to
-// detect them.
-func (r Record) Float64(fieldName string) float64 {
-	f, _ := r.Float64E(fieldName)
-	return f
-}
-
-// Bool parses the field value as a bool: empty fields are false, non-empty text
-// fields and number fields greater than 0 are true.
-func (r Record) Bool(fieldName string) bool {
-	switch val := r.Get(fieldName).(type) {
-	case string:
-		return len(val) > 0
-	case Number:
-		return val.positive()
-	}
-	return false
+// Bool returns the field value as a bool: non-empty text and numbers greater
+// than 0 are true, and empty fields are false. FileMaker has no boolean type, so
+// any present field reads as one; only an absent field is an error.
+func (f fields) Bool(fieldName string) (bool, error) {
+	return read(f, fieldName, toBool)
 }
 
 // timeFormats are the FileMaker date, timestamp and time-of-day layouts the Time
@@ -322,53 +328,150 @@ var timeFormats = []string{
 	"15:04:05",
 }
 
-// TimeInE parses the field value as a time.Time in the given location, returning
-// ErrUnknownFormat if it matches none of the supported date/timestamp/time
-// formats. A Time field holding 24 hours or more (an elapsed duration rather
-// than a clock time) is out of the wall-clock range and will not parse here; read
-// such a field with Duration instead.
-func (r Record) TimeInE(fieldName string, loc *time.Location) (time.Time, error) {
-	data := r.String(fieldName)
+// TimeIn parses the value of a date, timestamp or time field as a time.Time in
+// the given location. A value in none of the supported formats is
+// ErrUnknownFormat. A time field holding 24 hours or more (an elapsed duration
+// rather than a clock time) is out of the wall-clock range and will not parse
+// here; read such a field with Duration instead.
+func (f fields) TimeIn(fieldName string, loc *time.Location) (time.Time, error) {
+	return read(f, fieldName, func(v any) (time.Time, error) { return toTime(v, loc) })
+}
+
+// Time parses the field value like TimeIn, in the configured location (set via
+// the client's WithLocation option; UTC by default).
+func (f fields) Time(fieldName string) (time.Time, error) {
+	return f.TimeIn(fieldName, f.location())
+}
+
+// Duration parses the value of a time field, returned as a clock string
+// ([-]HH:MM:SS), as a time.Duration. Unlike Time it represents the value as
+// elapsed time, so it handles 24 hours or more and negative values. A value that
+// is not such a string is ErrUnknownFormat.
+func (f fields) Duration(fieldName string) (time.Duration, error) {
+	return read(f, fieldName, toDuration)
+}
+
+// read implements the typed accessors: it looks up the field, applies the
+// absent and empty rules documented on Record, and converts any other value
+// with conv. A failure names the field and, through f's origin, the record or
+// portal row.
+func read[T any](f fields, fieldName string, conv func(any) (T, error)) (T, error) {
+	var zero T
+	val, ok := f.data[fieldName]
+	switch {
+	case !ok:
+		return zero, f.fieldErr(fieldName, ErrMissingField)
+	case val == "":
+		return zero, nil
+	}
+	t, err := conv(val)
+	if err != nil {
+		return zero, f.fieldErr(fieldName, err)
+	}
+	return t, nil
+}
+
+// fieldErr is the error for a field that could not be read: err, naming the
+// field and f's record or portal row.
+func (f fields) fieldErr(fieldName string, err error) error {
+	return f.identify(&readError{field: fieldName, err: err})
+}
+
+// readError is an accessor's failure to read a field: the field and why. Its
+// message drops the wrapped error's package prefix and carries its own, which a
+// record or portal row identity then keeps at the front.
+type readError struct {
+	field string
+	err   error
+}
+
+func (e *readError) Error() string {
+	return fmt.Sprintf("filemaker: field %q: %s", e.field, strings.TrimPrefix(e.err.Error(), "filemaker: "))
+}
+
+func (e *readError) Unwrap() error { return e.err }
+
+// The to… functions convert a non-empty field value to a Go type, returning
+// the bare cause when they cannot. They are shared by the typed accessors and
+// Decode, which each add the field's identity to the error their own way.
+
+func toString(v any) (string, error) {
+	if s, ok := v.(string); ok {
+		return s, nil
+	}
+	return "", ErrNotString
+}
+
+func toStringSlice(v any) ([]string, error) {
+	s, err := toString(v)
+	if err != nil || s == "" {
+		return nil, err
+	}
+	// Normalize CRLF and lone CR to LF, then trim a single trailing line
+	// break so a terminating newline does not yield an empty final element.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.TrimSuffix(s, "\n")
+	return strings.Split(s, "\n"), nil
+}
+
+func toNumber(v any) (Number, error) {
+	if n, ok := v.(Number); ok {
+		return n, nil
+	}
+	return "", ErrNotNumber
+}
+
+func toInt64(v any) (int64, error) {
+	n, err := toNumber(v)
+	if err != nil {
+		return 0, err
+	}
+	return n.Int64()
+}
+
+func toInt(v any) (int, error) {
+	i, err := toInt64(v)
+	if err != nil {
+		return 0, err
+	}
+	if int64(int(i)) != i {
+		return 0, ErrOutOfRange
+	}
+	return int(i), nil
+}
+
+func toFloat64(v any) (float64, error) {
+	n, err := toNumber(v)
+	if err != nil {
+		return 0, err
+	}
+	return n.Float64()
+}
+
+func toBool(v any) (bool, error) {
+	switch val := v.(type) {
+	case string:
+		return len(val) > 0, nil
+	case Number:
+		return val.positive(), nil
+	}
+	return false, nil
+}
+
+func toTime(v any, loc *time.Location) (time.Time, error) {
+	s, _ := v.(string)
 	for _, layout := range timeFormats {
-		if t, err := time.ParseInLocation(layout, data, loc); err == nil {
+		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
 			return t, nil
 		}
 	}
 	return time.Time{}, ErrUnknownFormat
 }
 
-// TimeIn parses the field value as a time.Time in the given location. Errors are
-// ignored; use TimeInE to detect them.
-func (r Record) TimeIn(fieldName string, loc *time.Location) time.Time {
-	t, _ := r.TimeInE(fieldName, loc)
-	return t
-}
-
-// TimeE parses the field value using the record's configured location (set via
-// the client's WithLocation option; UTC by default).
-func (r Record) TimeE(fieldName string) (time.Time, error) {
-	return r.TimeInE(fieldName, r.location())
-}
-
-// Time parses the field value using the record's configured location. Errors are
-// ignored; use TimeE to detect them.
-func (r Record) Time(fieldName string) time.Time {
-	return r.TimeIn(fieldName, r.location())
-}
-
-// DurationE parses the field value as a time.Duration, for a FileMaker Time
-// field returned as a clock string ([-]HH:MM:SS). Unlike Time it represents the
-// value as elapsed time, so it handles 24 hours or more and negative values. It
-// returns ErrUnknownFormat if the value is not such a string.
-func (r Record) DurationE(fieldName string) (time.Duration, error) {
-	return parseFMDuration(r.String(fieldName))
-}
-
-// Duration parses the field value as a time.Duration. Errors are ignored; use
-// DurationE to detect them.
-func (r Record) Duration(fieldName string) time.Duration {
-	d, _ := r.DurationE(fieldName)
-	return d
+func toDuration(v any) (time.Duration, error) {
+	s, _ := v.(string)
+	return parseFMDuration(s)
 }
 
 // parseFMDuration parses a FileMaker time clock string ([-]H[H…]:MM:SS) into a
@@ -395,8 +498,9 @@ func parseFMDuration(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// Decode populates obj's fields from the record, matching each struct field's
-// `fm` tag to a record field name. obj must be a non-nil pointer to a struct.
+// Decode populates obj's fields from the record or portal row, matching each
+// struct field's `fm` tag to a field name. obj must be a non-nil pointer to a
+// struct.
 //
 // Decode is NOT recursive. FileMaker records are flat, so Decode maps only the
 // fields of the struct passed to it; nested struct fields are left untouched. To
@@ -409,23 +513,40 @@ func parseFMDuration(s string) (time.Duration, error) {
 // migration notes.)
 //
 // Only fields with a non-empty `fm` tag are touched; untagged fields and fields
-// tagged `fm:"-"` are left as-is. Decoding is lenient per field: a missing or
-// empty field leaves the struct field at its zero value. time.Time fields use
-// the record's configured location; a *time.Time field is set to a pointer when
-// the value parses to a non-zero time, and to nil otherwise (clearing any value
-// from a previous Decode).
+// tagged `fm:"-"` are left as-is. Each tagged field is set from this record
+// alone: it starts from its zero value, so nothing from an earlier Decode into
+// the same struct lingers. Values convert by the typed accessors' rules (see
+// Record), with these additions:
 //
-// An error is returned only for structural misuse: obj is not a non-nil pointer
-// to a struct, or an `fm`-tagged field has a type outside the supported list
-// below. The second case depends on the struct definition alone, not on the
-// record's data, so it surfaces on the first decode rather than for some records
-// only; every offending field is reported, and the fields that do decode are
-// still populated. Note that a defined type over a supported type (type Status
-// string) is not itself supported.
+//   - An empty field decodes to the zero value — nil for *time.Time — without
+//     error, as it reads through the accessors.
+//   - A field the record does not have is an error wrapping ErrMissingField,
+//     unless the tag carries the optional option (`fm:"Notes,optional"`), in
+//     which case it decodes to the zero value.
+//   - A value that cannot be converted to the field's type is an error wrapping
+//     the accessor's error: ErrNotNumber, ErrNotInteger, ErrOutOfRange (also
+//     for a value that overflows int8…int32 or float32), ErrUnknownFormat for a
+//     date, time or duration that does not parse. The field is left at its zero
+//     value.
+//   - A number field decodes into a string field as its exact text.
+//
+// time.Time fields use the configured location; bool fields follow Bool, which
+// accepts any value.
+//
+// Decode fills every field it can and reports all the fields it cannot in one
+// error, in struct field order, alongside any struct-definition faults: an
+// `fm`-tagged field whose type is not supported (which depends on the struct
+// alone, so it surfaces on the first decode) or an unknown tag option. Each
+// failure names the struct field and its tag, and the error matches each cause
+// with errors.Is. For a record returned by the host, the error also names the
+// record and its layout, and for a portal row the row and its portal too. A
+// caller that prefers leniency can log the error and use the struct, which holds
+// everything that decoded. Note that a defined type over a supported type (type
+// Status string) is not itself supported.
 //
 // Supported field types: string, int, int8, int16, int32, int64, float32,
 // float64, Number, bool, time.Duration, time.Time, *time.Time.
-func (r Record) Decode(obj any) error {
+func (f fields) Decode(obj any) error {
 	v := reflect.ValueOf(obj)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return errors.New("filemaker: decode requires a non-nil pointer to a struct")
@@ -442,54 +563,170 @@ func (r Record) Decode(obj any) error {
 		if !field.CanSet() {
 			continue
 		}
-
-		tag := vType.Field(i).Tag.Get("fm")
+		sf := vType.Field(i)
+		tag := sf.Tag.Get("fm")
 		if tag == "" || tag == "-" {
 			continue
 		}
-
-		switch field.Interface().(type) {
-		case string:
-			field.SetString(r.String(tag))
-		case int, int8, int16, int32, int64:
-			field.SetInt(r.Int64(tag))
-		case float32, float64:
-			field.SetFloat(r.Float64(tag))
-		case Number:
-			field.SetString(string(r.Number(tag)))
-		case bool:
-			field.SetBool(r.Bool(tag))
-		case time.Duration:
-			// A distinct named type (underlying int64), so it is matched here
-			// rather than by the integer case above.
-			field.Set(reflect.ValueOf(r.Duration(tag)))
-		case time.Time:
-			field.Set(reflect.ValueOf(r.Time(tag)))
-		case *time.Time:
-			// Assign unconditionally so the field reflects this record: a
-			// fresh pointer for a parseable value, nil otherwise (clearing any
-			// value left by a previous Decode).
-			if parsed := r.Time(tag); !parsed.IsZero() {
-				field.Set(reflect.ValueOf(&parsed))
-			} else {
-				field.Set(reflect.Zero(field.Type()))
-			}
-		default:
-			errs = append(errs, unsupportedFieldError(vType.Field(i), tag))
+		if err := f.decodeField(field, tag); err != nil {
+			errs = append(errs, &fieldError{field: sf.Name, tag: tag, err: err})
 		}
 	}
-	return errors.Join(errs...)
+	if len(errs) == 0 {
+		return nil
+	}
+	return f.identify(&decodeError{errs: errs})
 }
 
-// unsupportedFieldError reports an `fm`-tagged struct field that Decode cannot
-// populate. The fault is in the struct definition rather than the record — it is
-// the same for every record — so it is reported rather than skipped.
-func unsupportedFieldError(sf reflect.StructField, tag string) error {
+// decodeField sets one struct field from the field its `fm` tag names (see
+// Decode for the rules), returning why it could not.
+func (f fields) decodeField(field reflect.Value, tag string) error {
+	// Clear the field before anything can fail, so a reused struct never keeps
+	// an earlier record's value in a field this decode reports.
+	field.Set(reflect.Zero(field.Type()))
+
+	name, opts, _ := strings.Cut(tag, ",")
+	optional := false
+	if opts != "" {
+		for _, opt := range strings.Split(opts, ",") {
+			if opt != "optional" {
+				return fmt.Errorf("unknown tag option %q", opt)
+			}
+			optional = true
+		}
+	}
+	if !decodable(field.Type()) {
+		return unsupportedTypeError(field.Type())
+	}
+
+	val, ok := f.data[name]
+	switch {
+	case !ok && optional:
+		return nil
+	case !ok:
+		return ErrMissingField
+	case val == "":
+		return nil
+	}
+
+	switch field.Interface().(type) {
+	case string:
+		if n, ok := val.(Number); ok {
+			field.SetString(string(n))
+			return nil
+		}
+		s, err := toString(val)
+		if err != nil {
+			return err
+		}
+		field.SetString(s)
+	case int, int8, int16, int32, int64:
+		i, err := toInt64(val)
+		if err != nil {
+			return err
+		}
+		if field.OverflowInt(i) {
+			return ErrOutOfRange
+		}
+		field.SetInt(i)
+	case float32, float64:
+		fl, err := toFloat64(val)
+		if err != nil {
+			return err
+		}
+		if field.OverflowFloat(fl) {
+			return ErrOutOfRange
+		}
+		field.SetFloat(fl)
+	case Number:
+		n, err := toNumber(val)
+		if err != nil {
+			return err
+		}
+		field.SetString(string(n))
+	case bool:
+		b, err := toBool(val)
+		if err != nil {
+			return err
+		}
+		field.SetBool(b)
+	case time.Duration:
+		// A distinct named type (underlying int64), so it is matched here
+		// rather than by the integer case above.
+		d, err := toDuration(val)
+		if err != nil {
+			return err
+		}
+		field.SetInt(int64(d))
+	case time.Time:
+		t, err := toTime(val, f.location())
+		if err != nil {
+			return err
+		}
+		field.Set(reflect.ValueOf(t))
+	case *time.Time:
+		t, err := toTime(val, f.location())
+		if err != nil {
+			return err
+		}
+		field.Set(reflect.ValueOf(&t))
+	}
+	return nil
+}
+
+// decodable reports whether Decode supports struct fields of type t: exactly
+// the types decodeField's switch handles, so a defined type over one of them is
+// not decodable.
+func decodable(t reflect.Type) bool {
+	switch reflect.Zero(t).Interface().(type) {
+	case string, int, int8, int16, int32, int64, float32, float64, Number, bool,
+		time.Duration, time.Time, *time.Time:
+		return true
+	}
+	return false
+}
+
+// unsupportedTypeError reports an `fm`-tagged struct field type that Decode
+// cannot populate. The fault is in the struct definition rather than the record
+// — it is the same for every record — so it is reported rather than skipped.
+func unsupportedTypeError(t reflect.Type) error {
 	hint := ""
-	if k := sf.Type.Kind(); k == reflect.Struct ||
-		(k == reflect.Pointer && sf.Type.Elem().Kind() == reflect.Struct) {
+	if k := t.Kind(); k == reflect.Struct || (k == reflect.Pointer && t.Elem().Kind() == reflect.Struct) {
 		hint = "; Decode is not recursive — call Decode on the nested struct itself"
 	}
-	return fmt.Errorf("filemaker: decode: field %s has unsupported type %s for tag %q%s",
-		sf.Name, sf.Type, tag, hint)
+	return fmt.Errorf("unsupported type %s%s", t, hint)
 }
+
+// fieldError is one struct field Decode could not fill: the field, its `fm`
+// tag, and why. Its message drops the wrapped error's package prefix, which
+// decodeError carries once for all its fields.
+type fieldError struct {
+	field, tag string
+	err        error
+}
+
+func (e *fieldError) Error() string {
+	return fmt.Sprintf("%s (fm:%q): %s", e.field, e.tag, strings.TrimPrefix(e.err.Error(), "filemaker: "))
+}
+
+func (e *fieldError) Unwrap() error { return e.err }
+
+// decodeError is the error Decode returns: every field it could not fill, in
+// struct field order. Its message is a single line — the fields joined by "; "
+// rather than errors.Join's newlines — so it stays whole in a log line or an
+// error tracker's title, and it unwraps to each field's error so errors.Is
+// matches any of their causes. It is unexported because the field list is for
+// people reading the message; code branches on what it wraps.
+type decodeError struct {
+	errs []error
+}
+
+func (e *decodeError) Error() string {
+	parts := make([]string, len(e.errs))
+	for i, err := range e.errs {
+		parts[i] = err.Error()
+	}
+	return "filemaker: decode: " + strings.Join(parts, "; ")
+}
+
+func (e *decodeError) Unwrap() []error { return e.errs }
