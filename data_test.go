@@ -674,7 +674,7 @@ func TestPortalDataRejectedRows(t *testing.T) {
 	}{
 		{"mod ID without ID", PortalRowData{ModID: "4", Fields: FieldData{"Orders::Qty": 3}}, "has a ModID but no ID"},
 		{"recordId field", PortalRowData{Fields: FieldData{"recordId": "70", "Orders::Qty": 3}}, `has a "recordId" field`},
-		{"modId field", PortalRowData{ID: "70", Fields: FieldData{"modId": "4"}}, `has a "modId" field`},
+		{"modId field", PortalRowData{Fields: FieldData{"modId": "4", "Orders::Qty": 3}}, `has a "modId" field`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -693,6 +693,48 @@ func TestPortalDataRejectedRows(t *testing.T) {
 	edit := WithPortalData(PortalData{"Orders": {{ID: "70", Fields: FieldData{"Orders::Qty": 3}}}})
 	if _, err := c.Create(ctx, "People", nil, edit); err == nil || !strings.Contains(err.Error(), "Create adds every portal row") {
 		t.Errorf("Create(row with ID) err = %v, want a Create-specific error", err)
+	}
+}
+
+// roundTripFunc adapts a function to http.RoundTripper, for tests that answer a
+// request in memory rather than through a listening server.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestPortalDataLaterCallReplaces checks that a later WithPortalData replaces an
+// earlier one outright, an invalid earlier one included: the rows are checked
+// as the request is built, against the PortalData in effect.
+func TestPortalDataLaterCallReplaces(t *testing.T) {
+	var sent string
+	c := &Client{
+		httpClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			b, _ := io.ReadAll(r.Body)
+			sent = string(b)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"response":{"modId":"5"},"messages":[{"code":"0","message":"OK"}]}`)),
+				Request:    r,
+			}, nil
+		})},
+		host:     "https://fm.example",
+		database: "Sales",
+		token:    "tok",
+		authSem:  make(chan struct{}, 1),
+	}
+	ctx := context.Background()
+	bad := WithPortalData(PortalData{"Orders": {{ModID: "4", Fields: FieldData{"Orders::Qty": 3}}}})
+	good := WithPortalData(PortalData{"Orders": {{Fields: FieldData{"Orders::Item": "Widget"}}}})
+
+	if _, err := c.UpdateByID(ctx, "People", "9", nil, bad, good); err != nil {
+		t.Fatalf("UpdateByID(invalid, then valid WithPortalData) = %v, want the valid one used", err)
+	}
+	if !strings.Contains(sent, `"portalData":{"Orders":[{"Orders::Item":"Widget"}]}`) {
+		t.Errorf("body = %s, want the replacing portal data", sent)
+	}
+	if _, err := c.UpdateByID(ctx, "People", "9", nil, good, bad); err == nil || !strings.Contains(err.Error(), "has a ModID but no ID") {
+		t.Errorf("UpdateByID(valid, then invalid WithPortalData) = %v, want the invalid one rejected", err)
 	}
 }
 

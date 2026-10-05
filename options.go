@@ -261,13 +261,11 @@ func (pd PortalData) check(create bool) error {
 // page.
 //
 // It sets a single portal-data object; calling WithPortalData again replaces it
-// rather than merging — pass all the portals and rows in one call.
+// rather than merging — pass all the portals and rows in one call. The rows are
+// checked when the request is built, against the last PortalData passed, so a
+// replaced value cannot fail the write.
 func WithPortalData(portals PortalData) WriteOption {
 	return option(func(c *params) {
-		if err := portals.check(false); err != nil {
-			c.err = err
-			return
-		}
 		c.portalData = portals
 	})
 }

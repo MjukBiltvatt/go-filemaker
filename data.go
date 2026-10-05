@@ -166,6 +166,9 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 	if err != nil {
 		return UpdateResponse{}, err
 	}
+	if err := p.portalData.check(false); err != nil {
+		return UpdateResponse{}, err
+	}
 
 	body, err := marshalRecordBody(fields, p, c.dateFormat)
 	if err != nil {
