@@ -227,9 +227,9 @@ make test    # go test ./...  — no server needed
 | `TestIntegrationFindNoMatch` | Empty result is a nil error, not `ErrNoRecords` |
 | `TestIntegrationContainer` | Container upload + download round-trip; the upload's mod ID matches the record's, and the download reports the host-inferred `text/plain` media type |
 | `TestIntegrationContainerDownloadError` | A container URL with a damaged object token fails as an `*HTTPError` with status 401 |
-| `TestIntegrationPortal` | Related-record add / edit / delete via portals, with rows read back through `Record.Portal`; a row edit locked with a stale `ModID` fails with `ErrRecordModified`; `deleteRelated` removes one row by a single string and two by a list |
+| `TestIntegrationPortal` | Related-record add / edit / delete via portals, with rows read back through `Record.Portal`; a row edit locked with a stale `ModID` fails with `ErrRecordModified`; `deleteRelated` removes one row by a single string and two by a list; an Update adding four rows around an edit reports each in `NewPortalRecords` in the order sent |
 | `TestIntegrationPortalPaging` | Portal row cap: default find returns at most the portal's configured row count; `WithPortalLimit` overrides it; `PortalDataInfo` reports every related row in `FoundCount` and the returned ones in `ReturnedCount` (needs the portal configured to 3 rows) |
-| `TestIntegrationPortalObjectName` | A named portal is read and written under its object name, while `deleteRelated` takes the table-occurrence name: the object name fails with code 110 (skips without the optional `NamedChildren` portal) |
+| `TestIntegrationPortalObjectName` | A named portal is read and written under its object name, while `deleteRelated` takes the table-occurrence name: the object name fails with code 110; rows added under both portal names in one Update come back in `NewPortalRecords` in the order sent, portals in name order (skips without the optional `NamedChildren` portal) |
 | `TestIntegrationUpdateWithModID` | Optimistic lock by mod ID; conflict → 306 |
 | `TestIntegrationUpdateIfUnchanged` | Record-relative optimistic lock; conflict → 306 |
 | `TestIntegrationScriptResults` | `WithScript` on Update and Find: echo-param round-trip, script error without request failure, missing script → `*APIError` code 104 (needs the `EchoParam` and `TriggerError` fixtures) |

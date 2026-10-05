@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -610,6 +611,47 @@ func TestUpdateWithPortalData(t *testing.T) {
 	}
 	if rows[1]["Orders::Item"] != "Widget" {
 		t.Errorf("add row = %v, want Item=Widget", rows[1])
+	}
+}
+
+// TestUpdateNewPortalRecords checks that the related records the host reports
+// creating from portal rows reach UpdateResponse in the order it lists them,
+// and that a response without them leaves NewPortalRecords nil.
+func TestUpdateNewPortalRecords(t *testing.T) {
+	body := `{"response":{"modId":"5","newPortalRecordInfo":[` +
+		`{"tableName":"Orders","recordId":"71","modId":"0"},{"tableName":"Orders","recordId":"72","modId":"0"}]},` +
+		`"messages":[{"code":"0","message":"OK"}]}`
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		writeJSON(w, body)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	portals := WithPortalData(PortalData{"Orders": {
+		{Fields: FieldData{"Orders::Item": "Widget"}},
+		{Fields: FieldData{"Orders::Item": "Gadget"}},
+	}})
+	res, err := c.UpdateByID(context.Background(), "People", "9", nil, portals)
+	if err != nil {
+		t.Fatalf("UpdateByID: %v", err)
+	}
+	want := []NewPortalRecordInfo{{Table: "Orders", RecordID: "71", ModID: "0"}, {Table: "Orders", RecordID: "72", ModID: "0"}}
+	if !reflect.DeepEqual(res.NewPortalRecords, want) {
+		t.Errorf("NewPortalRecords = %+v, want %+v", res.NewPortalRecords, want)
+	}
+
+	mu.Lock()
+	body = `{"response":{"modId":"6"},"messages":[{"code":"0","message":"OK"}]}`
+	mu.Unlock()
+	res, err = c.UpdateByID(context.Background(), "People", "9", FieldData{"Name": "Jane"})
+	if err != nil {
+		t.Fatalf("UpdateByID: %v", err)
+	}
+	if res.NewPortalRecords != nil {
+		t.Errorf("NewPortalRecords = %+v, want nil when the host reports none", res.NewPortalRecords)
 	}
 }
 

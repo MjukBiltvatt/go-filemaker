@@ -23,10 +23,35 @@ type CreateResponse struct {
 	Scripts  ScriptOutcomes
 }
 
-// UpdateResponse is the host's acknowledgement of an Update.
+// UpdateResponse is the host's acknowledgement of an Update. NewPortalRecords
+// lists the related records the Update created from portal rows without an ID
+// (see PortalRowData), one per such row in the order they were sent (see
+// NewPortalRecordInfo); it is nil when the Update added none.
 type UpdateResponse struct {
-	ModID   string
-	Scripts ScriptOutcomes
+	ModID            string
+	NewPortalRecords []NewPortalRecordInfo
+	Scripts          ScriptOutcomes
+}
+
+// NewPortalRecordInfo is a related record an Update created from a portal row:
+// the table occurrence it was added to, and its record and mod IDs.
+//
+// UpdateResponse.NewPortalRecords lists one entry per row without an ID, in the
+// order the rows were sent: portals in name order, which is how WithPortalData
+// sends them, and within a portal in slice order. Rows with an ID are edits and
+// get no entry. So the i-th entry belongs to the i-th added row, which is what
+// tells rows apart when two portals show the same table occurrence: the host
+// reports the table occurrence even for a row written under a portal's object
+// name. (Observed against FileMaker Server with unsorted portals; the Data API
+// guide does not document the key.)
+//
+// In testing against FileMaker Server, a Create did not report these entries,
+// so CreateResponse has no such field; read the record back for the IDs of the
+// related records a Create added.
+type NewPortalRecordInfo struct {
+	Table    string `json:"tableName"`
+	RecordID string `json:"recordId"`
+	ModID    string `json:"modId"`
 }
 
 // DeleteResponse is the host's acknowledgement of a Delete. The delete returns
@@ -151,7 +176,7 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 	if err := c.do(ctx, http.MethodPatch, c.recordURL(layout, id), body, &rb); err != nil {
 		return UpdateResponse{}, recordErr(err, layout, id)
 	}
-	return UpdateResponse{ModID: rb.Response.ModID, Scripts: rb.scriptOutcomes()}, nil
+	return UpdateResponse{ModID: rb.Response.ModID, NewPortalRecords: rb.Response.NewPortalRecordInfo, Scripts: rb.scriptOutcomes()}, nil
 }
 
 // Delete removes the record identified by rec. Pass WithScript and friends to

@@ -22,6 +22,9 @@ type responseBody struct {
 		Scripts     []Script     `json:"scripts"`
 		Layouts     []Layout     `json:"layouts"`
 
+		// Related records an Update created from portal rows.
+		NewPortalRecordInfo []NewPortalRecordInfo `json:"newPortalRecordInfo"`
+
 		// Script outcomes, one result/error pair per phase. The keys carry dots,
 		// which Go json tags handle verbatim. Absent when no script ran.
 		ScriptResult        string `json:"scriptResult"`

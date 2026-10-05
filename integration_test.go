@@ -938,13 +938,39 @@ func portalRows(t *testing.T, rec Record) map[string]string {
 	return out
 }
 
+// checkNewPortalRecords checks that got reports the rows added with the given
+// texts, in that order and in table: entry i must be the record that now holds
+// texts[i], found in rows (ChildText → record ID).
+func checkNewPortalRecords(t *testing.T, got []NewPortalRecordInfo, table string, texts []string, rows map[string]string) {
+	t.Helper()
+	want := make([]string, len(texts))
+	for i, text := range texts {
+		if rows[text] == "" {
+			t.Fatalf("added row %q missing after the write (%v)", text, rows)
+		}
+		want[i] = rows[text]
+	}
+	gotIDs := make([]string, len(got))
+	for i, info := range got {
+		gotIDs[i] = info.RecordID
+		if info.Table != table || info.ModID == "" {
+			t.Errorf("NewPortalRecords[%d] = %+v, want Table %q and a ModID", i, info, table)
+		}
+	}
+	if !slices.Equal(gotIDs, want) {
+		t.Errorf("NewPortalRecords record IDs = %v, want %v: the rows %v in the order they were sent", gotIDs, want, texts)
+	}
+}
+
 // TestIntegrationPortal exercises the related-record lifecycle the mocks cannot:
 // add rows at Create time through WithPortalData, read them back via
 // Record.Portal, edit an existing row by its record ID (locked against its mod
 // ID, which a repeat of the edit must then fail), and delete rows through the
 // deleteRelated field-data directive — one by a single "TO.recordId" string,
-// then two at once by a list of them. The edit and deletes still go through
-// Update, since they address related records that already exist.
+// then two at once by a list of them. A last Update adds four rows around an
+// edit, and its NewPortalRecords must pair each entry with the row sent in that
+// position. The edit and deletes still go through Update, since they address
+// related records that already exist.
 func TestIntegrationPortal(t *testing.T) {
 	requireServer(t)
 	ctx := context.Background()
@@ -1040,6 +1066,26 @@ func TestIntegrationPortal(t *testing.T) {
 	if _, ok := rows["row-1-edited"]; !ok {
 		t.Errorf("after list delete: expected row-1-edited to remain (%v)", rows)
 	}
+
+	// Add four rows with an edit among them in one Update. The host reports one
+	// NewPortalRecordInfo per added row; the edit must neither be reported nor
+	// shift which entry belongs to which row.
+	added := []string{"new-a", "new-b", "new-c", "new-d"}
+	res, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, nil, WithPortalData(PortalData{portalName: {
+		{Fields: FieldData{fieldChildText: added[0]}},
+		{ID: id1, Fields: FieldData{fieldChildText: "row-1-again"}},
+		{Fields: FieldData{fieldChildText: added[1]}},
+		{Fields: FieldData{fieldChildText: added[2]}},
+		{Fields: FieldData{fieldChildText: added[3]}},
+	}}))
+	if err != nil {
+		t.Fatalf("Update (add rows around an edit): %v", err)
+	}
+	rows = portalRows(t, findParent(t, ctx, marker, allRows))
+	if _, ok := rows["row-1-again"]; !ok {
+		t.Errorf("after add: the edit among the added rows did not apply (%v)", rows)
+	}
+	checkNewPortalRecords(t, res.NewPortalRecords, portalName, added, rows)
 }
 
 // TestIntegrationPortalPaging exercises WithPortalLimit and WithPortalOffset
@@ -1121,8 +1167,11 @@ func TestIntegrationPortalPaging(t *testing.T) {
 // an object name. Its data is read and written under the object name, but
 // deleteRelated addresses related records by table occurrence: the object name
 // fails with code 110 ("Related tables are missing"), and the table-occurrence
-// name works even with the named portal on the layout. It skips unless the
-// layout carries the optional NamedChildren portal.
+// name works even with the named portal on the layout. Rows added under both
+// portal names in one Update come back in NewPortalRecords in the order they
+// were sent — portals in name order, as the library sends them — all reporting
+// the same table occurrence. It skips unless the layout carries the optional
+// NamedChildren portal.
 func TestIntegrationPortalObjectName(t *testing.T) {
 	requireServer(t)
 	ctx := context.Background()
@@ -1192,6 +1241,25 @@ func TestIntegrationPortalObjectName(t *testing.T) {
 	if _, ok := rows["seed-2"]; ok {
 		t.Errorf("seed-2 still present after deleteRelated by table occurrence (%v)", rows)
 	}
+
+	// Add rows under both portal names in one Update. The library sends portals
+	// in name order (encoding/json sorts map keys), and both report the same
+	// table occurrence, so an entry's position is all that pairs it with a row.
+	res, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, nil, WithPortalData(PortalData{
+		namedPortalName: {
+			{Fields: FieldData{fieldChildText: "named-1"}},
+			{Fields: FieldData{fieldChildText: "named-2"}},
+		},
+		portalName: {
+			{Fields: FieldData{fieldChildText: "plain-1"}},
+			{Fields: FieldData{fieldChildText: "plain-2"}},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Update (add rows under both portal names): %v", err)
+	}
+	rows = portalRows(t, findParent(t, ctx, marker, WithPortalLimit(portalName, 10)))
+	checkNewPortalRecords(t, res.NewPortalRecords, portalName, []string{"plain-1", "plain-2", "named-1", "named-2"}, rows)
 }
 
 // TestIntegrationUpdateWithModID exercises the WithModID optimistic-lock option
