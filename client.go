@@ -193,7 +193,8 @@ func WithDateFormat(format DateFormat) Option {
 //
 // The host may include a scheme; if it does not, https is assumed. Plaintext
 // http is rejected unless WithInsecureHTTP is passed, and any scheme other than
-// http or https is rejected outright.
+// http or https is rejected outright. The host must not carry credentials
+// ("https://user:pass@host"); pass them as username and password.
 func New(host, database, username, password string, opts ...Option) (*Client, error) {
 	if host == "" {
 		return nil, errors.New("filemaker: no host specified")
@@ -249,7 +250,11 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 
 // normalizeHost defaults the scheme to https when none is present, then
 // validates it: plaintext http is allowed only when allowInsecureHTTP is set,
-// and any scheme other than http or https is rejected outright.
+// and any scheme other than http or https is rejected outright. A host carrying
+// userinfo ("https://user:pass@host") is rejected too: New takes the
+// credentials separately, the host is printed in errors where a password would
+// leak, and sameOrigin refuses such a URL, so the client could not use the
+// records it reads.
 func normalizeHost(host string, allowInsecureHTTP bool) (string, error) {
 	if !strings.Contains(host, "://") {
 		host = "https://" + host
@@ -258,6 +263,10 @@ func normalizeHost(host string, allowInsecureHTTP bool) (string, error) {
 	u, err := url.Parse(host)
 	if err != nil {
 		return "", fmt.Errorf("filemaker: invalid host %q: %w", host, err)
+	}
+	if u.User != nil {
+		// The message leaves the host out: it carries the credentials.
+		return "", errors.New("filemaker: host must not include a username or password; pass them to New")
 	}
 
 	switch u.Scheme {

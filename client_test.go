@@ -61,12 +61,18 @@ func TestNormalizeHost(t *testing.T) {
 		{in: "HTTP://localhost:8080", wantErr: true},
 		{in: "ftp://my.host.com", wantErr: true},
 		{in: "ftp://my.host.com", allowInsecure: true, wantErr: true},
+		{in: "https://user:secret@my.host.com", wantErr: true},
+		{in: "user:secret@my.host.com", wantErr: true},
+		{in: "https://user@my.host.com", wantErr: true},
+		{in: "https://my.host.com@evil.example", wantErr: true},
 	}
 	for _, c := range cases {
 		got, err := normalizeHost(c.in, c.allowInsecure)
 		if c.wantErr {
 			if err == nil {
 				t.Errorf("normalizeHost(%q, %v) = %q, want error", c.in, c.allowInsecure, got)
+			} else if strings.Contains(err.Error(), "secret") {
+				t.Errorf("normalizeHost(%q) error %q reveals the password", c.in, err)
 			}
 			continue
 		}
