@@ -84,14 +84,15 @@ type Record struct {
 // can: it must carry an ID, and it must have been read from c's file. Another
 // client's record would otherwise be sent with c's database and token, and its
 // layout and ID would silently address whatever record holds them in c's file.
-// Two clients on the same file (say, different accounts) can share records; the
-// host is compared as an origin (see sameOrigin) and the database name
-// case-insensitively, so spelling either differently is not a mismatch.
+// Two clients on the same file (say, different accounts) can share records. The
+// host is compared by origin and base path (see sameServer), so two servers a
+// gateway exposes under different paths are different files, and the database
+// name is compared case-insensitively.
 func (c *Client) checkRecord(rec Record) error {
 	if rec.recordID == "" {
 		return errors.New("filemaker: record has no ID; create or find it first")
 	}
-	if !sameOrigin(c.host, rec.host) || !strings.EqualFold(c.database, rec.database) {
+	if !sameServer(c.host, rec.host) || !strings.EqualFold(c.database, rec.database) {
 		return fmt.Errorf("filemaker: record %q in layout %q was read from database %q on %s, not this client's database %q on %s",
 			rec.recordID, rec.layout, rec.database, rec.host, c.database, c.host)
 	}

@@ -291,6 +291,25 @@ func sameOrigin(base, raw string) bool {
 	return u.Scheme == b.Scheme && strings.EqualFold(originHost(u), originHost(b))
 }
 
+// sameServer reports whether two client hosts address the same FileMaker
+// Server: the same origin (see sameOrigin) and the same base path. The client
+// keeps the host's path in every request URL, so a gateway can expose several
+// servers under one origin by path ("https://gw/tenant-a", "https://gw/tenant-b"),
+// and two paths are two servers. Trailing slashes are ignored; the path is
+// otherwise compared exactly, so two spellings that might reach one server are
+// treated as different, which refuses a record rather than misroutes it.
+func sameServer(a, b string) bool {
+	if !sameOrigin(a, b) {
+		return false
+	}
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return strings.TrimRight(ua.Path, "/") == strings.TrimRight(ub.Path, "/")
+}
+
 // sameOriginRedirects returns a CheckRedirect policy that refuses any redirect
 // hop leaving base's origin. Every request carries a secret in its
 // Authorization header — the Basic credentials on login, the bearer token

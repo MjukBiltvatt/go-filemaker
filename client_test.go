@@ -106,6 +106,27 @@ func TestSameOrigin(t *testing.T) {
 	}
 }
 
+func TestSameServer(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+		desc string
+	}{
+		{"https://gw.example/tenant-a", "https://gw.example/tenant-a", true, "same base path"},
+		{"https://gw.example/tenant-a", "https://GW.example:443/tenant-a/", true, "origin spelled differently, trailing slash"},
+		{"https://fms.example.com", "https://fms.example.com/", true, "no path and a bare slash"},
+		{"https://gw.example/tenant-a", "https://gw.example/tenant-b", false, "two servers behind one gateway"},
+		{"https://gw.example/tenant-a", "https://gw.example", false, "path versus none"},
+		{"https://gw.example/tenant-a", "https://gw.example/Tenant-A", false, "path case differs"},
+		{"https://gw.example/tenant-a", "https://other.example/tenant-a", false, "same path, other origin"},
+	}
+	for _, c := range cases {
+		if got := sameServer(c.a, c.b); got != c.want {
+			t.Errorf("sameServer(%q, %q) = %v, want %v (%s)", c.a, c.b, got, c.want, c.desc)
+		}
+	}
+}
+
 // TestRedirectsStayOnOrigin checks that the client built by New refuses to
 // follow a redirect off the session origin. The foreign server shares the
 // session host's hostname (127.0.0.1) on another port, which is exactly the

@@ -906,6 +906,7 @@ func TestCheckRecord(t *testing.T) {
 		{"other database", stamped("https://fm.example", "Payroll"), false},
 		{"other host", stamped("https://other.example", "Sales"), false},
 		{"other port", stamped("https://fm.example:8443", "Sales"), false},
+		{"other path on the same origin", stamped("https://fm.example/tenant-b", "Sales"), false},
 		{"no origin", Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}}, false},
 		{"no ID", Record{fields: fields{origin: origin{layout: "People"}}, host: "https://fm.example", database: "Sales"}, false},
 	}
