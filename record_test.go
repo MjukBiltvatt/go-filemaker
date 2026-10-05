@@ -1,290 +1,971 @@
 package filemaker
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
 
-func newTestRecord() Record {
-	return newRecord(
-		"layout",
-		map[string]interface{}{
-			"recordId": "recordId",
-			"fieldData": map[string]interface{}{
-				"string":              "string",
-				"int":                 float64(100),
-				"int8":                float64(8),
-				"int16":               float64(16),
-				"int32":               float64(32),
-				"int64":               float64(64),
-				"float32":             float64(32.32),
-				"float64":             float64(64.64),
-				"bool_true_txt_test":  "test",
-				"bool_true_txt_false": "false",
-				"bool_false_txt":      "",
-				"bool_true_num_1":     float64(1),
-				"bool_true_num_123":   float64(123),
-				"bool_false_num_0":    float64(0),
-				"date_1":              "01/02/2006",
-				"date_2":              "2006-01-02",
-				"timestamp_1":         "01/02/2006 15:04:05",
-				"timestamp_2":         "2006-01-02 15:04:05",
-				"time_invalid":        "january 1 2006 15 pm",
-			},
-		},
-		Session{
-			Token:    "token",
-			Host:     "host",
-			Database: "database",
-			Username: "username",
-			Password: "password",
-		},
-	)
+func testRecord() Record {
+	return Record{
+		fields: fields{origin: origin{layout: "People"}, data: map[string]any{
+			"string":              "string",
+			"int":                 Number("100"),
+			"int8":                Number("8"),
+			"int16":               Number("16"),
+			"int32":               Number("32"),
+			"int64":               Number("64"),
+			"float32":             Number("32.32"),
+			"float64":             Number("64.64"),
+			"int_big":             Number("9007199254740993"), // 2^53 + 1: past float64
+			"fraction":            Number("3.7"),
+			"huge":                Number("1.2345678901234568e+29"),
+			"beyond_int64":        Number("123456789012345678901234567890"),
+			"exponent_whole":      Number("1e3"),
+			"number_text":         "abc", // text a user typed into a number field
+			"bool_true_txt_test":  "test",
+			"bool_true_txt_false": "false",
+			"bool_false_txt":      "",
+			"bool_true_num_1":     Number("1"),
+			"bool_true_num_123":   Number("123"),
+			"bool_false_num_0":    Number("0"),
+			"bool_false_num_neg":  Number("-1"),
+			"bool_true_num_small": Number("0.001"),
+			"bool_false_zeros":    Number("0.000"),
+			"bool_false_zero_exp": Number("0e5"),
+			"bool_false_neg_zero": Number("-0"),
+			"date_1":              "01/02/2006",
+			"date_2":              "2006-01-02",
+			"timestamp_1":         "01/02/2006 15:04:05",
+			"timestamp_2":         "2006-01-02 15:04:05",
+			"time_invalid":        "january 1 2006 15 pm",
+			"list_lf":             "a\nb\nc",
+			"list_crlf":           "a\r\nb\r\nc\r\n",
+			"list_cr":             "a\rb\rc",
+			"list_single":         "only",
+			"list_blank_internal": "a\n\nb",
+			"list_empty":          "",
+		}},
+	}
 }
 
-type nestedStructPointer struct {
+func TestFieldsAndPortalDataInfoAreFaithfulCopies(t *testing.T) {
+	cases := []struct {
+		name string
+		rec  Record
+	}{
+		{"nil", Record{}},
+		{"empty", Record{fields: fields{data: map[string]any{}}, portalInfo: map[string]PortalDataInfo{}}},
+		{"populated", Record{
+			fields: fields{data: map[string]any{"Name": "Mark", "Age": Number("42"), "Note": ""}},
+			portalInfo: map[string]PortalDataInfo{
+				"Lines": {Table: "Lines", FoundCount: 4, ReturnedCount: 2},
+				"Empty": {Table: "Lines"},
+			},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.rec.Fields(); !reflect.DeepEqual(got, FieldData(tc.rec.data)) {
+				t.Errorf("Fields() = %#v, want %#v", got, tc.rec.data)
+			}
+			if got := tc.rec.PortalDataInfo(); !reflect.DeepEqual(got, tc.rec.portalInfo) {
+				t.Errorf("PortalDataInfo() = %#v, want %#v", got, tc.rec.portalInfo)
+			}
+		})
+	}
+
+	// Mutating the returned copies must not reach the record.
+	rec := Record{
+		fields:     fields{data: map[string]any{"Name": "Mark"}},
+		portalData: map[string][]map[string]any{"Lines": {{"Item": "Widget"}}},
+		portalInfo: map[string]PortalDataInfo{"Lines": {FoundCount: 1, ReturnedCount: 1}},
+	}
+	f := rec.Fields()
+	f["Name"] = "CHANGED"
+	f["New"] = "x"
+	rf := rec.Portal("Lines")[0].Fields()
+	rf["Item"] = "CHANGED"
+	pi := rec.PortalDataInfo()
+	pi["Lines"] = PortalDataInfo{FoundCount: 99}
+	pi["New"] = PortalDataInfo{}
+
+	if rec.Get("Name") != "Mark" {
+		t.Errorf("record Name mutated to %v via Fields() copy", rec.Get("Name"))
+	}
+	if rec.Has("New") {
+		t.Error("record gained a field via mutated Fields() copy")
+	}
+	if got := rec.portalData["Lines"][0]["Item"]; got != "Widget" {
+		t.Errorf("portal row mutated to %v via a row's Fields() copy", got)
+	}
+	if got := rec.portalInfo["Lines"].FoundCount; got != 1 || len(rec.portalInfo) != 1 {
+		t.Errorf("portal info mutated via PortalDataInfo() copy: %+v", rec.portalInfo)
+	}
+}
+
+func TestRecordHas(t *testing.T) {
+	r := testRecord()
+	if !r.Has("string") {
+		t.Error("Has(string) = false, want true")
+	}
+	if r.Has("missing") {
+		t.Error("Has(missing) = true, want false")
+	}
+	if !r.Has("bool_false_txt") {
+		t.Error("Has(bool_false_txt) = false, want true (present but empty)")
+	}
+}
+
+func TestRecordGetters(t *testing.T) {
+	r := testRecord()
+
+	t.Run("Get", func(t *testing.T) {
+		if r.Get("string") != "string" {
+			t.Errorf("Get = %v", r.Get("string"))
+		}
+		if r.Get("missing") != nil {
+			t.Errorf("Get missing = %v, want nil", r.Get("missing"))
+		}
+	})
+
+	t.Run("String", func(t *testing.T) {
+		if got, err := r.String("string"); err != nil || got != "string" {
+			t.Errorf("String = %q, %v", got, err)
+		}
+		if got, err := r.String("int"); !errors.Is(err, ErrNotString) || got != "" {
+			t.Errorf("String(int) = %q, %v; want \"\", ErrNotString", got, err)
+		}
+	})
+
+	t.Run("StringSlice", func(t *testing.T) {
+		// CR, LF and CRLF are all accepted as line breaks, and a single
+		// trailing line break (list_crlf) is trimmed rather than yielding "".
+		want := []string{"a", "b", "c"}
+		for _, field := range []string{"list_lf", "list_crlf", "list_cr"} {
+			if got, err := r.StringSlice(field); err != nil || !slices.Equal(got, want) {
+				t.Errorf("StringSlice(%q) = %#v, %v; want %#v", field, got, err, want)
+			}
+		}
+		if got, _ := r.StringSlice("list_single"); !slices.Equal(got, []string{"only"}) {
+			t.Errorf("StringSlice(single) = %#v", got)
+		}
+		// Blank lines between values are preserved.
+		if got, _ := r.StringSlice("list_blank_internal"); !slices.Equal(got, []string{"a", "", "b"}) {
+			t.Errorf("StringSlice(blank_internal) = %#v, want [a  b]", got)
+		}
+		// An empty field yields nil, not []string{""}.
+		if got, err := r.StringSlice("list_empty"); err != nil || got != nil {
+			t.Errorf("StringSlice(empty) = %#v, %v; want nil, nil", got, err)
+		}
+		if got, err := r.StringSlice("int"); !errors.Is(err, ErrNotString) || got != nil {
+			t.Errorf("StringSlice(int) = %#v, %v; want nil, ErrNotString", got, err)
+		}
+	})
+
+	t.Run("ints", func(t *testing.T) {
+		if got, err := r.Int("int"); err != nil || got != 100 {
+			t.Errorf("Int = %d, %v", got, err)
+		}
+		if got, err := r.Int64("int64"); err != nil || got != 64 {
+			t.Errorf("Int64 = %d, %v", got, err)
+		}
+		if got, _ := r.Int64("int_big"); got != 9007199254740993 {
+			t.Errorf("Int64(int_big) = %d, want 9007199254740993 (exact)", got)
+		}
+		cases := []struct {
+			field   string
+			wantErr error
+		}{
+			{"string", ErrNotNumber},
+			{"number_text", ErrNotNumber},
+			{"missing", ErrMissingField},
+			{"fraction", ErrNotInteger},
+			{"exponent_whole", ErrNotInteger}, // whole, but not integer notation
+			{"huge", ErrNotInteger},
+			{"beyond_int64", ErrOutOfRange},
+		}
+		for _, c := range cases {
+			if got, err := r.Int(c.field); !errors.Is(err, c.wantErr) || got != 0 {
+				t.Errorf("Int(%q) = %d, %v; want 0, %v", c.field, got, err, c.wantErr)
+			}
+			if got, err := r.Int64(c.field); !errors.Is(err, c.wantErr) || got != 0 {
+				t.Errorf("Int64(%q) = %d, %v; want 0, %v", c.field, got, err, c.wantErr)
+			}
+		}
+	})
+
+	t.Run("number", func(t *testing.T) {
+		if got, err := r.Number("int_big"); err != nil || got != "9007199254740993" {
+			t.Errorf("Number(int_big) = %q, %v; want the exact digits", got, err)
+		}
+		if got, err := r.Number("huge"); err != nil || got != "1.2345678901234568e+29" {
+			t.Errorf("Number(huge) = %q, %v", got, err)
+		}
+		for _, field := range []string{"string", "number_text"} {
+			if got, err := r.Number(field); !errors.Is(err, ErrNotNumber) || got != "" {
+				t.Errorf("Number(%q) = %q, %v; want \"\", ErrNotNumber", field, got, err)
+			}
+		}
+	})
+
+	t.Run("floats", func(t *testing.T) {
+		if got, err := r.Float64("float64"); err != nil || got != 64.64 {
+			t.Errorf("Float64 = %v, %v", got, err)
+		}
+		if got, _ := r.Float64("fraction"); got != 3.7 {
+			t.Errorf("Float64(fraction) = %v, want 3.7", got)
+		}
+		if got, _ := r.Float64("huge"); got != 1.2345678901234568e+29 {
+			t.Errorf("Float64(huge) = %v", got)
+		}
+		for _, field := range []string{"string", "number_text"} {
+			if _, err := r.Float64(field); !errors.Is(err, ErrNotNumber) {
+				t.Errorf("Float64(%q) err = %v, want ErrNotNumber", field, err)
+			}
+		}
+	})
+
+	t.Run("bool", func(t *testing.T) {
+		cases := map[string]bool{
+			"bool_true_txt_test":  true,
+			"bool_false_txt":      false,
+			"bool_true_num_1":     true,
+			"bool_true_num_123":   true,
+			"bool_false_num_0":    false,
+			"bool_false_num_neg":  false,
+			"bool_true_num_small": true,
+			"bool_false_zeros":    false,
+			"bool_false_zero_exp": false,
+			"bool_false_neg_zero": false,
+			"huge":                true,
+		}
+		for field, want := range cases {
+			if got, err := r.Bool(field); err != nil || got != want {
+				t.Errorf("Bool(%q) = %v, %v; want %v", field, got, err, want)
+			}
+		}
+		if got, err := r.Bool("missing"); !errors.Is(err, ErrMissingField) || got {
+			t.Errorf("Bool(missing) = %v, %v; want false, ErrMissingField", got, err)
+		}
+	})
+
+	t.Run("time", func(t *testing.T) {
+		want := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
+		for _, field := range []string{"timestamp_1", "timestamp_2"} {
+			if got, err := r.Time(field); err != nil || !got.Equal(want) {
+				t.Errorf("Time(%q) = %v, %v; want %v", field, got, err, want)
+			}
+		}
+		wantDate := time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC)
+		for _, field := range []string{"date_1", "date_2"} {
+			if got, err := r.Time(field); err != nil || !got.Equal(wantDate) {
+				t.Errorf("Time(%q) = %v, %v; want %v", field, got, err, wantDate)
+			}
+		}
+		if _, err := r.Time("time_invalid"); !errors.Is(err, ErrUnknownFormat) {
+			t.Errorf("Time(invalid) err = %v, want ErrUnknownFormat", err)
+		}
+	})
+}
+
+// TestRecordGetterAbsentAndEmpty checks the two rules every typed accessor
+// shares with Decode: an absent field is ErrMissingField, and an empty field —
+// which the host sends as "" whatever its type — is the zero value without error.
+func TestRecordGetterAbsentAndEmpty(t *testing.T) {
+	r := Record{fields: fields{data: map[string]any{"e": ""}}}
+	type getter struct {
+		name string
+		get  func(field string) (any, error)
+	}
+	getters := []getter{
+		{"String", func(f string) (any, error) { return r.String(f) }},
+		{"StringSlice", func(f string) (any, error) { v, err := r.StringSlice(f); return v == nil, err }},
+		{"Number", func(f string) (any, error) { return r.Number(f) }},
+		{"Int", func(f string) (any, error) { return r.Int(f) }},
+		{"Int64", func(f string) (any, error) { return r.Int64(f) }},
+		{"Float64", func(f string) (any, error) { return r.Float64(f) }},
+		{"Bool", func(f string) (any, error) { return r.Bool(f) }},
+		{"Time", func(f string) (any, error) { return r.Time(f) }},
+		{"TimeIn", func(f string) (any, error) { return r.TimeIn(f, time.UTC) }},
+		{"Duration", func(f string) (any, error) { return r.Duration(f) }},
+	}
+	zero := map[string]any{
+		"String": "", "StringSlice": true, "Number": Number(""), "Int": 0, "Int64": int64(0),
+		"Float64": float64(0), "Bool": false, "Time": time.Time{}, "TimeIn": time.Time{},
+		"Duration": time.Duration(0),
+	}
+	for _, g := range getters {
+		if got, err := g.get("e"); err != nil || got != zero[g.name] {
+			t.Errorf("%s(empty) = %v, %v; want %v, nil", g.name, got, err, zero[g.name])
+		}
+		got, err := g.get("missing")
+		if !errors.Is(err, ErrMissingField) {
+			t.Errorf("%s(missing) err = %v, want ErrMissingField", g.name, err)
+		}
+		if got != zero[g.name] {
+			t.Errorf("%s(missing) = %v, want the zero value", g.name, got)
+		}
+	}
+}
+
+// TestRecordGetterErrorIdentity checks that an accessor's error names the field
+// and, for a record the host returned, the record and layout, with the package
+// prefix once, and that it matches its cause.
+func TestRecordGetterErrorIdentity(t *testing.T) {
+	data := map[string]any{"Age": "abc"}
+	cases := []struct {
+		name string
+		rec  Record
+		want string
+	}{
+		{"returned", Record{fields: fields{origin: origin{layout: "People", recordID: "9"}, data: data}},
+			`filemaker: record "9" in layout "People": field "Age": value is not a number`},
+		{"hand-built", Record{fields: fields{data: data}},
+			`filemaker: field "Age": value is not a number`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.rec.Int("Age")
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("Int(Age) err = %v\nwant %s", err, tc.want)
+			}
+			if !errors.Is(err, ErrNotNumber) {
+				t.Errorf("errors.Is(err, ErrNotNumber) = false for %v", err)
+			}
+		})
+	}
+}
+
+// TestRecordPortal checks that Portal returns a portal's rows in order, each
+// reading through the typed accessors with its record and mod IDs lifted out of
+// its field values, in the record's time zone, and naming itself in errors.
+func TestRecordPortal(t *testing.T) {
+	loc := time.FixedZone("TEST", 2*60*60)
+	rec := Record{
+		fields: fields{origin: origin{layout: "Invoices", recordID: "9"}, loc: loc},
+		portalData: map[string][]map[string]any{
+			"Lines": {
+				{"recordId": "5", "modId": "2", "Lines::Qty": Number("3"), "Lines::Shipped": "06/23/2026 15:04:05"},
+				{"recordId": "6", "modId": "1", "Lines::Qty": Number("3.5"), "Lines::Shipped": ""},
+			},
+			"Empty": {},
+		},
+	}
+
+	rows := rec.Portal("Lines")
+	if len(rows) != 2 {
+		t.Fatalf("Portal(Lines) = %d rows, want 2", len(rows))
+	}
+	if rows[0].ID() != "5" || rows[0].ModID() != "2" || rows[1].ID() != "6" {
+		t.Errorf("row IDs = %q/%q, %q; want 5/2, 6", rows[0].ID(), rows[0].ModID(), rows[1].ID())
+	}
+	if want := (FieldData{"Lines::Qty": Number("3"), "Lines::Shipped": "06/23/2026 15:04:05"}); !reflect.DeepEqual(rows[0].Fields(), want) {
+		t.Errorf("row Fields() = %#v, want %#v", rows[0].Fields(), want)
+	}
+	if got, err := rows[0].Int("Lines::Qty"); err != nil || got != 3 {
+		t.Errorf("row Int(Lines::Qty) = %d, %v; want 3", got, err)
+	}
+	if got, err := rows[0].Time("Lines::Shipped"); err != nil || !got.Equal(time.Date(2026, 6, 23, 15, 4, 5, 0, loc)) || got.Location() != loc {
+		t.Errorf("row Time(Lines::Shipped) = %v, %v; want 15:04:05 in the record's zone", got, err)
+	}
+
+	var line struct {
+		Qty     float64    `fm:"Lines::Qty"`
+		Shipped *time.Time `fm:"Lines::Shipped"`
+	}
+	if err := rows[1].Decode(&line); err != nil || line.Qty != 3.5 || line.Shipped != nil {
+		t.Errorf("row Decode = %+v, %v; want Qty 3.5, Shipped nil", line, err)
+	}
+
+	_, err := rows[1].Int("Lines::Qty")
+	want := `filemaker: portal "Lines" row "6" of record "9" in layout "Invoices": field "Lines::Qty": value is not written as an integer`
+	if err == nil || err.Error() != want || !errors.Is(err, ErrNotInteger) {
+		t.Errorf("row Int(Lines::Qty) err = %v\nwant %s", err, want)
+	}
+	var bad struct {
+		Qty int `fm:"Lines::Qty"`
+	}
+	err = rows[1].Decode(&bad)
+	want = `filemaker: portal "Lines" row "6" of record "9" in layout "Invoices": decode: Qty (fm:"Lines::Qty"): value is not written as an integer`
+	if err == nil || err.Error() != want {
+		t.Errorf("row Decode err = %v\nwant %s", err, want)
+	}
+
+	if rows := rec.Portal("Empty"); rows == nil || len(rows) != 0 {
+		t.Errorf("Portal(Empty) = %#v, want an empty non-nil slice", rows)
+	}
+	if rows := rec.Portal("Missing"); rows != nil {
+		t.Errorf("Portal(Missing) = %#v, want nil", rows)
+	}
+
+	// A row's fields are a copy: lifting its IDs out must not reach the record.
+	if _, ok := rec.portalData["Lines"][0]["recordId"]; !ok {
+		t.Error("Portal removed recordId from the record's own portal data")
+	}
+}
+
+func TestRecordTimeLocation(t *testing.T) {
+	loc := time.FixedZone("TEST", 2*60*60) // +02:00
+
+	r := Record{fields: fields{data: map[string]any{"ts": "01/02/2006 15:04:05"}, loc: loc}}
+	got, _ := r.Time("ts")
+	if got.Location() != loc {
+		t.Errorf("Time location = %v, want %v", got.Location(), loc)
+	}
+	if want := time.Date(2006, 1, 2, 15, 4, 5, 0, loc); !got.Equal(want) {
+		t.Errorf("Time = %v, want %v", got, want)
+	}
+
+	// Explicit override ignores the record's location.
+	if utc, _ := r.TimeIn("ts", time.UTC); utc.Location() != time.UTC {
+		t.Errorf("TimeIn location = %v, want UTC", utc.Location())
+	}
+
+	// No configured location defaults to UTC.
+	r2 := Record{fields: fields{data: map[string]any{"ts": "01/02/2006 15:04:05"}}}
+	if got, _ := r2.Time("ts"); got.Location() != time.UTC {
+		t.Errorf("default location = %v, want UTC", got.Location())
+	}
+}
+
+type addressGroup struct {
 	String string `fm:"string"`
 }
 
 type testRecordStruct struct {
-	String             string     `fm:"string"`
-	Int                int        `fm:"int"`
-	Int8               int8       `fm:"int8"`
-	Int16              int16      `fm:"int16"`
-	Int32              int32      `fm:"int32"`
-	Int64              int64      `fm:"int64"`
-	Float32            float32    `fm:"float32"`
-	Float64            float64    `fm:"float64"`
-	BoolTrueTxtTest    bool       `fm:"bool_true_txt_test"`
-	BoolTrueTxtFalse   bool       `fm:"bool_true_txt_false"`
-	BoolFalseTxt       bool       `fm:"bool_false_txt"`
-	BoolTrueNum1       bool       `fm:"bool_true_num_1"`
-	BoolTrueNum123     bool       `fm:"bool_true_num_123"`
-	BoolFalseNum0      bool       `fm:"bool_false_num_0"`
-	Date1              time.Time  `fm:"date_1"`
-	Date2              time.Time  `fm:"date_2"`
-	Timestamp1         time.Time  `fm:"timestamp_1"`
-	Timestamp2         time.Time  `fm:"timestamp_2"`
-	TimeInvalid        time.Time  `fm:"time_invalid"`
-	TimePointer        *time.Time `fm:"timestamp_1"`
-	TimePointerInvalid *time.Time `fm:"time_invalid"`
-	Nested             struct {
-		String string `fm:"string"`
-		Nested struct {
-			String string `fm:"string"`
-		}
-	}
-	NestedStructPointer    *nestedStructPointer
-	NestedNilStructPointer *nestedStructPointer
+	String      string     `fm:"string"`
+	Int         int        `fm:"int"`
+	Int8        int8       `fm:"int8"`
+	Int64       int64      `fm:"int64"`
+	Float64     float64    `fm:"float64"`
+	Number      Number     `fm:"int_big"`
+	BoolText    bool       `fm:"bool_true_txt_test"`
+	BoolNumZero bool       `fm:"bool_false_num_0"`
+	Date        time.Time  `fm:"date_1"`
+	Timestamp   time.Time  `fm:"timestamp_1"`
+	TimeEmpty   time.Time  `fm:"list_empty"`
+	TimePointer *time.Time `fm:"timestamp_1"`
+	TimePtrZero *time.Time `fm:"list_empty"`
+
+	Untagged string       // no fm tag: must be left untouched
+	Skipped  string       `fm:"-"` // explicitly skipped
+	Nested   addressGroup // nested struct: must NOT be recursed into
 }
 
-// TestRecordMap tests the `Record.Map` method
-func TestRecordMap(t *testing.T) {
-	//Create a dummy record
-	record := newTestRecord()
+func TestRecordDecode(t *testing.T) {
+	value := testRecordStruct{Untagged: "keep", Skipped: "keep"}
 
-	//Create a struct to map the dummy record to
-	var value testRecordStruct
-	value.NestedStructPointer = &nestedStructPointer{}
+	if err := testRecord().Decode(&value); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
 
-	//Map the dummy record to the struct
-	record.Map(&value, time.UTC)
+	wantTS := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
 
-	t.Run("string", func(t *testing.T) {
-		got := value.String
-		expect := "string"
-		if got != expect {
-			t.Errorf("got: '%v', expected: '%v'", got, expect)
+	checks := []struct {
+		name string
+		ok   bool
+	}{
+		{"string", value.String == "string"},
+		{"int", value.Int == 100},
+		{"int8", value.Int8 == 8},
+		{"int64", value.Int64 == 64},
+		{"float64", value.Float64 == 64.64},
+		{"number", value.Number == "9007199254740993"},
+		{"bool_text", value.BoolText},
+		{"bool_num_zero", !value.BoolNumZero},
+		{"date", value.Date.Equal(time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC))},
+		{"timestamp", value.Timestamp.Equal(wantTS)},
+		{"time_empty", value.TimeEmpty.IsZero()},
+		{"time_pointer", value.TimePointer != nil && value.TimePointer.Equal(wantTS)},
+		{"time_pointer_zero", value.TimePtrZero == nil},
+		{"untagged_untouched", value.Untagged == "keep"},
+		{"skipped_untouched", value.Skipped == "keep"},
+		{"nested_not_recursed", value.Nested.String == ""},
+	}
+	for _, c := range checks {
+		if !c.ok {
+			t.Errorf("%s: decoded incorrectly (%+v)", c.name, value)
 		}
-	})
+	}
 
-	t.Run("int", func(t *testing.T) {
-		got := value.Int
-		var expect int = 100
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+	// Nested structs are decoded explicitly, not recursively.
+	if err := testRecord().Decode(&value.Nested); err != nil {
+		t.Fatalf("Decode nested: %v", err)
+	}
+	if value.Nested.String != "string" {
+		t.Errorf("manual nested decode: got %q, want %q", value.Nested.String, "string")
+	}
+}
 
-	t.Run("int8", func(t *testing.T) {
-		got := value.Int8
-		var expect int8 = 8
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+func TestRecordDecodeClearsStaleTimePointer(t *testing.T) {
+	var value struct {
+		T *time.Time `fm:"ts"`
+	}
 
-	t.Run("int16", func(t *testing.T) {
-		got := value.Int16
-		var expect int16 = 16
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+	// First decode: a parseable value sets the pointer.
+	if err := (Record{fields: fields{data: map[string]any{"ts": "01/02/2006 15:04:05"}}}).Decode(&value); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if value.T == nil {
+		t.Fatal("first decode: T is nil, want set")
+	}
 
-	t.Run("int32", func(t *testing.T) {
-		got := value.Int32
-		var expect int32 = 32
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+	// Second decode: an empty value must clear the pointer back to nil rather
+	// than leaving the stale value.
+	if err := (Record{fields: fields{data: map[string]any{"ts": ""}}}).Decode(&value); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if value.T != nil {
+		t.Errorf("second decode: T = %v, want nil", value.T)
+	}
+}
 
-	t.Run("int64", func(t *testing.T) {
-		got := value.Int64
-		var expect int64 = 64
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+func TestRecordDecodeErrors(t *testing.T) {
+	r := testRecord()
 
-	t.Run("float32", func(t *testing.T) {
-		got := value.Float32
-		var expect float32 = 32.32
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+	var notPointer testRecordStruct
+	if err := r.Decode(notPointer); err == nil {
+		t.Error("Decode(struct) = nil, want error")
+	}
 
-	t.Run("float64", func(t *testing.T) {
-		got := value.Float64
-		var expect float64 = 64.64
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+	var nilPointer *testRecordStruct
+	if err := r.Decode(nilPointer); err == nil {
+		t.Error("Decode(nil pointer) = nil, want error")
+	}
 
-	t.Run("bool_true_txt_test", func(t *testing.T) {
-		got := value.BoolTrueTxtTest
-		expect := true
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+	n := 5
+	if err := r.Decode(&n); err == nil {
+		t.Error("Decode(*int) = nil, want error")
+	}
+}
 
-	t.Run("bool_true_txt_false", func(t *testing.T) {
-		got := value.BoolTrueTxtFalse
-		expect := true
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+// TestRecordDecodeUnsupportedFieldTypes checks that an `fm` tag on a field
+// Decode cannot populate is reported rather than silently skipped, that every
+// offending field is named in one error, and that the fields that can decode are
+// still populated.
+func TestRecordDecodeUnsupportedFieldTypes(t *testing.T) {
+	value := struct {
+		Supported string       `fm:"string"`
+		Uint      uint         `fm:"int"`
+		Slice     []string     `fm:"string"`
+		Nested    addressGroup `fm:"string"`
+		Untagged  uint         // no fm tag: not an error
+	}{
+		// Stale values from an earlier decode: the tagged fields must be reset
+		// even though they cannot decode; the untagged one must be left alone.
+		Uint: 7, Slice: []string{"stale"}, Nested: addressGroup{String: "stale"}, Untagged: 9,
+	}
 
-	t.Run("bool_false_txt", func(t *testing.T) {
-		got := value.BoolFalseTxt
-		expect := false
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
+	err := testRecord().Decode(&value)
+	if err == nil {
+		t.Fatal("Decode(unsupported field types) = nil, want error")
+	}
+	for _, name := range []string{"Uint", "Slice", "Nested"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error does not name field %s: %v", name, err)
 		}
-	})
+	}
+	if strings.Contains(err.Error(), "Untagged") {
+		t.Errorf("error names untagged field Untagged: %v", err)
+	}
+	// The nested-struct case is the v3 Map recursion trap, so it carries a hint.
+	if !strings.Contains(err.Error(), "not recursive") {
+		t.Errorf("error lacks the nested-struct hint: %v", err)
+	}
+	if value.Supported != "string" {
+		t.Errorf("Supported = %q, want %q: decodable fields must still be set", value.Supported, "string")
+	}
+	if value.Uint != 0 || value.Slice != nil || value.Nested != (addressGroup{}) {
+		t.Errorf("unsupported fields kept stale values: %+v", value)
+	}
+	if value.Untagged != 9 {
+		t.Errorf("Untagged = %d, want 9: untagged fields must be left alone", value.Untagged)
+	}
+}
 
-	t.Run("bool_true_num_1", func(t *testing.T) {
-		got := value.BoolTrueNum1
-		expect := true
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+// TestRecordDecodeDefinedType documents that a defined type over a supported
+// type does not decode (the type switch matches concrete types) and is reported
+// rather than left silently at its zero value.
+func TestRecordDecodeDefinedType(t *testing.T) {
+	type status string
 
-	t.Run("bool_true_num_123", func(t *testing.T) {
-		got := value.BoolTrueNum123
-		expect := true
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+	var value struct {
+		Status status `fm:"string"`
+	}
 
-	t.Run("bool_false_num_0", func(t *testing.T) {
-		got := value.BoolFalseNum0
-		expect := false
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+	err := testRecord().Decode(&value)
+	if err == nil {
+		t.Fatal("Decode(defined type) = nil, want error")
+	}
+	if strings.Contains(err.Error(), "not recursive") {
+		t.Errorf("non-struct field carries the nested-struct hint: %v", err)
+	}
+}
 
-	t.Run("date_1", func(t *testing.T) {
-		got := value.Date1
-		expect := time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC)
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+// TestTimeGetterFormats checks every layout Time accepts, in both US and ISO
+// form, and confirms a timestamp keeps its time component (it is not truncated
+// to a date). Each layout requires a full match — Go's time.Parse errors on
+// extra or missing text — so the order of timeFormats is not load-bearing; this
+// asserts each value parses to the right instant regardless.
+func TestTimeGetterFormats(t *testing.T) {
+	loc := time.UTC
+	tsWant := time.Date(2026, 6, 23, 15, 4, 5, 0, loc)
+	dateWant := time.Date(2026, 6, 23, 0, 0, 0, 0, loc)
+	todWant := time.Date(0, 1, 1, 15, 4, 5, 0, loc) // time-only: Go's zero date
 
-	t.Run("date_2", func(t *testing.T) {
-		got := value.Date2
-		expect := time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC)
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
+	cases := []struct {
+		name, value string
+		want        time.Time
+	}{
+		{"US timestamp", "06/23/2026 15:04:05", tsWant},
+		{"ISO timestamp space", "2026-06-23 15:04:05", tsWant},
+		{"ISO timestamp T", "2026-06-23T15:04:05", tsWant},
+		{"US date", "06/23/2026", dateWant},
+		{"ISO date", "2026-06-23", dateWant},
+		{"time of day", "15:04:05", todWant},
+	}
+	for _, c := range cases {
+		r := Record{fields: fields{data: map[string]any{"f": c.value}, loc: loc}}
+		got, err := r.Time("f")
+		if err != nil {
+			t.Errorf("%s: Time(%q) error: %v", c.name, c.value, err)
+			continue
 		}
-	})
+		if !got.Equal(c.want) {
+			t.Errorf("%s: Time(%q) = %v, want %v", c.name, c.value, got, c.want)
+		}
+	}
+}
 
-	t.Run("timestamp_1", func(t *testing.T) {
-		got := value.Timestamp1
-		expect := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
+// TestTimeGetterErrors covers the values Time rejects: an unparseable string, a
+// number, and a Time value of 24h or more (out of the wall-clock range — read
+// those with Duration). The time returned with the error is the zero time.
+func TestTimeGetterErrors(t *testing.T) {
+	r := Record{fields: fields{data: map[string]any{
+		"bad":  "not a date",
+		"over": "37:30:00",  // >= 24h: a duration, not a clock time
+		"num":  Number("5"), // a number field, not a date string
+	}}}
+	for _, f := range []string{"bad", "over", "num"} {
+		got, err := r.Time(f)
+		if !errors.Is(err, ErrUnknownFormat) {
+			t.Errorf("Time(%q) err = %v, want ErrUnknownFormat", f, err)
 		}
-	})
+		if !got.IsZero() {
+			t.Errorf("Time(%q) = %v, want zero time", f, got)
+		}
+	}
+}
 
-	t.Run("timestamp_2", func(t *testing.T) {
-		got := value.Timestamp2
-		expect := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
+func TestDurationGetter(t *testing.T) {
+	valid := map[string]time.Duration{
+		"00:00:00":  0,
+		"15:04:05":  15*time.Hour + 4*time.Minute + 5*time.Second,
+		"37:30:00":  37*time.Hour + 30*time.Minute, // exceeds 24h
+		"100:00:00": 100 * time.Hour,
+		"-01:30:00": -(time.Hour + 30*time.Minute), // negative
+		"-00:00:01": -time.Second,
+	}
+	for v, want := range valid {
+		r := Record{fields: fields{data: map[string]any{"f": v}}}
+		got, err := r.Duration("f")
+		if err != nil {
+			t.Errorf("Duration(%q) error: %v", v, err)
+			continue
 		}
-	})
+		if got != want {
+			t.Errorf("Duration(%q) = %v, want %v", v, got, want)
+		}
+	}
 
-	t.Run("time_invalid", func(t *testing.T) {
-		got := value.TimeInvalid
-		expect := time.Time{}
-		if got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
+	invalid := []any{
+		"12:00",               // too few components
+		"12:00:00:00",         // too many components
+		"aa:bb:cc",            // non-numeric
+		"12:60:00",            // minute out of range
+		"12:00:60",            // second out of range
+		"2026-06-23",          // a date
+		"2026-06-23T15:04:05", // a timestamp
+		Number("5"),           // a number field
+	}
+	for _, v := range invalid {
+		r := Record{fields: fields{data: map[string]any{"f": v}}}
+		got, err := r.Duration("f")
+		if !errors.Is(err, ErrUnknownFormat) {
+			t.Errorf("Duration(%v) err = %v, want ErrUnknownFormat", v, err)
 		}
-	})
+		if got != 0 {
+			t.Errorf("Duration(%v) = %v, want 0", v, got)
+		}
+	}
+}
 
-	t.Run("time_pointer", func(t *testing.T) {
-		got := value.TimePointer
-		expect := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
-		if got == nil || *got != expect {
-			t.Errorf("got: %v, expected: %v", got, expect)
-		}
-	})
+func TestDecodeDuration(t *testing.T) {
+	r := Record{fields: fields{data: map[string]any{"worked": "37:30:00"}}}
+	var got struct {
+		Worked time.Duration `fm:"worked"`
+	}
+	if err := r.Decode(&got); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if want := 37*time.Hour + 30*time.Minute; got.Worked != want {
+		t.Errorf("Worked = %v, want %v", got.Worked, want)
+	}
+}
 
-	t.Run("time_pointer_invalid", func(t *testing.T) {
-		got := value.TimePointerInvalid
-		if got != nil {
-			t.Errorf("got: %v, expected: %v", got, nil)
-		}
-	})
+// TestRecordDecodeDataErrors checks that a value Decode cannot convert is
+// reported rather than left silently at its zero value: every failing field is
+// named in one single-line error that matches each cause with errors.Is, each
+// failing field is reset to its zero value, and the fields that can decode are
+// still populated.
+func TestRecordDecodeDataErrors(t *testing.T) {
+	r := Record{
+		fields: fields{data: map[string]any{
+			"name":     "Mark",
+			"fraction": Number("3.7"),
+			"big":      Number("300"),
+			"float":    Number("1e39"),
+			"text":     "abc",
+			"bad_time": "january 1 2006 15 pm",
+			"bad_dur":  "37 hours",
+		}},
+	}
+	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	value := struct {
+		Name     string        `fm:"name"`
+		Fraction int           `fm:"fraction"`
+		Big      int8          `fm:"big"`
+		Float    float32       `fm:"float"`
+		Text     int64         `fm:"text"`
+		TextNum  Number        `fm:"text"`
+		BadTime  time.Time     `fm:"bad_time"`
+		BadPtr   *time.Time    `fm:"bad_time"`
+		BadDur   time.Duration `fm:"bad_dur"`
+		Missing  string        `fm:"nope"`
+		NoBool   bool          `fm:"nope_bool"`
+	}{
+		// Stale values from an earlier decode: each failing field must be reset.
+		Fraction: 1, Big: 1, Float: 1, Text: 1, TextNum: "1",
+		BadTime: past, BadPtr: &past, BadDur: 1, Missing: "stale", NoBool: true,
+	}
 
-	t.Run("nested_string", func(t *testing.T) {
-		got := value.Nested.String
-		expect := "string"
-		if got != expect {
-			t.Errorf("got: '%v', expected: '%v'", got, expect)
+	err := r.Decode(&value)
+	if err == nil {
+		t.Fatal("Decode = nil error, want one naming every failing field")
+	}
+	for _, want := range []error{ErrNotInteger, ErrOutOfRange, ErrNotNumber, ErrUnknownFormat, ErrMissingField} {
+		if !errors.Is(err, want) {
+			t.Errorf("errors.Is(err, %v) = false; err = %v", want, err)
 		}
-	})
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "\n") {
+		t.Errorf("error spans several lines: %q", msg)
+	}
+	if !strings.HasPrefix(msg, "filemaker: decode: ") {
+		t.Errorf("error = %q, want the filemaker: decode: prefix", msg)
+	}
+	if n := strings.Count(msg, "filemaker:"); n != 1 {
+		t.Errorf("error names the package %d times, want once: %q", n, msg)
+	}
+	for _, part := range []string{
+		`Fraction (fm:"fraction")`, `Big (fm:"big")`, `Float (fm:"float")`, `Text (fm:"text")`,
+		`TextNum (fm:"text")`, `BadTime (fm:"bad_time")`, `BadPtr (fm:"bad_time")`,
+		`BadDur (fm:"bad_dur")`, `Missing (fm:"nope")`, `NoBool (fm:"nope_bool")`,
+	} {
+		if !strings.Contains(msg, part) {
+			t.Errorf("error does not name %s: %q", part, msg)
+		}
+	}
+	if strings.Contains(msg, "Name") {
+		t.Errorf("error names the field that decoded: %q", msg)
+	}
+	// Failures are listed in struct field order, so a record gives the same
+	// message on every run.
+	if strings.Index(msg, "Fraction") > strings.Index(msg, "Missing") {
+		t.Errorf("failures are not in struct field order: %q", msg)
+	}
 
-	t.Run("nested_nested_string", func(t *testing.T) {
-		got := value.Nested.Nested.String
-		expect := "string"
-		if got != expect {
-			t.Errorf("got: '%v', expected: '%v'", got, expect)
-		}
-	})
+	if value.Name != "Mark" {
+		t.Errorf("Name = %q, want Mark: decodable fields must still be set", value.Name)
+	}
+	if value.Fraction != 0 || value.Big != 0 || value.Float != 0 || value.Text != 0 || value.TextNum != "" ||
+		!value.BadTime.IsZero() || value.BadPtr != nil || value.BadDur != 0 || value.Missing != "" || value.NoBool {
+		t.Errorf("failing fields were not reset to their zero values: %+v", value)
+	}
+}
 
-	t.Run("nested_pointer_string", func(t *testing.T) {
-		got := value.NestedStructPointer.String
-		expect := "string"
-		if got != expect {
-			t.Errorf("got: '%v', expected: '%v'", got, expect)
-		}
-	})
+// TestRecordDecodeEmptyValues checks that an empty field — which the host sends
+// as "" whatever the field's type — decodes to the zero value without error,
+// clearing any value left by an earlier decode.
+func TestRecordDecodeEmptyValues(t *testing.T) {
+	r := Record{fields: fields{data: map[string]any{"e": ""}}}
+	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	value := struct {
+		String   string        `fm:"e"`
+		Int      int           `fm:"e"`
+		Int8     int8          `fm:"e"`
+		Float    float64       `fm:"e"`
+		Number   Number        `fm:"e"`
+		Bool     bool          `fm:"e"`
+		Duration time.Duration `fm:"e"`
+		Time     time.Time     `fm:"e"`
+		TimePtr  *time.Time    `fm:"e"`
+	}{"x", 1, 1, 1, "1", true, 1, past, &past}
 
-	t.Run("nested_nil_pointer", func(t *testing.T) {
-		got := value.NestedNilStructPointer
-		if got != nil {
-			t.Errorf("got: %v, expected: %v", got, nil)
+	if err := r.Decode(&value); err != nil {
+		t.Fatalf("Decode(empty values) = %v, want nil", err)
+	}
+	if value.String != "" || value.Int != 0 || value.Int8 != 0 || value.Float != 0 || value.Number != "" ||
+		value.Bool || value.Duration != 0 || !value.Time.IsZero() || value.TimePtr != nil {
+		t.Errorf("empty values did not decode to zero values: %+v", value)
+	}
+}
+
+// TestRecordDecodeOptional checks that the optional tag option allows a field
+// to be absent — decoded to its zero value without error — while a present
+// optional field decodes normally, and that an unknown tag option is reported.
+func TestRecordDecodeOptional(t *testing.T) {
+	r := Record{fields: fields{data: map[string]any{"name": "Mark"}}}
+	value := struct {
+		Name  string `fm:"name,optional"`
+		Notes string `fm:"notes,optional"`
+	}{Notes: "stale"}
+
+	if err := r.Decode(&value); err != nil {
+		t.Fatalf("Decode = %v, want nil for an absent optional field", err)
+	}
+	if value.Name != "Mark" {
+		t.Errorf("Name = %q, want Mark", value.Name)
+	}
+	if value.Notes != "" {
+		t.Errorf("Notes = %q, want it reset to empty", value.Notes)
+	}
+
+	typo := struct {
+		Name string `fm:"name,omitempty"`
+	}{Name: "stale"}
+	err := r.Decode(&typo)
+	if err == nil || !strings.Contains(err.Error(), "omitempty") {
+		t.Errorf("Decode(unknown tag option) = %v, want an error naming the option", err)
+	}
+	if typo.Name != "" {
+		t.Errorf("Name = %q after a decode that rejected its tag, want it reset to empty", typo.Name)
+	}
+}
+
+// TestRecordDecodeNumberIntoString checks that a number field decodes into a
+// string field as its exact text, the common case of a numeric ID read as a
+// string.
+func TestRecordDecodeNumberIntoString(t *testing.T) {
+	r := Record{fields: fields{data: map[string]any{"id": Number("9007199254740993")}}}
+	var value struct {
+		ID string `fm:"id"`
+	}
+	if err := r.Decode(&value); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if value.ID != "9007199254740993" {
+		t.Errorf("ID = %q, want the exact digits", value.ID)
+	}
+}
+
+// TestRecordDecodeErrorNamesRecord checks that a decode error from a record the
+// host returned names that record and its layout, like the errors from
+// record-addressed calls.
+func TestRecordDecodeErrorNamesRecord(t *testing.T) {
+	r := Record{fields: fields{origin: origin{layout: "People", recordID: "9"}, data: map[string]any{"qty": Number("3.7")}}}
+	var value struct {
+		Qty int `fm:"qty"`
+	}
+	err := r.Decode(&value)
+	want := `filemaker: record "9" in layout "People": decode: Qty (fm:"qty"): value is not written as an integer`
+	if err == nil || err.Error() != want {
+		t.Errorf("Decode error = %v\nwant %s", err, want)
+	}
+	if !errors.Is(err, ErrNotInteger) {
+		t.Errorf("errors.Is(err, ErrNotInteger) = false for %v", err)
+	}
+}
+
+// failTransport fails the test on any request, for checks that must reject a
+// call before it reaches the host.
+type failTransport struct{ t *testing.T }
+
+func (f failTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+	return nil, errors.New("unexpected request")
+}
+
+func TestCheckRecord(t *testing.T) {
+	c := &Client{host: "https://fm.example", database: "Sales"}
+	stamped := func(host, database string) Record {
+		return Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}, host: host, database: database}
+	}
+
+	cases := []struct {
+		name string
+		rec  Record
+		ok   bool
+	}{
+		{"same file", stamped("https://fm.example", "Sales"), true},
+		{"same file, spelled differently", stamped("https://FM.example:443", "sales"), true},
+		{"other database", stamped("https://fm.example", "Payroll"), false},
+		{"other host", stamped("https://other.example", "Sales"), false},
+		{"other port", stamped("https://fm.example:8443", "Sales"), false},
+		{"other path on the same origin", stamped("https://fm.example/tenant-b", "Sales"), false},
+		{"no origin", Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}}, false},
+		{"no ID", Record{fields: fields{origin: origin{layout: "People"}}, host: "https://fm.example", database: "Sales"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.checkRecord(tc.rec); (err == nil) != tc.ok {
+				t.Errorf("checkRecord = %v, want ok=%v", err, tc.ok)
+			}
+		})
+	}
+}
+
+func TestRecordFromAnotherDatabase(t *testing.T) {
+	c := &Client{
+		httpClient: &http.Client{Transport: failTransport{t}},
+		host:       "https://fm.example",
+		database:   "Sales",
+		token:      "tok",
+		authSem:    make(chan struct{}, 1),
+	}
+	// Read from another file on the same host: its layout and ID must not be
+	// sent to c's database, where they could name an unrelated record.
+	rec := Record{fields: fields{origin: origin{layout: "People", recordID: "9"}}, modID: "3", host: "https://fm.example", database: "Payroll"}
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"Get": func() error { _, err := c.Get(ctx, rec); return err },
+		"Update": func() error {
+			_, err := c.Update(ctx, rec, FieldData{"Name": "x"}, IfUnchanged())
+			return err
+		},
+		"Delete":    func() error { _, err := c.Delete(ctx, rec); return err },
+		"Duplicate": func() error { _, err := c.Duplicate(ctx, rec); return err },
+		"UploadToContainer": func() error {
+			_, err := c.UploadToContainer(ctx, rec, "Photo", "f.png", strings.NewReader("x"))
+			return err
+		},
+	}
+	for name, call := range calls {
+		err := call()
+		if err == nil {
+			t.Errorf("%s: expected an error for a record from another database", name)
+			continue
 		}
-	})
+		if !strings.Contains(err.Error(), `"Payroll"`) || !strings.Contains(err.Error(), `"Sales"`) {
+			t.Errorf("%s: error %q should name both databases", name, err)
+		}
+	}
 }
