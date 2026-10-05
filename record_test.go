@@ -550,12 +550,16 @@ func TestRecordDecodeErrors(t *testing.T) {
 // offending field is named in one error, and that the fields that can decode are
 // still populated.
 func TestRecordDecodeUnsupportedFieldTypes(t *testing.T) {
-	var value struct {
+	value := struct {
 		Supported string       `fm:"string"`
 		Uint      uint         `fm:"int"`
 		Slice     []string     `fm:"string"`
 		Nested    addressGroup `fm:"string"`
 		Untagged  uint         // no fm tag: not an error
+	}{
+		// Stale values from an earlier decode: the tagged fields must be reset
+		// even though they cannot decode; the untagged one must be left alone.
+		Uint: 7, Slice: []string{"stale"}, Nested: addressGroup{String: "stale"}, Untagged: 9,
 	}
 
 	err := testRecord().Decode(&value)
@@ -576,6 +580,12 @@ func TestRecordDecodeUnsupportedFieldTypes(t *testing.T) {
 	}
 	if value.Supported != "string" {
 		t.Errorf("Supported = %q, want %q: decodable fields must still be set", value.Supported, "string")
+	}
+	if value.Uint != 0 || value.Slice != nil || value.Nested != (addressGroup{}) {
+		t.Errorf("unsupported fields kept stale values: %+v", value)
+	}
+	if value.Untagged != 9 {
+		t.Errorf("Untagged = %d, want 9: untagged fields must be left alone", value.Untagged)
 	}
 }
 
@@ -838,12 +848,15 @@ func TestRecordDecodeOptional(t *testing.T) {
 		t.Errorf("Notes = %q, want it reset to empty", value.Notes)
 	}
 
-	var typo struct {
+	typo := struct {
 		Name string `fm:"name,omitempty"`
-	}
+	}{Name: "stale"}
 	err := r.Decode(&typo)
 	if err == nil || !strings.Contains(err.Error(), "omitempty") {
 		t.Errorf("Decode(unknown tag option) = %v, want an error naming the option", err)
+	}
+	if typo.Name != "" {
+		t.Errorf("Name = %q after a decode that rejected its tag, want it reset to empty", typo.Name)
 	}
 }
 

@@ -581,6 +581,10 @@ func (f fields) Decode(obj any) error {
 // decodeField sets one struct field from the field its `fm` tag names (see
 // Decode for the rules), returning why it could not.
 func (f fields) decodeField(field reflect.Value, tag string) error {
+	// Clear the field before anything can fail, so a reused struct never keeps
+	// an earlier record's value in a field this decode reports.
+	field.Set(reflect.Zero(field.Type()))
+
 	name, opts, _ := strings.Cut(tag, ",")
 	optional := false
 	if opts != "" {
@@ -595,7 +599,6 @@ func (f fields) decodeField(field reflect.Value, tag string) error {
 		return unsupportedTypeError(field.Type())
 	}
 
-	field.Set(reflect.Zero(field.Type()))
 	val, ok := f.data[name]
 	switch {
 	case !ok && optional:
