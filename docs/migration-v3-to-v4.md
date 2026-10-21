@@ -43,7 +43,7 @@ The package name is `filemaker` in both versions.
 
 | v3 | v4 |
 | --- | --- |
-| `fm, err := filemaker.New(host, db, user, pass)` | same call, but **no network yet** — login is lazy |
+| `fm, err := filemaker.New(host, db, user, pass)` | `c, err := filemaker.New(host, db, filemaker.BasicAuth(user, pass))` — **no network yet**, login is lazy |
 | `defer fm.Destroy()` | `defer c.Logout(ctx)` |
 | `fm.Find(layout, NewFindCommand(NewFindRequest(NewFindCriterion("F", "v")).Omit()).Limit(10).Sort("F", filemaker.SortAscending))` | `c.Find(ctx, layout, []filemaker.FindRequest{{Criteria: filemaker.Criteria{"F": "v"}, Omit: true}}, filemaker.WithLimit(10), filemaker.WithSort(filemaker.Asc("F")))` |
 | `rec := fm.NewRecord(layout); rec.Set("F", "v"); rec.Commit()` | `c.Create(ctx, layout, filemaker.FieldData{"F": "v"})` |
@@ -60,7 +60,8 @@ The package name is `filemaker` in both versions.
 
 ### Sessions: `New` / `Destroy` → `New` / `Logout`
 
-`New` keeps the same signature but is now **pure** — it does no network I/O and
+`New` takes the account name and password wrapped in `filemaker.BasicAuth`
+rather than as two strings, and is now **pure** — it does no network I/O and
 its error is cheap argument validation only. The session is established on the
 first operation that needs it (or eagerly with `c.Authenticate(ctx)`).
 
@@ -71,7 +72,7 @@ if err != nil { /* could be a failed login */ }
 defer fm.Destroy()
 
 // v4 — New never logs in; a bad credential surfaces on the first call below.
-c, err := filemaker.New(host, db, user, pass)
+c, err := filemaker.New(host, db, filemaker.BasicAuth(user, pass))
 if err != nil { /* validation only */ }
 defer c.Logout(ctx)
 ```

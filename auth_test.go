@@ -24,7 +24,7 @@ func TestAuthenticate(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
+	c, err := New(srv.URL, "db", BasicAuth("user", "pass"), WithInsecureHTTP())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestLazyAuthOnFirstUse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
+	c, err := New(srv.URL, "db", BasicAuth("user", "pass"), WithInsecureHTTP())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -87,25 +87,110 @@ func TestLazyAuthOnFirstUse(t *testing.T) {
 }
 
 func TestLoginValidation(t *testing.T) {
-	// Authenticating a client with no database or username fails fast with a
-	// clear error, before any network round-trip.
-	if _, err := New("h", "", "u", "p"); err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	// Authenticating a client with no database or no credentials fails fast with
+	// a clear error, before any network round-trip. New allows both, so a client
+	// can still reach the unauthenticated ProductInfo endpoint.
 	for _, tc := range []struct {
-		name           string
-		db, user, pass string
+		name  string
+		db    string
+		creds Credentials
+		want  string
 	}{
-		{"empty database", "", "u", "p"},
-		{"empty username", "db", "", "p"},
+		{"empty database", "", BasicAuth("u", "p"), "no database specified"},
+		{"nil credentials", "db", nil, "no credentials specified"},
 	} {
-		c, err := New("https://example.invalid", tc.db, tc.user, tc.pass)
+		c, err := New("https://example.invalid", tc.db, tc.creds)
 		if err != nil {
 			t.Fatalf("%s: New: %v", tc.name, err)
 		}
-		if err := c.Authenticate(context.Background()); err == nil {
-			t.Errorf("%s: Authenticate returned nil, want error", tc.name)
+		if err := c.Authenticate(context.Background()); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: Authenticate = %v, want error containing %q", tc.name, err, tc.want)
 		}
+	}
+}
+
+func TestBasicAuthValidation(t *testing.T) {
+	// A BasicAuth with no username can never log in, so New rejects it rather
+	// than deferring the failure to the first operation.
+	_, err := New("h", "db", BasicAuth("", "p"))
+	if err == nil || !strings.Contains(err.Error(), "no username specified") {
+		t.Errorf("New with empty username = %v, want error containing %q", err, "no username specified")
+	}
+}
+
+// countingCredentials counts how often the client presents its credentials and
+// fails with err when set, standing in for a login method whose credential is
+// obtained per login.
+type countingCredentials struct {
+	calls atomic.Int32
+	err   error
+}
+
+func (c *countingCredentials) validate() error { return nil }
+
+func (c *countingCredentials) authorize(_ context.Context, h http.Header) error {
+	c.calls.Add(1)
+	if c.err != nil {
+		return c.err
+	}
+	h.Set("Authorization", "Test")
+	return nil
+}
+
+func TestCredentialsPresentedPerLogin(t *testing.T) {
+	// Every login asks the credentials for its headers afresh, re-logins
+	// included, so a credential that expires can be renewed between them.
+	var gotAuth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth.Store(r.Header.Get("Authorization"))
+		writeJSON(w, okSession)
+	}))
+	defer srv.Close()
+
+	creds := &countingCredentials{}
+	c, err := New(srv.URL, "db", creds, WithInsecureHTTP())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := c.Authenticate(context.Background()); err != nil {
+			t.Fatalf("Authenticate: %v", err)
+		}
+	}
+	if n := creds.calls.Load(); n != 2 {
+		t.Errorf("credentials presented %d times, want 2 (once per login)", n)
+	}
+	if got := gotAuth.Load(); got != "Test" {
+		t.Errorf("login auth = %v, want the header the credentials set", got)
+	}
+}
+
+func TestCredentialsErrorAbortsLogin(t *testing.T) {
+	// Credentials that cannot be presented fail the login before any request is
+	// sent, and the caller sees their error unchanged.
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		writeJSON(w, okSession)
+	}))
+	defer srv.Close()
+
+	wantErr := errors.New("token unavailable")
+	c, err := New(srv.URL, "db", &countingCredentials{err: wantErr}, WithInsecureHTTP())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := c.Authenticate(context.Background()); !errors.Is(err, wantErr) {
+		t.Errorf("Authenticate = %v, want %v", err, wantErr)
+	}
+	if _, err := c.Databases(context.Background()); !errors.Is(err, wantErr) {
+		t.Errorf("Databases = %v, want %v", err, wantErr)
+	}
+	if n := requests.Load(); n != 0 {
+		t.Errorf("requests sent = %d, want 0", n)
+	}
+	if c.token != "" {
+		t.Errorf("token = %q, want none after a failed login", c.token)
 	}
 }
 
@@ -115,7 +200,7 @@ func TestAuthenticateError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "db", "user", "bad", WithInsecureHTTP())
+	c, err := New(srv.URL, "db", BasicAuth("user", "bad"), WithInsecureHTTP())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -227,7 +312,7 @@ func TestLogoutNoSession(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
+	c, err := New(srv.URL, "db", BasicAuth("user", "pass"), WithInsecureHTTP())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -69,7 +69,7 @@ func (d *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // redactAuth masks the value of any Authorization header in a request dump, so
-// neither the Basic-auth credentials sent on login nor the session Bearer token
+// neither the BasicAuth credentials sent on login nor the session Bearer token
 // are ever written to the debug log.
 func redactAuth(dump []byte) []byte {
 	return authHeaderLine.ReplaceAll(dump, []byte("${1} REDACTED"))

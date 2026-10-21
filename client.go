@@ -30,8 +30,7 @@ type Client struct {
 	httpClient           *http.Client
 	host                 string
 	database             string
-	username             string
-	password             string
+	credentials          Credentials // nil: no account; only unauthenticated endpoints work
 	reauthOnInvalidToken bool
 	idleTimeout          time.Duration // > 0 enables proactive (idle) reauth
 	location             *time.Location
@@ -123,9 +122,9 @@ func WithReauthOnIdle(timeout ...time.Duration) Option {
 }
 
 // WithInsecureHTTP permits the client to connect to a host over plaintext
-// http://. This sends the credentials and session token unencrypted and must
-// only be used for local development or testing against a trusted host. Without
-// it, New rejects any host whose scheme is not https.
+// http://. This sends the login credentials and session token unencrypted and
+// must only be used for local development or testing against a trusted host.
+// Without it, New rejects any host whose scheme is not https.
 func WithInsecureHTTP() Option {
 	return func(c *config) {
 		c.allowInsecureHTTP = true
@@ -137,7 +136,7 @@ func WithInsecureHTTP() Option {
 // headers, and body — written to w. Pass nil to write to os.Stderr.
 //
 // Treat the output as a secret. Authorization headers are masked, so the
-// Basic-auth credentials never reach the log, but everything else is printed
+// BasicAuth credentials never reach the log, but everything else is printed
 // verbatim: record data, and the session token, which appears both in the login
 // response body and in the logout request URI. That token stays valid until it
 // is logged out or the session sits idle, so a log captured mid-session carries
@@ -181,23 +180,35 @@ func WithDateFormat(format DateFormat) Option {
 	}
 }
 
-// New builds a client for the given host and credentials. It performs no
-// network I/O: the session is established lazily, on the first operation that
-// needs it (or eagerly via Authenticate). The errors it returns are therefore
-// cheap argument/host validation, never a failed login.
+// New builds a client for the given host, database, and credentials, which
+// determine how the client logs in (see Credentials):
 //
-// Only host is required here. database and username are validated when a session
-// is actually established (see login), so a client may be built with neither to
-// reach the unauthenticated, database-agnostic ProductInfo endpoint; any
-// authenticated or database-scoped operation then fails fast with a clear error.
+//	c, err := filemaker.New(host, "MyDatabase", filemaker.BasicAuth("user", "pass"))
+//
+// New performs no network I/O: the session is established lazily, on the first
+// operation that needs it (or eagerly via Authenticate). The errors it returns
+// are therefore cheap argument/host validation, never a failed login.
+//
+// Only host is required here. database and credentials are required when a
+// session is actually established (see login), so a client may be built with
+// neither — an empty database and nil credentials — to reach the
+// unauthenticated, database-agnostic ProductInfo endpoint; any authenticated or
+// database-scoped operation then fails fast with a clear error. Credentials that
+// are passed are checked here, so an incomplete value, such as a BasicAuth with
+// no username, is an error from New.
 //
 // The host may include a scheme; if it does not, https is assumed. Plaintext
 // http is rejected unless WithInsecureHTTP is passed, and any scheme other than
 // http or https is rejected outright. The host must not carry credentials
-// ("https://user:pass@host"); pass them as username and password.
-func New(host, database, username, password string, opts ...Option) (*Client, error) {
+// ("https://user:pass@host"); pass them as credentials.
+func New(host, database string, credentials Credentials, opts ...Option) (*Client, error) {
 	if host == "" {
 		return nil, errors.New("filemaker: no host specified")
+	}
+	if credentials != nil {
+		if err := credentials.validate(); err != nil {
+			return nil, err
+		}
 	}
 
 	cfg := config{timeout: 30 * time.Second, location: time.UTC}
@@ -238,8 +249,7 @@ func New(host, database, username, password string, opts ...Option) (*Client, er
 		httpClient:           httpClient,
 		host:                 normalizedHost,
 		database:             database,
-		username:             username,
-		password:             password,
+		credentials:          credentials,
 		reauthOnInvalidToken: cfg.reauthOnInvalidToken,
 		idleTimeout:          cfg.idleTimeout,
 		location:             cfg.location,
@@ -266,7 +276,7 @@ func normalizeHost(host string, allowInsecureHTTP bool) (string, error) {
 	}
 	if u.User != nil {
 		// The message leaves the host out: it carries the credentials.
-		return "", errors.New("filemaker: host must not include a username or password; pass them to New")
+		return "", errors.New("filemaker: host must not include a username or password; pass them to New as Credentials")
 	}
 
 	switch u.Scheme {
@@ -321,7 +331,7 @@ func sameServer(a, b string) bool {
 
 // sameOriginRedirects returns a CheckRedirect policy that refuses any redirect
 // hop leaving base's origin. Every request carries a secret in its
-// Authorization header — the Basic credentials on login, the bearer token
+// Authorization header — the credentials on login, the bearer token
 // otherwise — and net/http re-sends it on redirect whenever the target's
 // hostname is the original's or a subdomain of it, ignoring scheme and port. So
 // a hop to sub.host, to host:8443, or down to http://host would all receive it.
@@ -457,7 +467,7 @@ func (c *Client) attempt(ctx context.Context, method, url, contentType string, b
 
 // send performs one round-trip: it sends req, reads and decodes the response
 // into out, and reports any host error. It holds no locks and sets no auth
-// headers, so it is shared by both login (Basic auth) and do (Bearer).
+// headers, so it is shared by both login (Credentials) and do (Bearer).
 func (c *Client) send(req *http.Request, out *responseBody) error {
 	res, err := c.httpClient.Do(req)
 	if err != nil {

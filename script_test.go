@@ -150,7 +150,7 @@ func TestRunScriptMissingScript(t *testing.T) {
 }
 
 func TestRunScriptValidation(t *testing.T) {
-	c, _ := New("https://example.com", "db", "user", "pass")
+	c, _ := New("https://example.com", "db", BasicAuth("user", "pass"))
 	tests := []struct {
 		name   string
 		layout string

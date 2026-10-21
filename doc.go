@@ -7,17 +7,19 @@
 //
 // # Client lifecycle
 //
-// [New] performs no network I/O — its only error is cheap argument validation.
-// The session is established lazily on the first operation that needs it, or
-// eagerly with [Client.Authenticate]. [Client.Logout] ends the session, but the
-// client stays usable: a later operation re-authenticates. Token refresh is
+// [New] takes the database and the [Credentials] the client logs in with —
+// [BasicAuth] for a FileMaker account name and password. It performs no network
+// I/O — its only error is cheap argument validation. The session is established
+// lazily on the first operation that needs it, or eagerly with
+// [Client.Authenticate]. [Client.Logout] ends the session, but the client stays
+// usable: a later operation re-authenticates. Token refresh is
 // opt-in via [WithReauthOnInvalidToken] (reactive, on a 952) and
 // [WithReauthOnIdle] (proactive, before an idle request). The reactive trigger
 // needs a host error code to recognise, so it covers every operation except
 // container downloads, whose streaming endpoint reports only an HTTP status; see
 // [Client.DownloadFromContainerByURL].
 //
-//	c, err := filemaker.New("https://fms.example.com", "MyDatabase", "user", "pass")
+//	c, err := filemaker.New("https://fms.example.com", "MyDatabase", filemaker.BasicAuth("user", "pass"))
 //	if err != nil {
 //	    return err
 //	}

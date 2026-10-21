@@ -37,7 +37,7 @@ func main() {
 	ctx := context.Background()
 
 	// New does no network I/O — the session is established on first use.
-	c, err := filemaker.New("https://fms.example.com", "MyDatabase", "user", "pass")
+	c, err := filemaker.New("https://fms.example.com", "MyDatabase", filemaker.BasicAuth("user", "pass"))
 	if err != nil {
 		log.Fatal(err)
 	}

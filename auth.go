@@ -93,16 +93,19 @@ func (c *Client) Logout(ctx context.Context) error {
 	return nil
 }
 
-// login performs a Basic-auth login and returns a fresh session token. The
-// session is database-scoped, so both database and username are required here;
-// New defers their validation to this point so a credential-free client can
-// still reach the unauthenticated ProductInfo endpoint.
+// login opens a session with the client's credentials and returns its token.
+// The session is database-scoped, so a database and credentials are both
+// required here; New defers that check to this point so a credential-free
+// client can still reach the unauthenticated ProductInfo endpoint.
+//
+// Every login method shares this request — the same endpoint and empty JSON
+// body — and differs only in the headers the credentials set on it.
 func (c *Client) login(ctx context.Context) (string, error) {
 	switch {
 	case c.database == "":
 		return "", errors.New("filemaker: no database specified")
-	case c.username == "":
-		return "", errors.New("filemaker: no username specified")
+	case c.credentials == nil:
+		return "", errors.New("filemaker: no credentials specified")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL()+"/sessions", bytes.NewReader([]byte("{}")))
@@ -110,7 +113,9 @@ func (c *Client) login(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("filemaker: failed to build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Basic "+basicAuth(c.username, c.password))
+	if err := c.credentials.authorize(ctx, req.Header); err != nil {
+		return "", err
+	}
 
 	var rb responseBody
 	if err := c.send(req, &rb); err != nil {
@@ -159,7 +164,47 @@ func (c *Client) authenticate(ctx context.Context, observedToken string) error {
 	return nil
 }
 
-// basicAuth builds the value for an HTTP Basic Authorization header.
-func basicAuth(username, password string) string {
-	return base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+// Credentials is how a client proves who it is when it opens a session. Build
+// one with BasicAuth and pass it to New; pass nil instead for a client that only
+// calls the endpoints that need no account, such as ProductInfo.
+//
+// The client presents its credentials on every login — the first, and each
+// re-authentication after the session expires — and to Databases, which takes
+// account credentials rather than a session token.
+//
+// The interface is sealed: the login methods the Data API accepts are a fixed
+// set, and each has its constructor in this package.
+type Credentials interface {
+	// validate reports whether the credentials are complete enough to log in
+	// with. New calls it, so an incomplete value fails at construction rather
+	// than on first use.
+	validate() error
+
+	// authorize sets the headers that carry the credentials on a request. It
+	// runs once per request, with that request's context, so a credential that
+	// has to be fetched or renewed can be obtained at that point.
+	authorize(ctx context.Context, h http.Header) error
+}
+
+// BasicAuth returns credentials that log in with a FileMaker account name and
+// password, sent as HTTP Basic authentication. username must not be empty.
+func BasicAuth(username, password string) Credentials {
+	return basicAuth{username: username, password: password}
+}
+
+// basicAuth is the Credentials returned by BasicAuth.
+type basicAuth struct {
+	username, password string
+}
+
+func (b basicAuth) validate() error {
+	if b.username == "" {
+		return errors.New("filemaker: no username specified")
+	}
+	return nil
+}
+
+func (b basicAuth) authorize(_ context.Context, h http.Header) error {
+	h.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(b.username+":"+b.password)))
+	return nil
 }

@@ -67,7 +67,7 @@ func TestProductInfoWithoutCredentials(t *testing.T) {
 
 	// A client built with neither database nor username can still reach the
 	// unauthenticated ProductInfo endpoint.
-	c, err := New(srv.URL, "", "", "", WithInsecureHTTP())
+	c, err := New(srv.URL, "", nil, WithInsecureHTTP())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestDatabasesWithoutCredentials(t *testing.T) {
 
 	// A credential-free client sends no Authorization header, which works against
 	// a host that has "Filter Databases in Client Applications" disabled.
-	c, err := New(srv.URL, "", "", "", WithInsecureHTTP())
+	c, err := New(srv.URL, "", nil, WithInsecureHTTP())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestLayoutMetadataWithValueListRecordID(t *testing.T) {
 }
 
 func TestLayoutMetadataValidation(t *testing.T) {
-	c, _ := New("https://example.com", "db", "user", "pass")
+	c, _ := New("https://example.com", "db", BasicAuth("user", "pass"))
 	if _, err := c.LayoutMetadata(context.Background(), ""); err == nil {
 		t.Error("expected error for empty layout")
 	}

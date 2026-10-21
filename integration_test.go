@@ -196,7 +196,7 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	}
 
-	c, err := New(itHost, itDatabase, itUsername, itPassword, itClientOptions()...)
+	c, err := New(itHost, itDatabase, BasicAuth(itUsername, itPassword), itClientOptions()...)
 	if err != nil {
 		// A construction error is a configuration mistake, not a test failure;
 		// fail loudly so it is not mistaken for "no server".
@@ -244,7 +244,7 @@ func itClientOptions(extra ...Option) []Option {
 // not matter.
 func buildITClient(t *testing.T, extra ...Option) *Client {
 	t.Helper()
-	c, err := New(itHost, itDatabase, itUsername, itPassword, itClientOptions(extra...)...)
+	c, err := New(itHost, itDatabase, BasicAuth(itUsername, itPassword), itClientOptions(extra...)...)
 	if err != nil {
 		t.Fatalf("New (sibling client): %v", err)
 	}
@@ -1700,7 +1700,7 @@ func invalidateSession(t *testing.T, c *Client) string {
 	// A throwaway client carries the borrowed token to Logout, which issues
 	// DELETE /sessions/{token}. New performs no network I/O, so it opens no
 	// session of its own; the token is set directly (single-goroutine test).
-	killer, err := New(itHost, itDatabase, itUsername, itPassword, itBaseOptions()...)
+	killer, err := New(itHost, itDatabase, BasicAuth(itUsername, itPassword), itBaseOptions()...)
 	if err != nil {
 		t.Fatalf("New (killer): %v", err)
 	}
@@ -1724,7 +1724,7 @@ func TestIntegrationReauthOnInvalidToken(t *testing.T) {
 
 	// Control: no reauth option, so a dead token surfaces as ErrInvalidToken.
 	// This also confirms the out-of-band logout genuinely invalidated the token.
-	plain, err := New(itHost, itDatabase, itUsername, itPassword, itBaseOptions()...)
+	plain, err := New(itHost, itDatabase, BasicAuth(itUsername, itPassword), itBaseOptions()...)
 	if err != nil {
 		t.Fatalf("New (plain): %v", err)
 	}

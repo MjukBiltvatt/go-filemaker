@@ -129,23 +129,25 @@ type LayoutMetadataResponse struct {
 // client's database, establishes no session, and does not update LastActivity.
 //
 // Authentication is conditional on the host's "Filter Databases in Client
-// Applications" setting. When enabled, the host requires HTTP Basic credentials
+// Applications" setting. When enabled, the host requires account credentials
 // and returns only the databases the account may access; when disabled, no
-// credentials are needed and every hosted database is listed. The endpoint uses
-// Basic auth with the raw account credentials, not a session token, so Databases
-// sends the client's username/password whenever a username is set — covering the
-// enabled case — while a client built without credentials can still call it
-// against a host that has filtering disabled.
+// credentials are needed and every hosted database is listed. The endpoint takes
+// the client's Credentials directly, not a session token, so Databases sends
+// them whenever the client has any — covering the enabled case — while a client
+// built with nil credentials can still call it against a host that has
+// filtering disabled.
 func (c *Client) Databases(ctx context.Context) (DatabasesResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiURL()+"/databases", nil)
 	if err != nil {
 		return DatabasesResponse{}, fmt.Errorf("filemaker: failed to build request: %w", err)
 	}
-	// Basic auth (not the session bearer token) per the endpoint's spec; sent
-	// only when credentials exist, so a credential-free client still works
-	// against a host with database filtering disabled.
-	if c.username != "" {
-		req.Header.Set("Authorization", "Basic "+basicAuth(c.username, c.password))
+	// The account credentials (not the session bearer token) per the endpoint's
+	// spec; sent only when the client has them, so a credential-free client
+	// still works against a host with database filtering disabled.
+	if c.credentials != nil {
+		if err := c.credentials.authorize(ctx, req.Header); err != nil {
+			return DatabasesResponse{}, err
+		}
 	}
 
 	var rb responseBody

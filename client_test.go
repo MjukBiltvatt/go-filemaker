@@ -23,13 +23,12 @@ func writeJSON(w http.ResponseWriter, body string) {
 // testClient builds a Client pointed at srv with a known token, bypassing New.
 func testClient(srv *httptest.Server) *Client {
 	return &Client{
-		httpClient: redirectGuarded(srv.Client(), srv.URL),
-		host:       srv.URL,
-		database:   "db",
-		username:   "user",
-		password:   "pass",
-		token:      "tok",
-		authSem:    make(chan struct{}, 1),
+		httpClient:  redirectGuarded(srv.Client(), srv.URL),
+		host:        srv.URL,
+		database:    "db",
+		credentials: BasicAuth("user", "pass"),
+		token:       "tok",
+		authSem:     make(chan struct{}, 1),
 	}
 }
 
@@ -162,7 +161,7 @@ func TestRedirectsStayOnOrigin(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
+	c, err := New(srv.URL, "db", BasicAuth("user", "pass"), WithInsecureHTTP())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -210,7 +209,7 @@ func TestNew(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP())
+	c, err := New(srv.URL, "db", BasicAuth("user", "pass"), WithInsecureHTTP())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -226,14 +225,14 @@ func TestNew(t *testing.T) {
 }
 
 func TestNewValidation(t *testing.T) {
-	if _, err := New("", "db", "u", "p"); err == nil {
+	if _, err := New("", "db", BasicAuth("u", "p")); err == nil {
 		t.Error("expected error for empty host")
 	}
-	// database and username are no longer validated at construction: a
+	// database and credentials are not required at construction: a
 	// credential-free client is allowed so it can reach ProductInfo. They are
 	// instead enforced when a session is established (see TestLoginValidation).
-	if _, err := New("h", "", "", ""); err != nil {
-		t.Errorf("New with empty database/username: %v, want nil", err)
+	if _, err := New("h", "", nil); err != nil {
+		t.Errorf("New with empty database and nil credentials: %v, want nil", err)
 	}
 }
 
@@ -712,7 +711,7 @@ func TestConcurrentDo(t *testing.T) {
 }
 
 func TestWithDateFormatWiring(t *testing.T) {
-	c, err := New("https://example.com", "db", "user", "pass", WithDateFormat(DateFormatISO))
+	c, err := New("https://example.com", "db", BasicAuth("user", "pass"), WithDateFormat(DateFormatISO))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -721,7 +720,7 @@ func TestWithDateFormatWiring(t *testing.T) {
 	}
 
 	// Unset (nil) by default.
-	d, err := New("https://example.com", "db", "user", "pass")
+	d, err := New("https://example.com", "db", BasicAuth("user", "pass"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -735,7 +734,7 @@ func TestWithDateFormatWiring(t *testing.T) {
 // parameter) while writing another (the wrappers fall back to US).
 func TestWithDateFormatRejectsUnsupported(t *testing.T) {
 	for _, format := range []DateFormat{1, 3, -1} {
-		c, err := New("https://example.com", "db", "user", "pass", WithDateFormat(format))
+		c, err := New("https://example.com", "db", BasicAuth("user", "pass"), WithDateFormat(format))
 		if err == nil {
 			t.Errorf("New with DateFormat(%d) = nil error, want error", format)
 		}

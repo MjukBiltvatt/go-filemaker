@@ -22,7 +22,7 @@ func TestWithDebugLogsAndRedacts(t *testing.T) {
 	defer srv.Close()
 
 	var buf bytes.Buffer
-	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP(), WithDebug(&buf))
+	c, err := New(srv.URL, "db", BasicAuth("user", "pass"), WithInsecureHTTP(), WithDebug(&buf))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestWithDebugPreservesRequestBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "db", "user", "pass", WithInsecureHTTP(), WithDebug(&bytes.Buffer{}))
+	c, err := New(srv.URL, "db", BasicAuth("user", "pass"), WithInsecureHTTP(), WithDebug(&bytes.Buffer{}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
