@@ -55,6 +55,14 @@ type scriptCall struct {
 	param string
 }
 
+// fail records a deferred option error. The first one wins, matching how the
+// checks that run after resolution report the first problem they find.
+func (p *params) fail(err error) {
+	if p.err == nil {
+		p.err = err
+	}
+}
+
 // updatePortalRange applies fn to the range for the named portal, creating the
 // map and entry on first use. Map values are not addressable, so it reads,
 // mutates, and writes back.

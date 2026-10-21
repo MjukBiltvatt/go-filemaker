@@ -2,6 +2,7 @@ package filemaker
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,5 +128,27 @@ func TestDeferredOptionErrorBeatsUnresolvableModID(t *testing.T) {
 				t.Errorf("error = %q, want %q", err.Error(), want)
 			}
 		})
+	}
+}
+
+// TestEmptyModIDSurvivesLaterModID pins that an empty WithModID is reported even
+// when a later WithModID supplies a value: the later call replaces the mod ID but
+// does not clear the earlier mistake.
+func TestEmptyModIDSurvivesLaterModID(t *testing.T) {
+	_, err := resolveOptions([]UpdateOption{WithModID(""), WithModID("3")}, UpdateOption.applyUpdate)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+// TestFailKeepsFirstError pins that the first deferred option error wins over
+// later ones.
+func TestFailKeepsFirstError(t *testing.T) {
+	first, second := errors.New("first"), errors.New("second")
+	var p params
+	p.fail(first)
+	p.fail(second)
+	if p.err != first {
+		t.Errorf("err = %v, want %v", p.err, first)
 	}
 }

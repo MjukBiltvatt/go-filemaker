@@ -150,7 +150,8 @@ func (o option) applyUpload(c *params)    { o(c) }
 // the record you are writing, prefer IfUnchanged. Accepted by Update and
 // UploadToContainer.
 //
-// It sets a single mod ID; calling WithModID again keeps only the last value.
+// It sets a single mod ID; calling WithModID again keeps only the last value,
+// though an empty one is still reported even if a later call supplies a value.
 // (Combining it with IfUnchanged is a documented exception, not a duplicate: the
 // explicit version from WithModID is used regardless of order.)
 //
@@ -160,7 +161,7 @@ func (o option) applyUpload(c *params)    { o(c) }
 func WithModID(modID string) ConcurrencyOption {
 	return option(func(c *params) {
 		if modID == "" {
-			c.err = errors.New("filemaker: WithModID requires a non-empty mod ID")
+			c.fail(errors.New("filemaker: WithModID requires a non-empty mod ID"))
 			return
 		}
 		c.conditional = true
