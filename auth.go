@@ -67,10 +67,15 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 // steps are best-effort: a failed refresh falls through to the attempt, which
 // surfaces any real error, and a failed logout (typically 952 because the old
 // session had already expired) leaves nothing more to do.
+//
+// The logout ignores the caller's cancellation: once the login has replaced the
+// token, nothing else will end the old session, so abandoning the DELETE would
+// leave it holding one of the host's sessions until it times out. The DELETE is
+// still bounded by the client's request timeout (WithTimeout).
 func (c *Client) refreshIdle(ctx context.Context) {
 	replaced, err := c.authenticateIf(ctx, func(string) bool { return c.idle() })
 	if err == nil && replaced != "" {
-		_ = c.endSession(ctx, replaced)
+		_ = c.endSession(context.WithoutCancel(ctx), replaced)
 	}
 }
 
