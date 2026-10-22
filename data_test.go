@@ -812,6 +812,102 @@ func TestUpdateByRecordPortalDataWithIfUnchanged(t *testing.T) {
 	}
 }
 
+// TestUpdateWithDeleteRelated checks that WithDeleteRelated sends each record
+// as "TableOccurrence.recordId" in fieldData.deleteRelated — a string for one
+// record, a list for several — alongside the request's own field data, whether
+// the records are written out or taken from rows read through a portal.
+func TestUpdateWithDeleteRelated(t *testing.T) {
+	var sent string
+	c := &Client{
+		httpClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			b, _ := io.ReadAll(r.Body)
+			sent = string(b)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"response":{"modId":"5"},"messages":[{"code":"0","message":"OK"}]}`)),
+				Request:    r,
+			}, nil
+		})},
+		host:     "https://fm.example",
+		database: "Sales",
+		token:    "tok",
+		authSem:  make(chan struct{}, 1),
+	}
+	ctx := context.Background()
+
+	if _, err := c.UpdateByID(ctx, "People", "9", nil, WithDeleteRelated(RelatedRecord{Table: "Lines", ID: "5"})); err != nil {
+		t.Fatalf("UpdateByID(one record): %v", err)
+	}
+	if !strings.Contains(sent, `"fieldData":{"deleteRelated":"Lines.5"}`) {
+		t.Errorf("body = %s, want deleteRelated \"Lines.5\"", sent)
+	}
+
+	rec := readBy(c, Record{
+		fields: fields{origin: origin{layout: "People", recordID: "9"}},
+		modID:  "3",
+		portalData: map[string][]map[string]any{
+			"Orders": {{"recordId": "70", "modId": "1"}, {"recordId": "71", "modId": "1"}},
+		},
+		portalInfo: map[string]PortalDataInfo{"Orders": {Table: "Orders"}},
+	})
+	orders := rec.Portal("Orders")
+	del := WithDeleteRelated(orders[1].RelatedRecord(), RelatedRecord{Table: "Lines", ID: "5"}, orders[0].RelatedRecord())
+	if _, err := c.Update(ctx, rec, FieldData{"Name": "Jane"}, del, IfUnchanged()); err != nil {
+		t.Fatalf("Update(several records): %v", err)
+	}
+	for _, want := range []string{`"deleteRelated":["Orders.71","Lines.5","Orders.70"]`, `"Name":"Jane"`, `"modId":"3"`} {
+		if !strings.Contains(sent, want) {
+			t.Errorf("body = %s, want %s", sent, want)
+		}
+	}
+
+	// A later call replaces the records; none at all sends no directive.
+	if _, err := c.UpdateByID(ctx, "People", "9", FieldData{"Name": "Jane"}, del, WithDeleteRelated()); err != nil {
+		t.Fatalf("UpdateByID(replaced by no records): %v", err)
+	}
+	if strings.Contains(sent, "deleteRelated") {
+		t.Errorf("body = %s, want no deleteRelated once a later call passes no records", sent)
+	}
+}
+
+// TestDeleteRelatedRejected checks the records WithDeleteRelated refuses before
+// any request is sent, and its refusal of field data that sets the directive
+// itself.
+func TestDeleteRelatedRejected(t *testing.T) {
+	c := &Client{
+		httpClient: &http.Client{Transport: failTransport{t}},
+		host:       "https://fm.example",
+		database:   "Sales",
+		token:      "tok",
+		authSem:    make(chan struct{}, 1),
+	}
+	ctx := context.Background()
+	ok := RelatedRecord{Table: "Lines", ID: "5"}
+
+	cases := []struct {
+		name   string
+		record RelatedRecord
+		want   string
+	}{
+		{"no table", RelatedRecord{ID: "6"}, `record 1 (ID "6") has no Table`},
+		{"no ID", RelatedRecord{Table: "Lines"}, `record 1 (table "Lines") has no ID`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := c.UpdateByID(ctx, "People", "9", nil, WithDeleteRelated(ok, tc.record))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("UpdateByID err = %v, want one containing %q", err, tc.want)
+			}
+		})
+	}
+
+	fields := FieldData{"deleteRelated": "Lines.6"}
+	if _, err := c.UpdateByID(ctx, "People", "9", fields, WithDeleteRelated(ok)); err == nil || !strings.Contains(err.Error(), `has a "deleteRelated" key`) {
+		t.Errorf("UpdateByID(deleteRelated in both forms) err = %v, want a conflict error", err)
+	}
+}
+
 func TestDeleteByID(t *testing.T) {
 	var mu sync.Mutex
 	var gotMethod, gotPath string

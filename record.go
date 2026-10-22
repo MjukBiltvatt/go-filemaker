@@ -123,6 +123,9 @@ func (r Record) Portal(name string) []PortalRow {
 	if !ok {
 		return nil
 	}
+	// A row's RelatedRecord names it by the table occurrence the portal shows,
+	// which only the host's portal info names.
+	table := r.portalInfo[name].Table
 	out := make([]PortalRow, len(rows))
 	for i, row := range rows {
 		// The host sends a row's record and mod IDs as plain "recordId" and
@@ -140,6 +143,7 @@ func (r Record) Portal(name string) []PortalRow {
 				loc:    r.loc,
 			},
 			modID: modID,
+			table: table,
 		}
 	}
 	return out
@@ -163,13 +167,15 @@ func (r Record) PortalDataInfo() map[string]PortalDataInfo {
 //
 // A PortalRow is not a Record, so it cannot be passed to the methods that
 // address a record (Update, Delete, …): its ID belongs to a record in the
-// portal's table, not the layout's. Edit it through the parent record's Update
-// with WithPortalData, as a PortalRowData carrying the row's ID (and its ModID to
-// lock the edit).
+// portal's table, not the layout's. Write it through the parent record's Update
+// instead: edit it with WithPortalData, as a PortalRowData carrying the row's ID
+// (and its ModID to lock the edit), and delete it with WithDeleteRelated, passing
+// its RelatedRecord.
 type PortalRow struct {
 	fields // the field values, and the portal, row and record that name them
 
 	modID string
+	table string // the table occurrence the portal shows, from the host's portal info
 }
 
 // ID returns the related record's internal FileMaker record ID.
@@ -177,6 +183,15 @@ func (p PortalRow) ID() string { return p.rowID }
 
 // ModID returns the related record's modification ID.
 func (p PortalRow) ModID() string { return p.modID }
+
+// RelatedRecord returns the related record the row shows, named by the table
+// occurrence its portal shows and its ID, for WithDeleteRelated. The table
+// occurrence comes from the host's portal info for the row's portal
+// (PortalDataInfo.Table); without it, Table is empty and WithDeleteRelated
+// reports the record rather than sending it.
+func (p PortalRow) RelatedRecord() RelatedRecord {
+	return RelatedRecord{Table: p.table, ID: p.rowID}
+}
 
 // origin names the record or portal row a set of field values was read from,
 // so an error reading them can say which one it concerns. The zero value names

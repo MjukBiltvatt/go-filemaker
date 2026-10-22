@@ -159,6 +159,13 @@ _, err := c.Update(ctx, rec, nil, filemaker.WithPortalData(filemaker.PortalData{
 }))
 ```
 
+To delete related records, pass them to `WithDeleteRelated` on an `Update`, each named by table occurrence and record ID — a row read through a portal gives its own:
+
+```go
+_, err := c.Update(ctx, rec, nil, filemaker.WithDeleteRelated(line.RelatedRecord()))
+_, err = c.UpdateByID(ctx, "Invoices", "9", nil, filemaker.WithDeleteRelated(filemaker.RelatedRecord{Table: "Lines", ID: "5"}))
+```
+
 `Decode` maps a record's `fm`-tagged fields onto a struct (it is **not** recursive — decode nested structs explicitly):
 
 ```go

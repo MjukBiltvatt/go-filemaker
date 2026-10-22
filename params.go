@@ -18,6 +18,9 @@ type params struct {
 	modID       string
 	portalData  PortalData
 
+	// deleteRelated is the related records an Update deletes (WithDeleteRelated).
+	deleteRelated []RelatedRecord
+
 	// Data-entry behavior on Create/Update (the body "options" object).
 	entryMode    EntryMode
 	prohibitMode EntryMode

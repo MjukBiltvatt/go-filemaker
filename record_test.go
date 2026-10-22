@@ -413,6 +413,26 @@ func TestRecordPortal(t *testing.T) {
 	}
 }
 
+// TestPortalRowRelatedRecord checks that a row names its related record by the
+// table occurrence its portal shows — not the portal's object name — and that a
+// portal without the host's portal info leaves the table empty.
+func TestPortalRowRelatedRecord(t *testing.T) {
+	rec := Record{
+		fields: fields{origin: origin{layout: "Invoices", recordID: "9"}},
+		portalData: map[string][]map[string]any{
+			"NamedLines": {{"recordId": "5", "modId": "2"}},
+			"Notes":      {{"recordId": "8", "modId": "1"}},
+		},
+		portalInfo: map[string]PortalDataInfo{"NamedLines": {Table: "Lines"}},
+	}
+	if got, want := rec.Portal("NamedLines")[0].RelatedRecord(), (RelatedRecord{Table: "Lines", ID: "5"}); got != want {
+		t.Errorf("NamedLines row RelatedRecord() = %+v, want %+v", got, want)
+	}
+	if got, want := rec.Portal("Notes")[0].RelatedRecord(), (RelatedRecord{ID: "8"}); got != want {
+		t.Errorf("Notes row RelatedRecord() = %+v, want %+v (no portal info, no table)", got, want)
+	}
+}
+
 func TestRecordTimeLocation(t *testing.T) {
 	loc := time.FixedZone("TEST", 2*60*60) // +02:00
 

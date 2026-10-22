@@ -246,20 +246,15 @@ func (pd PortalData) check(create bool) error {
 }
 
 // WithPortalData attaches related-record data to a Create or Update, applied by
-// the host alongside the field-data patch (see PortalData and PortalRowData).
-// On a Create every row is added as a new related record, so a row with an ID
-// is an error. On an Update a row with an ID edits that related record, and a
-// row without one adds a new related record.
+// the host alongside the field-data patch (see PortalData and PortalRowData). It
+// adds and edits related records: on a Create every row is added as a new
+// related record, so a row with an ID is an error. On an Update a row with an ID
+// edits that related record, and a row without one adds a new related record.
 //
-// Only the listed rows are touched; rows you omit are left unchanged. To
-// remove related records, set "deleteRelated" in the FieldData patch to
-// "TableOccurrence.recordId" (e.g. "Orders.3", or a slice for several): it is a
-// field-data directive, not a portal edit. It names the table occurrence the
-// portal shows (PortalDataInfo.Table), even for a portal with an object name,
-// whose name the host refuses there with code 110 ("Related tables are
-// missing"). To edit only portals and leave the record's own fields untouched,
-// pass a nil or empty FieldData. See the Claris Data API guide's "Edit record"
-// page.
+// Only the listed rows are touched; rows you omit are left unchanged. To delete
+// related records, use WithDeleteRelated. To edit only portals and leave the
+// record's own fields untouched, pass a nil or empty FieldData. See the Claris
+// Data API guide's "Edit record" page.
 //
 // It sets a single portal-data object; calling WithPortalData again replaces it
 // rather than merging — pass all the portals and rows in one call. The rows are
@@ -269,6 +264,69 @@ func WithPortalData(portals PortalData) WriteOption {
 	return option(func(c *params) {
 		c.portalData = portals
 	})
+}
+
+// RelatedRecord names a record in a related table, as the Data API's
+// deleteRelated directive does: Table is the table occurrence the parent
+// record's layout relates it through (PortalDataInfo.Table for a portal showing
+// it), and ID is its record ID. It is the value type for WithDeleteRelated; for
+// a row read through Record.Portal, PortalRow.RelatedRecord returns one.
+//
+// Table is always a table-occurrence name, never a portal's object name: the
+// host refuses an object name there with code 110 ("Related tables are
+// missing").
+type RelatedRecord struct {
+	Table string
+	ID    string
+}
+
+// WithDeleteRelated deletes related records with an Update — the Data API's
+// deleteRelated directive. Each RelatedRecord is deleted from its table; records
+// in different tables may be mixed. Other related records are left unchanged,
+// and the request's field data and portal data still apply.
+//
+//	_, err := c.UpdateByID(ctx, "Invoices", "9", nil,
+//	    filemaker.WithDeleteRelated(filemaker.RelatedRecord{Table: "Lines", ID: "5"}))
+//
+// For rows read through Record.Portal, pass their PortalRow.RelatedRecord, which
+// carries the table occurrence the portal shows:
+//
+//	lines := rec.Portal("Lines")
+//	_, err := c.Update(ctx, rec, nil,
+//	    filemaker.WithDeleteRelated(lines[1].RelatedRecord(), lines[3].RelatedRecord()))
+//
+// The records are checked when the request is built: each needs a Table and an
+// ID. Field data with its own "deleteRelated" key is an error, since the two
+// would replace one another. Deletes are unconditional: no mod ID is checked for
+// a related record, and IfUnchanged or WithModID locks only the record.
+//
+// It sets a single list of records; calling WithDeleteRelated again replaces it
+// rather than adding to it.
+func WithDeleteRelated(records ...RelatedRecord) UpdateOption {
+	return option(func(c *params) {
+		c.deleteRelated = records
+	})
+}
+
+// checkDeleteRelated reports the first record WithDeleteRelated cannot send:
+// one missing its Table or ID. It also refuses fields that set the
+// "deleteRelated" directive themselves, which the records would replace.
+func checkDeleteRelated(records []RelatedRecord, fields FieldData) error {
+	if len(records) == 0 {
+		return nil
+	}
+	if _, ok := fields["deleteRelated"]; ok {
+		return errors.New(`filemaker: field data has a "deleteRelated" key and WithDeleteRelated records; use WithDeleteRelated`)
+	}
+	for i, rec := range records {
+		switch {
+		case rec.Table == "":
+			return fmt.Errorf("filemaker: WithDeleteRelated record %d (ID %q) has no Table", i, rec.ID)
+		case rec.ID == "":
+			return fmt.Errorf("filemaker: WithDeleteRelated record %d (table %q) has no ID", i, rec.Table)
+		}
+	}
+	return nil
 }
 
 // WithEntryMode sets whether the write honors field data validation — the Data

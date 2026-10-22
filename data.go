@@ -125,9 +125,10 @@ func (c *Client) Create(ctx context.Context, layout string, fields FieldData, op
 // to address the record (its Layout and ID), and must have been read from the
 // client's database; its own field values are not sent.
 // Writes are unconditional by default; pass IfUnchanged for optimistic
-// concurrency against the record's ModID, WithPortalData to edit related records,
-// or WithScript and friends to run scripts, in the same request; script outcomes
-// are returned in the UpdateResponse.
+// concurrency against the record's ModID, WithPortalData to add or edit related
+// records, WithDeleteRelated to delete them, or WithScript and friends to run
+// scripts, in the same request; script outcomes are returned in the
+// UpdateResponse.
 func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
 	if err := c.checkRecord(rec); err != nil {
 		return UpdateResponse{}, err
@@ -151,9 +152,9 @@ func (c *Client) Update(ctx context.Context, rec Record, fields FieldData, opts 
 // UpdateByID writes the given field data to an existing record addressed by
 // layout and id, and returns the new mod ID. See Update for the patch semantics.
 // For optimistic concurrency pass WithModID (IfUnchanged needs a record); pass
-// WithPortalData to edit related records, or WithScript and friends to run
-// scripts, in the same request; script outcomes are returned in the
-// UpdateResponse.
+// WithPortalData to add or edit related records, WithDeleteRelated to delete
+// them, or WithScript and friends to run scripts, in the same request; script
+// outcomes are returned in the UpdateResponse.
 func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields FieldData, opts ...UpdateOption) (UpdateResponse, error) {
 	switch {
 	case layout == "":
@@ -167,6 +168,9 @@ func (c *Client) UpdateByID(ctx context.Context, layout, id string, fields Field
 		return UpdateResponse{}, err
 	}
 	if err := p.portalData.check(false); err != nil {
+		return UpdateResponse{}, err
+	}
+	if err := checkDeleteRelated(p.deleteRelated, fields); err != nil {
 		return UpdateResponse{}, err
 	}
 
@@ -462,8 +466,9 @@ func marshalDuplicateBody(p params) ([]byte, error) {
 }
 
 // marshalRecordBody wraps fields in the {"fieldData": ...} envelope the host
-// expects, drawing the optional parameters (portal data, a modId for optimistic
-// locking, and any script directives) from p and omitting each when unset. A
+// expects, drawing the optional parameters (related records to delete, portal
+// data, a modId for optimistic locking, and any script directives) from p and
+// omitting each when unset. A
 // nil fields map becomes an empty object so the host applies defaults on create
 // and leaves the record's own fields untouched on a portal-only edit.
 //
@@ -478,7 +483,11 @@ func marshalDuplicateBody(p params) ([]byte, error) {
 // e.g. "script.param") share one source of truth with the Delete query string:
 // both read params.scripts.
 func marshalRecordBody(fields FieldData, p params, format *DateFormat) ([]byte, error) {
-	body := map[string]any{"fieldData": wireFields(fields, format)}
+	fieldData := wireFields(fields, format)
+	if refs := wireDeleteRelated(p.deleteRelated); refs != nil {
+		fieldData["deleteRelated"] = refs
+	}
+	body := map[string]any{"fieldData": fieldData}
 	if portals := wirePortals(p.portalData, format); len(portals) > 0 {
 		body["portalData"] = portals
 	}
@@ -603,4 +612,22 @@ func wirePortals(portals PortalData, format *DateFormat) map[string][]FieldData 
 		out[name] = wireRows
 	}
 	return out
+}
+
+// wireDeleteRelated renders the records WithDeleteRelated deletes as the host's
+// deleteRelated directive, naming each as "TableOccurrence.recordId": a single
+// string for one record and a list for several, the two forms the host
+// documents. No records yields nil.
+func wireDeleteRelated(records []RelatedRecord) any {
+	refs := make([]string, len(records))
+	for i, rec := range records {
+		refs[i] = rec.Table + "." + rec.ID
+	}
+	switch len(refs) {
+	case 0:
+		return nil
+	case 1:
+		return refs[0]
+	}
+	return refs
 }

@@ -1088,6 +1088,62 @@ func TestIntegrationPortal(t *testing.T) {
 	checkNewPortalRecords(t, res.NewPortalRecords, portalName, added, rows)
 }
 
+// TestIntegrationPortalDeleteRelated deletes related records with
+// WithDeleteRelated: one row read through Record.Portal, by its RelatedRecord
+// through the record-based Update (sent as a single "TO.recordId" string), then
+// two by RelatedRecord values built from stored IDs through UpdateByID (sent as
+// a list) alongside an edit of the record's own field, which applies too.
+func TestIntegrationPortalDeleteRelated(t *testing.T) {
+	requireServer(t)
+	ctx := context.Background()
+
+	// Three rows fit the portal's three-row display, so every read sees them all.
+	marker := "go-filemaker-it-portaldelete-" + time.Now().UTC().Format("20060102T150405.000000000")
+	created, err := itClient.Create(ctx, itLayout, FieldData{
+		fieldText:         marker,
+		fieldNumber:       1,
+		fieldRequired:     "present",
+		fieldSoftRequired: "present",
+	}, WithPortalData(PortalData{portalName: {
+		{Fields: FieldData{fieldChildText: "del-1"}},
+		{Fields: FieldData{fieldChildText: "del-2"}},
+		{Fields: FieldData{fieldChildText: "del-3"}},
+	}}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := itClient.DeleteByID(context.Background(), itLayout, created.RecordID); err != nil {
+			t.Errorf("cleanup DeleteByID(%s): %v", created.RecordID, err)
+		}
+	})
+
+	rec := findParent(t, ctx, marker)
+	if _, err := itClient.Update(ctx, rec, nil, WithDeleteRelated(portalRow(t, rec, "del-1").RelatedRecord())); err != nil {
+		t.Fatalf("Update WithDeleteRelated(one row): %v", err)
+	}
+	rows := portalRows(t, findParent(t, ctx, marker))
+	if _, ok := rows["del-1"]; ok || len(rows) != 2 {
+		t.Fatalf("after deleting del-1: rows %v, want del-2 and del-3", rows)
+	}
+
+	// The rest by table occurrence and ID alone, as a caller holding stored IDs
+	// would, with no Record or PortalRow in hand.
+	if _, err := itClient.UpdateByID(ctx, itLayout, created.RecordID, FieldData{fieldNumber: 2}, WithDeleteRelated(
+		RelatedRecord{Table: portalName, ID: rows["del-2"]},
+		RelatedRecord{Table: portalName, ID: rows["del-3"]},
+	)); err != nil {
+		t.Fatalf("UpdateByID WithDeleteRelated(two records): %v", err)
+	}
+	rec = findParent(t, ctx, marker)
+	if rows := rec.Portal(portalName); len(rows) != 0 {
+		t.Errorf("after deleting del-2 and del-3: %d portal rows, want 0", len(rows))
+	}
+	if got, err := rec.Int(fieldNumber); err != nil || got != 2 {
+		t.Errorf("%s = %d, %v; want 2, written with the deletes", fieldNumber, got, err)
+	}
+}
+
 // TestIntegrationPortalPaging exercises WithPortalLimit and WithPortalOffset
 // against a real host. This is the coverage the mocks cannot give: the find body
 // pages a portal with "offset.<portal>"/"limit.<portal>" keys (no leading
@@ -1167,11 +1223,12 @@ func TestIntegrationPortalPaging(t *testing.T) {
 // an object name. Its data is read and written under the object name, but
 // deleteRelated addresses related records by table occurrence: the object name
 // fails with code 110 ("Related tables are missing"), and the table-occurrence
-// name works even with the named portal on the layout. Rows added under both
-// portal names in one Update come back in NewPortalRecords in the order they
-// were sent — portals in name order, as the library sends them — all reporting
-// the same table occurrence. It skips unless the layout carries the optional
-// NamedChildren portal.
+// name works even with the named portal on the layout, as does WithDeleteRelated
+// given the RelatedRecord of a row read through the named portal. Rows added
+// under both portal names in one Update come back in NewPortalRecords in the
+// order they were sent — portals in name order, as the library sends them — all
+// reporting the same table occurrence. It skips unless the layout carries the
+// optional NamedChildren portal.
 func TestIntegrationPortalObjectName(t *testing.T) {
 	requireServer(t)
 	ctx := context.Background()
@@ -1240,6 +1297,27 @@ func TestIntegrationPortalObjectName(t *testing.T) {
 	rows = portalRows(t, findParent(t, ctx, marker))
 	if _, ok := rows["seed-2"]; ok {
 		t.Errorf("seed-2 still present after deleteRelated by table occurrence (%v)", rows)
+	}
+
+	// WithDeleteRelated deletes a row read through the named portal: its
+	// RelatedRecord carries the table occurrence the portal shows, so the host
+	// accepts it.
+	rec = findParent(t, ctx, marker)
+	var added PortalRow
+	for _, row := range rec.Portal(namedPortalName) {
+		if text, _ := row.String(fieldChildText); text == "added-via-object-name" {
+			added = row
+		}
+	}
+	if added.ID() == "" {
+		t.Fatalf("Portal(%s) has no added-via-object-name row", namedPortalName)
+	}
+	if _, err := itClient.Update(ctx, rec, nil, WithDeleteRelated(added.RelatedRecord())); err != nil {
+		t.Fatalf("Update WithDeleteRelated(row of %s): %v", namedPortalName, err)
+	}
+	rows = portalRows(t, findParent(t, ctx, marker))
+	if _, ok := rows["added-via-object-name"]; ok {
+		t.Errorf("added-via-object-name still present after WithDeleteRelated (%v)", rows)
 	}
 
 	// Add rows under both portal names in one Update. The library sends portals
