@@ -343,10 +343,12 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 // in it is returned as ErrEmptyContainer, so a caller walking many records can
 // skip those without an attachment; a field absent from rec (ErrMissingField),
 // or one holding a number (ErrNotString), is reported as an error too, naming
-// the field and record as rec.String does. As with DownloadFromContainerByURL,
-// the contents are buffered in memory.
+// the field and record as the field accessors do. As with
+// DownloadFromContainerByURL, the contents are buffered in memory.
 func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) (DownloadResponse, error) {
-	u, err := rec.String(field)
+	// Not rec.String, which reads a number as its text: a number here means the
+	// wrong field, and would otherwise be refused as a URL on a foreign host.
+	u, err := read(rec.fields, field, toText)
 	if err != nil {
 		return DownloadResponse{}, err
 	}

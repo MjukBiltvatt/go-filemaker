@@ -219,6 +219,12 @@ The common getters carry over by name — `String`, `Int`, `Int64`, `Float64`,
   v3's `IntE` or `TimeE` reported one. Use `rec.Get(f) == ""` to tell an empty
   field from a stored zero. `Bool` now returns an error too, for an absent field
   only.
+- **`String` reads a number field as its text.** v3's `StringE` returned
+  `ErrNotString` for a number field, and `String` returned `""`. v4's `String`
+  returns the number's exact text, in the notation the host sent (`7.0`, `1e3`),
+  and `StringSlice` returns it as one element. Code that used `ErrNotString` to
+  tell a number field from a text field should check the type from `Get`
+  instead: `filemaker.Number` or `string`.
 - **Getter errors name the field and the record.** A failed read reads
   `filemaker: record "9" in layout "People": field "Age": value is not a number`
   rather than the bare sentinel, and still matches it with `errors.Is`.
@@ -292,7 +298,7 @@ The time zone that was the second argument to `Map` is now a client-level settin
 
   Empty fields still decode to the zero value without error, every field that
   can be filled still is, and a number field decodes into a `string` field as
-  its exact text. Test for a cause with `errors.Is`. To keep v3's leniency, log
+  its exact text, as `String` reads it. Test for a cause with `errors.Is`. To keep v3's leniency, log
   the error and use the struct. Untagged and `fm:"-"` fields are unaffected.
   Supported types: `string`, `int`, `int8`, `int16`, `int32`, `int64`,
   `float32`, `float64`, `Number`, `bool`, `time.Duration`, `time.Time`,

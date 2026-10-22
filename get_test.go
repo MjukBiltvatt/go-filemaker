@@ -579,10 +579,13 @@ func TestGetByIDExactNumbers(t *testing.T) {
 	if got, err := row.Int64("Lines::Qty"); err != nil || got != 20260924123456789 {
 		t.Errorf("row Int64(Lines::Qty) = %d, %v; want 20260924123456789", got, err)
 	}
-	_, err = row.String("Lines::Qty")
-	wantErr := `filemaker: portal "Lines" row "5" of record "42" in layout "People": field "Lines::Qty": value is not a string`
-	if err == nil || err.Error() != wantErr || !errors.Is(err, ErrNotString) {
-		t.Errorf("row String(Lines::Qty) err = %v\nwant %s", err, wantErr)
+	if got, err := row.String("Lines::Qty"); err != nil || got != "20260924123456789" {
+		t.Errorf("row String(Lines::Qty) = %q, %v; want the exact digits", got, err)
+	}
+	_, err = row.String("Lines::Missing")
+	wantErr := `filemaker: portal "Lines" row "5" of record "42" in layout "People": field "Lines::Missing": field is not in the record`
+	if err == nil || err.Error() != wantErr || !errors.Is(err, ErrMissingField) {
+		t.Errorf("row String(Lines::Missing) err = %v\nwant %s", err, wantErr)
 	}
 }
 

@@ -138,8 +138,11 @@ func TestRecordGetters(t *testing.T) {
 		if got, err := r.String("string"); err != nil || got != "string" {
 			t.Errorf("String = %q, %v", got, err)
 		}
-		if got, err := r.String("int"); !errors.Is(err, ErrNotString) || got != "" {
-			t.Errorf("String(int) = %q, %v; want \"\", ErrNotString", got, err)
+		// A number field reads as its exact text, in the notation the host sent.
+		for field, want := range map[string]string{"int_big": "9007199254740993", "exponent_whole": "1e3"} {
+			if got, err := r.String(field); err != nil || got != want {
+				t.Errorf("String(%s) = %q, %v; want %q, nil", field, got, err, want)
+			}
 		}
 	})
 
@@ -163,8 +166,8 @@ func TestRecordGetters(t *testing.T) {
 		if got, err := r.StringSlice("list_empty"); err != nil || got != nil {
 			t.Errorf("StringSlice(empty) = %#v, %v; want nil, nil", got, err)
 		}
-		if got, err := r.StringSlice("int"); !errors.Is(err, ErrNotString) || got != nil {
-			t.Errorf("StringSlice(int) = %#v, %v; want nil, ErrNotString", got, err)
+		if got, err := r.StringSlice("int"); err != nil || !slices.Equal(got, []string{"100"}) {
+			t.Errorf("StringSlice(int) = %#v, %v; want [100], nil", got, err)
 		}
 	})
 

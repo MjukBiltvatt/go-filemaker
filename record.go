@@ -52,8 +52,9 @@ type PortalDataInfo struct {
 //   - An empty field, which the host sends as "" whatever its type, reads as the
 //     zero value without error. Use Get to tell it from a stored zero.
 //   - A value the accessor cannot convert is the accessor's own error:
-//     ErrNotString, ErrNotNumber, ErrNotInteger, ErrOutOfRange or
-//     ErrUnknownFormat. The value returned with it is the zero value.
+//     ErrNotNumber, ErrNotInteger, ErrOutOfRange or ErrUnknownFormat. The
+//     value returned with it is the zero value. String reads any value, so it
+//     has no conversion error.
 //
 // Every error names the field and, for a record the host returned, the record
 // and its layout, and it matches its cause with errors.Is. Decode applies the
@@ -260,8 +261,9 @@ func (f fields) Get(fieldName string) any {
 	return f.data[fieldName]
 }
 
-// String returns the value of a text field. A number field is ErrNotString;
-// read it with Number, whose String method gives its exact text.
+// String returns the value of a field as text. A number field reads as its
+// exact text, in the notation the host sent (7.0 and 1e3 as written), so String
+// reads any field and does not say which type it holds; use Get for that.
 func (f fields) String(fieldName string) (string, error) {
 	return read(f, fieldName, toString)
 }
@@ -271,7 +273,8 @@ func (f fields) String(fieldName string) (string, error) {
 // CRLF pairs are all accepted as line breaks. Blank lines between values are
 // preserved as empty strings, but a single trailing line break is treated as a
 // terminator and does not produce a trailing empty element. An empty field
-// yields a nil slice. A number field is ErrNotString.
+// yields a nil slice. A number field yields one element, its text as String
+// reads it.
 func (f fields) StringSlice(fieldName string) ([]string, error) {
 	return read(f, fieldName, toStringSlice)
 }
@@ -395,7 +398,22 @@ func (e *readError) Unwrap() error { return e.err }
 // the bare cause when they cannot. They are shared by the typed accessors and
 // Decode, which each add the field's identity to the error their own way.
 
+// toString reads any field value as text: a string as is, a Number as its
+// exact text. Which of the two a value is depends on how the host sent it, not
+// on the field's type, so no field type can be relied on to give only strings.
 func toString(v any) (string, error) {
+	switch v := v.(type) {
+	case string:
+		return v, nil
+	case Number:
+		return string(v), nil
+	}
+	return "", ErrNotString
+}
+
+// toText accepts only a value the host sent as text, for a reader that a
+// number would mislead rather than serve: a container field's URL.
+func toText(v any) (string, error) {
 	if s, ok := v.(string); ok {
 		return s, nil
 	}
@@ -516,7 +534,8 @@ func parseFMDuration(s string) (time.Duration, error) {
 // tagged `fm:"-"` are left as-is. Each tagged field is set from this record
 // alone: it starts from its zero value, so nothing from an earlier Decode into
 // the same struct lingers. Values convert by the typed accessors' rules (see
-// Record), with these additions:
+// Record), so a string field takes a number field's exact text as String does,
+// while text into a numeric field is ErrNotNumber. In detail:
 //
 //   - An empty field decodes to the zero value — nil for *time.Time — without
 //     error, as it reads through the accessors.
@@ -528,7 +547,6 @@ func parseFMDuration(s string) (time.Duration, error) {
 //     for a value that overflows int8…int32 or float32), ErrUnknownFormat for a
 //     date, time or duration that does not parse. The field is left at its zero
 //     value.
-//   - A number field decodes into a string field as its exact text.
 //
 // time.Time fields use the configured location; bool fields follow Bool, which
 // accepts any value.
@@ -611,10 +629,6 @@ func (f fields) decodeField(field reflect.Value, tag string) error {
 
 	switch field.Interface().(type) {
 	case string:
-		if n, ok := val.(Number); ok {
-			field.SetString(string(n))
-			return nil
-		}
 		s, err := toString(val)
 		if err != nil {
 			return err
