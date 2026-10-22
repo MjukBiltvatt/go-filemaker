@@ -64,6 +64,15 @@ func TestNormalizeHost(t *testing.T) {
 		{in: "user:secret@my.host.com", wantErr: true},
 		{in: "https://user@my.host.com", wantErr: true},
 		{in: "https://my.host.com@evil.example", wantErr: true},
+		{in: "https://my.host.com/", want: "https://my.host.com"},
+		{in: "my.host.com//", want: "https://my.host.com"},
+		{in: "https://gw.example.com/tenant-a/", want: "https://gw.example.com/tenant-a"},
+		{in: "https://my.host.com?x=1", wantErr: true},
+		{in: "https://my.host.com/?", wantErr: true},
+		{in: "https://my.host.com#frag", wantErr: true},
+		{in: "https://my.host.com/#", wantErr: true},
+		{in: "https://", wantErr: true},
+		{in: "https:///", wantErr: true},
 	}
 	for _, c := range cases {
 		got, err := normalizeHost(c.in, c.allowInsecure)

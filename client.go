@@ -264,7 +264,9 @@ func New(host, database string, credentials Credentials, opts ...Option) (*Clien
 // userinfo ("https://user:pass@host") is rejected too: New takes the
 // credentials separately, the host is printed in errors where a password would
 // leak, and sameOrigin refuses such a URL, so the client could not use the
-// records it reads.
+// records it reads. The API path is appended to the result, so trailing
+// slashes are dropped, and a host with no hostname, a query, or a fragment is
+// rejected, since the appended path would not land in the request path.
 func normalizeHost(host string, allowInsecureHTTP bool) (string, error) {
 	if !strings.Contains(host, "://") {
 		host = "https://" + host
@@ -289,7 +291,17 @@ func normalizeHost(host string, allowInsecureHTTP bool) (string, error) {
 		return "", fmt.Errorf("filemaker: unsupported host scheme %q; use https (or http with WithInsecureHTTP)", u.Scheme)
 	}
 
-	return host, nil
+	if u.Host == "" {
+		return "", fmt.Errorf("filemaker: invalid host %q: no hostname", host)
+	}
+	// Checked on the raw string: an empty query or fragment ("https://host/#")
+	// leaves no trace in the parsed URL, yet would still swallow the API path.
+	if strings.ContainsAny(host, "?#") {
+		return "", fmt.Errorf("filemaker: invalid host %q: must not include a query or fragment", host)
+	}
+
+	// The API path is appended to the host, so a trailing slash would double it.
+	return strings.TrimRight(host, "/"), nil
 }
 
 // sameOrigin reports whether raw addresses the same origin as base: identical
