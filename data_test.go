@@ -1055,7 +1055,7 @@ func TestDownloadFromContainer(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{fields: fields{origin: origin{layout: "People"}, data: map[string]any{"Photo": srv.URL + "/Streaming/abc"}}}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "1"}, data: map[string]any{"Photo": srv.URL + "/Streaming/abc"}}})
 	res, err := c.DownloadFromContainer(context.Background(), rec, "Photo")
 	if err != nil {
 		t.Fatalf("DownloadFromContainer: %v", err)
@@ -1186,7 +1186,7 @@ func TestDownloadFromContainerNotAURL(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(srv)
-	rec := Record{fields: fields{origin: origin{layout: "People"}, data: map[string]any{"Age": Number("42"), "Photo": ""}}}
+	rec := readBy(c, Record{fields: fields{origin: origin{layout: "People", recordID: "1"}, data: map[string]any{"Age": Number("42"), "Photo": ""}}})
 
 	_, err := c.DownloadFromContainer(context.Background(), rec, "Age")
 	if !errors.Is(err, ErrNotString) || errors.Is(err, ErrEmptyContainer) {
@@ -1243,6 +1243,58 @@ func TestDownloadFromContainerByURLForeignHost(t *testing.T) {
 		if !strings.Contains(err.Error(), "foreign host") {
 			t.Errorf("DownloadFromContainerByURL(%q) = %v, want a foreign-host refusal (%s)", tc.raw, err, tc.desc)
 		}
+	}
+}
+
+// TestDownloadFromContainerForeignRecord checks that a record read through
+// another server behind the same gateway is refused before its URL is fetched,
+// as every other record-addressed endpoint refuses it.
+func TestDownloadFromContainerForeignRecord(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("must not request a container of another server's record")
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.host = srv.URL + "/tenant-a"
+	rec := Record{fields: fields{origin: origin{layout: "People", recordID: "1"}, data: map[string]any{"Photo": srv.URL + "/tenant-a/Streaming/abc"}}}
+	rec.host, rec.database = srv.URL+"/tenant-b", c.database
+	if _, err := c.DownloadFromContainer(context.Background(), rec, "Photo"); err == nil || !strings.Contains(err.Error(), "was read from") {
+		t.Errorf("DownloadFromContainer(foreign record) = %v, want a record-provenance refusal", err)
+	}
+}
+
+// TestDownloadFromContainerByURLBasePath checks that a client whose host has a
+// base path sends its token only to URLs inside that path: a gateway may route
+// a sibling path to another server.
+func TestDownloadFromContainerByURLBasePath(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Path != "/tenant-a/Streaming/abc" {
+			t.Errorf("request to %s reached with Authorization = %q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		w.Write([]byte("filecontents"))
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.host = srv.URL + "/tenant-a"
+	for _, raw := range []string{
+		srv.URL + "/tenant-b/Streaming/abc",
+		srv.URL + "/tenant-ab/Streaming/abc",
+		srv.URL + "/Streaming/abc",
+		srv.URL + "/tenant-a/../tenant-b/Streaming/abc",
+	} {
+		if _, err := c.DownloadFromContainerByURL(context.Background(), raw); err == nil || !strings.Contains(err.Error(), "foreign host") {
+			t.Errorf("DownloadFromContainerByURL(%q) = %v, want a refusal", raw, err)
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("server hit %d times by refused URLs, want 0", n)
+	}
+	if res, err := c.DownloadFromContainerByURL(context.Background(), srv.URL+"/tenant-a/Streaming/abc"); err != nil || string(res.Data) != "filecontents" {
+		t.Errorf("DownloadFromContainerByURL(inside base path) = %q, %v; want filecontents", res.Data, err)
 	}
 }
 

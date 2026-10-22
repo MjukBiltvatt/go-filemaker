@@ -236,7 +236,7 @@ func New(host, database string, credentials Credentials, opts ...Option) (*Clien
 	httpClient := &http.Client{
 		Timeout:       cfg.timeout,
 		Jar:           jar,
-		CheckRedirect: sameOriginRedirects(normalizedHost),
+		CheckRedirect: onServerRedirects(normalizedHost),
 	}
 	if cfg.debug {
 		w := cfg.debugWriter
@@ -346,23 +346,49 @@ func sameServer(a, b string) bool {
 	return strings.TrimRight(ua.Path, "/") == strings.TrimRight(ub.Path, "/")
 }
 
-// sameOriginRedirects returns a CheckRedirect policy that refuses any redirect
-// hop leaving base's origin. Every request carries a secret in its
+// onServer reports whether raw is a URL on the FileMaker Server that the client
+// host base addresses: the same origin (see sameOrigin) and a path inside base's
+// path. A gateway can expose several servers under one origin by path (see
+// sameServer), so a URL on the origin but outside the base path may reach
+// another server and must not be sent the session's secrets. The path is
+// compared as sent on the wire, so an encoded spelling of the base path is
+// refused, and dot segments are refused rather than resolved: whether
+// "/tenant-a/../tenant-b" reaches tenant-b is the gateway's decision.
+func onServer(base, raw string) bool {
+	if !sameOrigin(base, raw) {
+		return false
+	}
+	// sameOrigin has parsed both already.
+	b, _ := url.Parse(base)
+	u, _ := url.Parse(raw)
+	for _, seg := range strings.Split(u.Path, "/") {
+		if seg == "." || seg == ".." {
+			return false
+		}
+	}
+	prefix := strings.TrimRight(b.EscapedPath(), "/")
+	p := u.EscapedPath()
+	return prefix == "" || p == prefix || strings.HasPrefix(p, prefix+"/")
+}
+
+// onServerRedirects returns a CheckRedirect policy that refuses any redirect
+// hop leaving the server base addresses. Every request carries a secret in its
 // Authorization header — the credentials on login, the bearer token
 // otherwise — and net/http re-sends it on redirect whenever the target's
-// hostname is the original's or a subdomain of it, ignoring scheme and port. So
-// a hop to sub.host, to host:8443, or down to http://host would all receive it.
-// Checking sameOrigin per hop closes that; same-origin redirects, such as the
-// cookie bounce on a container streaming URL, are still followed.
-func sameOriginRedirects(base string) func(*http.Request, []*http.Request) error {
+// hostname is the original's or a subdomain of it, ignoring scheme, port, and
+// path. So a hop to sub.host, to host:8443, down to http://host, or across to
+// another gateway base path would all receive it. Checking onServer per hop
+// closes that; redirects within the server, such as the cookie bounce on a
+// container streaming URL, are still followed.
+func onServerRedirects(base string) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		// Setting CheckRedirect replaces net/http's default policy, so its
 		// 10-hop limit has to be restated here.
 		if len(via) >= 10 {
 			return errors.New("filemaker: stopped after 10 redirects")
 		}
-		if !sameOrigin(base, req.URL.String()) {
-			return fmt.Errorf("filemaker: refusing redirect to foreign host: %s", req.URL.Redacted())
+		if !onServer(base, req.URL.String()) {
+			return fmt.Errorf("filemaker: refusing redirect to foreign host or base path: %s", req.URL.Redacted())
 		}
 		return nil
 	}

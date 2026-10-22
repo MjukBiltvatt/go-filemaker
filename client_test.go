@@ -42,7 +42,7 @@ func readBy(c *Client, rec Record) Record {
 // redirectGuarded installs the redirect policy New sets on its client, so the
 // test client follows redirects exactly as a real one does.
 func redirectGuarded(hc *http.Client, host string) *http.Client {
-	hc.CheckRedirect = sameOriginRedirects(host)
+	hc.CheckRedirect = onServerRedirects(host)
 	return hc
 }
 
@@ -141,6 +141,33 @@ func TestSameServer(t *testing.T) {
 	}
 }
 
+func TestOnServer(t *testing.T) {
+	cases := []struct {
+		base, raw string
+		want      bool
+		desc      string
+	}{
+		{"https://fms.example.com", "https://fms.example.com/Streaming_SSL/x", true, "no base path"},
+		{"https://gw.example/tenant-a", "https://gw.example/tenant-a/Streaming_SSL/x", true, "inside the base path"},
+		{"https://gw.example/tenant-a", "https://GW.example:443/tenant-a", true, "the base path itself, origin spelled differently"},
+		{"https://gw.example/tenant-a/", "https://gw.example/tenant-a/x", true, "base with a trailing slash"},
+		{"https://gw.example/tenant-a", "https://gw.example/tenant-b/x", false, "sibling base path"},
+		{"https://gw.example/tenant-a", "https://gw.example/tenant-ab/x", false, "base path extended without a slash"},
+		{"https://gw.example/tenant-a", "https://gw.example/Streaming_SSL/x", false, "origin root"},
+		{"https://gw.example/tenant-a", "https://gw.example/Tenant-A/x", false, "path case differs"},
+		{"https://gw.example/tenant-a", "https://gw.example/tenant-a/../tenant-b/x", false, "dot segments"},
+		{"https://gw.example/tenant-a", "https://gw.example/tenant-a/%2e%2e/tenant-b/x", false, "encoded dot segments"},
+		{"https://gw.example/tenant-a", "https://gw.example/tenant%2Da/x", false, "encoded spelling of the base path"},
+		{"https://fms.example.com", "https://fms.example.com/./x", false, "dot segment with no base path"},
+		{"https://gw.example/tenant-a", "https://other.example/tenant-a/x", false, "other origin"},
+	}
+	for _, c := range cases {
+		if got := onServer(c.base, c.raw); got != c.want {
+			t.Errorf("onServer(%q, %q) = %v, want %v (%s)", c.base, c.raw, got, c.want, c.desc)
+		}
+	}
+}
+
 // TestRedirectsStayOnOrigin checks that the client built by New refuses to
 // follow a redirect off the session origin. The foreign server shares the
 // session host's hostname (127.0.0.1) on another port, which is exactly the
@@ -199,8 +226,20 @@ func TestRedirectsStayOnOrigin(t *testing.T) {
 	}
 }
 
-func TestSameOriginRedirectsHopLimit(t *testing.T) {
-	check := sameOriginRedirects("https://fms.example.com")
+func TestOnServerRedirectsBasePath(t *testing.T) {
+	check := onServerRedirects("https://gw.example/tenant-a")
+	in, _ := http.NewRequest(http.MethodGet, "https://gw.example/tenant-a/Streaming_SSL/x", nil)
+	if err := check(in, nil); err != nil {
+		t.Errorf("redirect inside the base path: %v, want nil", err)
+	}
+	out, _ := http.NewRequest(http.MethodGet, "https://gw.example/tenant-b/Streaming_SSL/x", nil)
+	if err := check(out, nil); err == nil {
+		t.Error("redirect to a sibling base path: want an error")
+	}
+}
+
+func TestOnServerRedirectsHopLimit(t *testing.T) {
+	check := onServerRedirects("https://fms.example.com")
 	req, _ := http.NewRequest(http.MethodGet, "https://fms.example.com/x", nil)
 	if err := check(req, make([]*http.Request, 9)); err != nil {
 		t.Errorf("9 prior hops: %v, want nil", err)

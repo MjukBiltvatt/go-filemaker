@@ -342,14 +342,19 @@ func (c *Client) UploadToContainerByID(ctx context.Context, layout, id, field, f
 }
 
 // DownloadFromContainer downloads the binary contents of a container field of
-// the record identified by rec. The field must hold a container streaming URL
-// (the value FileMaker returns for a container field). A container with nothing
+// the record identified by rec. The record must have been read from the
+// client's database, as for Update, and the field must hold a container
+// streaming URL (the value FileMaker returns for a container field), which is
+// checked as DownloadFromContainerByURL checks it. A container with nothing
 // in it is returned as ErrEmptyContainer, so a caller walking many records can
 // skip those without an attachment; a field absent from rec (ErrMissingField),
 // or one holding a number (ErrNotString), is reported as an error too, naming
 // the field and record as the field accessors do. As with
 // DownloadFromContainerByURL, the contents are buffered in memory.
 func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field string) (DownloadResponse, error) {
+	if err := c.checkRecord(rec); err != nil {
+		return DownloadResponse{}, err
+	}
 	// Not rec.String, which reads a number as its text: a number here means the
 	// wrong field, and would otherwise be refused as a URL on a foreign host.
 	u, err := read(rec.fields, field, toText)
@@ -363,10 +368,11 @@ func (c *Client) DownloadFromContainer(ctx context.Context, rec Record, field st
 }
 
 // DownloadFromContainerByURL downloads the binary contents of a container from
-// its streaming URL. The URL must be on the session host (typically obtained
-// from a record via record.String(field)); the bearer token is never sent to a
-// foreign host, and a redirect off the session host is refused rather than
-// followed.
+// its streaming URL. The URL must be on the session host and, when the host
+// was given with a base path (a gateway exposing servers by path), inside that
+// path; it is typically obtained from a record via record.String(field). The
+// bearer token is never sent anywhere else, and a redirect leaving the host or
+// its base path is refused rather than followed.
 //
 // WithReauthOnIdle covers this operation like any other: an idle session is
 // refreshed before the download is attempted. WithReauthOnInvalidToken does not.
@@ -385,8 +391,8 @@ func (c *Client) DownloadFromContainerByURL(ctx context.Context, containerURL st
 	if containerURL == "" {
 		return DownloadResponse{}, errors.New("filemaker: empty container url")
 	}
-	if !sameOrigin(c.host, containerURL) {
-		return DownloadResponse{}, fmt.Errorf("filemaker: refusing to fetch container from foreign host: %s", containerURL)
+	if !onServer(c.host, containerURL) {
+		return DownloadResponse{}, fmt.Errorf("filemaker: refusing to fetch container from foreign host or base path: %s", containerURL)
 	}
 
 	// Streaming responses are raw bytes, not a responseBody, so this cannot go
