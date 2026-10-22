@@ -716,6 +716,41 @@ func TestProactiveReauthOnIdleBurst(t *testing.T) {
 	}
 }
 
+// TestProactiveReauthRechecksIdleUnderLock covers a caller that saw the session
+// idle but reaches the refresh only after another caller has already replaced
+// it. The token it reads then is the fresh one, so keying the refresh on that
+// token alone would log out a session the other caller may be sending on.
+func TestProactiveReauthRechecksIdleUnderLock(t *testing.T) {
+	var sessionCalls, logoutCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/sessions"):
+			sessionCalls.Add(1)
+			writeJSON(w, `{"response":{"token":"newtok"},"messages":[{"code":"0","message":"OK"}]}`)
+		case r.Method == http.MethodDelete:
+			logoutCalls.Add(1)
+			writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+		}
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.idleTimeout = time.Minute
+	c.lastActivity = time.Now() // the other caller's login just stamped it
+
+	c.refreshIdle(context.Background())
+
+	if got := sessionCalls.Load(); got != 0 {
+		t.Errorf("session calls = %d, want 0 (session no longer idle)", got)
+	}
+	if got := logoutCalls.Load(); got != 0 {
+		t.Errorf("logout calls = %d, want 0 (fresh session must not be logged out)", got)
+	}
+	if c.token != "tok" {
+		t.Errorf("token = %q, want tok (fresh session kept)", c.token)
+	}
+}
+
 func TestReauthWaitHonorsContext(t *testing.T) {
 	authStarted := make(chan struct{})
 	releaseAuth := make(chan struct{})

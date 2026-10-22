@@ -55,16 +55,21 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 // until the host times it out, and with a short timeout each idle period would
 // strand another.
 //
+// Idleness is rechecked under the login lock rather than keyed on the token the
+// caller observed. A caller that saw the session idle can reach the lock after
+// another has already refreshed it; by then it would observe the fresh token,
+// and replacing that would log out a session the other caller may be sending
+// on. The fresh session's login stamped lastActivity, so the recheck sees it is
+// no longer idle.
+//
 // Only the caller whose login replaced the token logs the old one out, so a
 // burst of callers arriving after the same idle period sends one DELETE. Both
 // steps are best-effort: a failed refresh falls through to the attempt, which
 // surfaces any real error, and a failed logout (typically 952 because the old
 // session had already expired) leaves nothing more to do.
 func (c *Client) refreshIdle(ctx context.Context) {
-	c.mu.RLock()
-	used := c.token
-	c.mu.RUnlock()
-	if replaced, err := c.authenticate(ctx, used); err == nil && replaced != "" {
+	replaced, err := c.authenticateIf(ctx, func(string) bool { return c.idle() })
+	if err == nil && replaced != "" {
 		_ = c.endSession(ctx, replaced)
 	}
 }
@@ -163,13 +168,21 @@ func (c *Client) login(ctx context.Context) (string, error) {
 //
 // It returns the token its login replaced, which is empty when it did not log
 // in (another caller already had) or when there was no session before.
+func (c *Client) authenticate(ctx context.Context, observedToken string) (replaced string, err error) {
+	return c.authenticateIf(ctx, func(current string) bool { return current == observedToken })
+}
+
+// authenticateIf replaces the stored token with one from a fresh login when
+// need, called with the current token while holding the login lock, still
+// reports a login as needed. It returns the token its login replaced, as
+// authenticate does.
 //
 // authSem (a cap-1 channel used as a context-aware mutex) serializes logins so
 // concurrent callers collapse to one network call; a caller waiting on it honors
 // its ctx and bails on cancellation rather than blocking on an in-flight login.
 // The login itself runs without holding the read/write lock, so token reads (and
 // LastActivity) stay live during a refresh.
-func (c *Client) authenticate(ctx context.Context, observedToken string) (replaced string, err error) {
+func (c *Client) authenticateIf(ctx context.Context, need func(current string) bool) (replaced string, err error) {
 	select {
 	case c.authSem <- struct{}{}:
 	case <-ctx.Done():
@@ -180,7 +193,7 @@ func (c *Client) authenticate(ctx context.Context, observedToken string) (replac
 	c.mu.RLock()
 	current := c.token
 	c.mu.RUnlock()
-	if current != observedToken {
+	if !need(current) {
 		return "", nil
 	}
 
