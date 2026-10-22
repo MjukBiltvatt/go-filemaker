@@ -282,7 +282,7 @@ func TestLogoutKeepsConcurrentRefreshToken(t *testing.T) {
 
 	// Logout is now parked past its token read. Stand in for the reactive
 	// refresh an in-flight operation would perform after its 952.
-	if err := c.authenticate(context.Background(), "tok"); err != nil {
+	if _, err := c.authenticate(context.Background(), "tok"); err != nil {
 		t.Fatalf("authenticate: %v", err)
 	}
 

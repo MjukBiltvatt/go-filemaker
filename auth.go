@@ -29,7 +29,8 @@ func (c *Client) Authenticate(ctx context.Context) error {
 	c.mu.RLock()
 	used := c.token
 	c.mu.RUnlock()
-	return c.authenticate(ctx, used)
+	_, err := c.authenticate(ctx, used)
+	return err
 }
 
 // ensureAuthenticated acquires the initial session token on first use (lazy
@@ -43,7 +44,29 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 	if token != "" {
 		return nil
 	}
-	return c.authenticate(ctx, "")
+	_, err := c.authenticate(ctx, "")
+	return err
+}
+
+// refreshIdle replaces a session that has sat idle past the client's idle
+// timeout with a fresh one, then logs the old session out. The idle timeout is
+// meant to sit under the host's, so the old session is usually still alive;
+// abandoning it would leave it holding one of the host's concurrent sessions
+// until the host times it out, and with a short timeout each idle period would
+// strand another.
+//
+// Only the caller whose login replaced the token logs the old one out, so a
+// burst of callers arriving after the same idle period sends one DELETE. Both
+// steps are best-effort: a failed refresh falls through to the attempt, which
+// surfaces any real error, and a failed logout (typically 952 because the old
+// session had already expired) leaves nothing more to do.
+func (c *Client) refreshIdle(ctx context.Context) {
+	c.mu.RLock()
+	used := c.token
+	c.mu.RUnlock()
+	if replaced, err := c.authenticate(ctx, used); err == nil && replaced != "" {
+		_ = c.endSession(ctx, replaced)
+	}
 }
 
 // Logout ends the current database session, invalidating the token on the
@@ -64,17 +87,7 @@ func (c *Client) Logout(ctx context.Context) error {
 	if token == "" {
 		return nil
 	}
-
-	// Logout identifies the session by the token in the URL and takes no
-	// Authorization header, so it bypasses the authed do() path.
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL()+"/sessions/"+token, nil)
-	if err != nil {
-		return fmt.Errorf("filemaker: failed to build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	var rb responseBody
-	if err := c.send(req, &rb); err != nil {
+	if err := c.endSession(ctx, token); err != nil {
 		return err
 	}
 
@@ -91,6 +104,21 @@ func (c *Client) Logout(ctx context.Context) error {
 	c.lastActivity = time.Now()
 	c.mu.Unlock()
 	return nil
+}
+
+// endSession logs out the session identified by token on the host. It leaves
+// the client's stored token alone; the caller decides what that should be.
+func (c *Client) endSession(ctx context.Context, token string) error {
+	// Logout identifies the session by the token in the URL and takes no
+	// Authorization header, so it bypasses the authed do() path.
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL()+"/sessions/"+token, nil)
+	if err != nil {
+		return fmt.Errorf("filemaker: failed to build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	var rb responseBody
+	return c.send(req, &rb)
 }
 
 // login opens a session with the client's credentials and returns its token.
@@ -133,16 +161,19 @@ func (c *Client) login(ctx context.Context) (string, error) {
 // without a network round-trip. It serves both first-time and repeat
 // authentication — the empty string as observedToken is the first-use key.
 //
+// It returns the token its login replaced, which is empty when it did not log
+// in (another caller already had) or when there was no session before.
+//
 // authSem (a cap-1 channel used as a context-aware mutex) serializes logins so
 // concurrent callers collapse to one network call; a caller waiting on it honors
 // its ctx and bails on cancellation rather than blocking on an in-flight login.
 // The login itself runs without holding the read/write lock, so token reads (and
 // LastActivity) stay live during a refresh.
-func (c *Client) authenticate(ctx context.Context, observedToken string) error {
+func (c *Client) authenticate(ctx context.Context, observedToken string) (replaced string, err error) {
 	select {
 	case c.authSem <- struct{}{}:
 	case <-ctx.Done():
-		return ctx.Err()
+		return "", ctx.Err()
 	}
 	defer func() { <-c.authSem }()
 
@@ -150,18 +181,19 @@ func (c *Client) authenticate(ctx context.Context, observedToken string) error {
 	current := c.token
 	c.mu.RUnlock()
 	if current != observedToken {
-		return nil
+		return "", nil
 	}
 
 	token, err := c.login(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	c.mu.Lock()
+	replaced = c.token
 	c.token = token
 	c.lastActivity = time.Now()
 	c.mu.Unlock()
-	return nil
+	return replaced, nil
 }
 
 // Credentials is how a client proves who it is when it opens a session. Build

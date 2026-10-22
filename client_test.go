@@ -586,11 +586,19 @@ func TestReauthDedup(t *testing.T) {
 }
 
 func TestProactiveReauthOnIdle(t *testing.T) {
-	var opCalls, sessionCalls atomic.Int32
+	var opCalls, sessionCalls, logoutCalls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/sessions") {
 			sessionCalls.Add(1)
 			writeJSON(w, `{"response":{"token":"newtok"},"messages":[{"code":"0","message":"OK"}]}`)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			logoutCalls.Add(1)
+			if !strings.HasSuffix(r.URL.Path, "/sessions/tok") {
+				t.Errorf("logout path = %q, want the replaced session /sessions/tok", r.URL.Path)
+			}
+			writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
 			return
 		}
 		opCalls.Add(1)
@@ -613,11 +621,59 @@ func TestProactiveReauthOnIdle(t *testing.T) {
 	if got := sessionCalls.Load(); got != 1 {
 		t.Errorf("session (reauth) calls = %d, want 1 (proactive refresh)", got)
 	}
+	if got := logoutCalls.Load(); got != 1 {
+		t.Errorf("logout calls = %d, want 1 (replaced session logged out)", got)
+	}
 	if got := opCalls.Load(); got != 1 {
 		t.Errorf("op calls = %d, want 1 (no doomed request)", got)
 	}
 	if c.token != "newtok" {
 		t.Errorf("token = %q, want newtok", c.token)
+	}
+}
+
+// TestProactiveReauthOnIdleBurst covers a burst of callers arriving after the
+// same idle period: they collapse to one login, and the replaced session is
+// logged out once rather than by every caller that saw it idle.
+func TestProactiveReauthOnIdleBurst(t *testing.T) {
+	const n = 10
+	var sessionCalls, logoutCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/sessions"):
+			sessionCalls.Add(1)
+			writeJSON(w, `{"response":{"token":"newtok"},"messages":[{"code":"0","message":"OK"}]}`)
+		case r.Method == http.MethodDelete:
+			logoutCalls.Add(1)
+			writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+		default:
+			writeJSON(w, `{"response":{"recordId":"1"},"messages":[{"code":"0","message":"OK"}]}`)
+		}
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.idleTimeout = time.Minute
+	c.lastActivity = time.Now().Add(-2 * time.Minute)
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var rb responseBody
+			if err := c.do(context.Background(), http.MethodGet, c.baseURL()+"/x", nil, &rb); err != nil {
+				t.Errorf("do: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := sessionCalls.Load(); got != 1 {
+		t.Errorf("session calls = %d, want 1", got)
+	}
+	if got := logoutCalls.Load(); got != 1 {
+		t.Errorf("logout calls = %d, want 1", got)
 	}
 }
 
@@ -636,7 +692,8 @@ func TestReauthWaitHonorsContext(t *testing.T) {
 	// Leader: holds the reauth lock and blocks inside the slow auth.
 	leaderDone := make(chan error, 1)
 	go func() {
-		leaderDone <- c.authenticate(context.Background(), "tok")
+		_, err := c.authenticate(context.Background(), "tok")
+		leaderDone <- err
 	}()
 	<-authStarted
 
@@ -644,7 +701,7 @@ func TestReauthWaitHonorsContext(t *testing.T) {
 	// than wait for the blocked leader.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := c.authenticate(ctx, "tok"); !errors.Is(err, context.Canceled) {
+	if _, err := c.authenticate(ctx, "tok"); !errors.Is(err, context.Canceled) {
 		t.Errorf("follower reauth = %v, want context.Canceled", err)
 	}
 

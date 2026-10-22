@@ -109,6 +109,11 @@ func WithReauthOnInvalidToken() Option {
 // so a burst of requests after an idle period does not each fail with an
 // invalid-token error. With no argument it uses DefaultIdleTimeout.
 //
+// The refresh logs out the session it replaces, so a timeout shorter than the
+// host's does not leave a live session behind after every idle period. A
+// request that had already read the old token when it is logged out fails with
+// an invalid-token error, which WithReauthOnInvalidToken recovers.
+//
 // Combine with WithReauthOnInvalidToken so that any expiry the idle heuristic
 // misses (e.g. a server timeout shorter than timeout) is still recovered.
 func WithReauthOnIdle(timeout ...time.Duration) Option {
@@ -402,8 +407,9 @@ func (c *Client) do(ctx context.Context, method, url string, body []byte, out *r
 // independent of the reauth options.
 //
 // Proactive (WithReauthOnIdle): if the session has been idle past the configured
-// timeout, refresh the token before the attempt. Best-effort — a failed refresh
-// falls through to the attempt, which surfaces any real error.
+// timeout, refresh the token and log out the old session before the attempt.
+// Best-effort — a failed refresh falls through to the attempt, which surfaces
+// any real error.
 //
 // Reactive (WithReauthOnInvalidToken): if the attempt fails with an
 // invalid-token error, re-authenticate and retry once.
@@ -420,16 +426,13 @@ func (c *Client) withAuth(ctx context.Context, attempt func() (string, error)) e
 	}
 
 	if c.idleTimeout > 0 && c.idle() {
-		c.mu.RLock()
-		used := c.token
-		c.mu.RUnlock()
-		_ = c.authenticate(ctx, used)
+		c.refreshIdle(ctx)
 	}
 
 	used, err := attempt()
 
 	if c.reauthOnInvalidToken && errors.Is(err, ErrInvalidToken) {
-		if rerr := c.authenticate(ctx, used); rerr != nil {
+		if _, rerr := c.authenticate(ctx, used); rerr != nil {
 			return rerr
 		}
 		_, err = attempt()

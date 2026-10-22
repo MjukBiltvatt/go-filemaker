@@ -1083,6 +1083,10 @@ func TestDownloadFromContainerRefreshesIdleSession(t *testing.T) {
 			writeJSON(w, `{"response":{"token":"newtok"},"messages":[{"code":"0","message":"OK"}]}`)
 			return
 		}
+		if r.Method == http.MethodDelete { // the replaced session's logout
+			writeJSON(w, `{"response":{},"messages":[{"code":"0","message":"OK"}]}`)
+			return
+		}
 		downloadCalls.Add(1)
 		if got := r.Header.Get("Authorization"); got != "Bearer newtok" {
 			t.Errorf("download auth = %q, want Bearer newtok (token should be refreshed before send)", got)
