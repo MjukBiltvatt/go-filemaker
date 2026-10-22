@@ -10,7 +10,7 @@
 // Configure the target via environment variables, then run with the tag:
 //
 //	set -a; source .env; set +a
-//	go test -tags=integration -run Integration -v ./...
+//	go test -tags integration -run Integration -v ./...
 //
 // or simply `make integration` (see the Makefile target).
 //
