@@ -1573,6 +1573,14 @@ func TestIntegrationFindQuery(t *testing.T) {
 	marker := "go-filemaker-it-query-" + time.Now().UTC().Format("20060102T150405.000000000")
 	const n = 4
 	ids := make([]string, 0, n)
+	// Registered before seeding so a failed Create still removes earlier records.
+	t.Cleanup(func() {
+		for _, id := range ids {
+			if _, err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
+				t.Errorf("cleanup DeleteByID(%s): %v", id, err)
+			}
+		}
+	})
 	for i := 1; i <= n; i++ {
 		created, err := itClient.Create(ctx, itLayout, FieldData{
 			fieldText:         marker,
@@ -1585,13 +1593,6 @@ func TestIntegrationFindQuery(t *testing.T) {
 		}
 		ids = append(ids, created.RecordID)
 	}
-	t.Cleanup(func() {
-		for _, id := range ids {
-			if _, err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
-				t.Errorf("cleanup DeleteByID(%s): %v", id, err)
-			}
-		}
-	})
 
 	// mine matches exactly the seeded set.
 	mine := FindRequest{Criteria: map[string]string{fieldText: "==" + marker}}
@@ -1716,6 +1717,14 @@ func TestIntegrationFindMultiSort(t *testing.T) {
 		{1, "a"},
 	}
 	ids := make([]string, 0, len(seed))
+	// Registered before seeding so a failed Create still removes earlier records.
+	t.Cleanup(func() {
+		for _, id := range ids {
+			if _, err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
+				t.Errorf("cleanup DeleteByID(%s): %v", id, err)
+			}
+		}
+	})
 	for _, s := range seed {
 		created, err := itClient.Create(ctx, itLayout, FieldData{
 			fieldText:          marker,
@@ -1729,13 +1738,6 @@ func TestIntegrationFindMultiSort(t *testing.T) {
 		}
 		ids = append(ids, created.RecordID)
 	}
-	t.Cleanup(func() {
-		for _, id := range ids {
-			if _, err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
-				t.Errorf("cleanup DeleteByID(%s): %v", id, err)
-			}
-		}
-	})
 
 	res, err := itClient.Find(ctx, itLayout,
 		[]FindRequest{{Criteria: map[string]string{fieldText: "==" + marker}}},
@@ -1937,6 +1939,14 @@ func TestIntegrationGetRange(t *testing.T) {
 	marker := "go-filemaker-it-getrange-" + time.Now().UTC().Format("20060102T150405.000000000")
 	const n = 3
 	ids := make([]string, 0, n)
+	// Registered before seeding so a failed Create still removes earlier records.
+	t.Cleanup(func() {
+		for _, id := range ids {
+			if _, err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
+				t.Errorf("cleanup DeleteByID(%s): %v", id, err)
+			}
+		}
+	})
 	for i := 1; i <= n; i++ {
 		created, err := itClient.Create(ctx, itLayout, FieldData{
 			fieldText:         marker,
@@ -1949,13 +1959,6 @@ func TestIntegrationGetRange(t *testing.T) {
 		}
 		ids = append(ids, created.RecordID)
 	}
-	t.Cleanup(func() {
-		for _, id := range ids {
-			if _, err := itClient.DeleteByID(context.Background(), itLayout, id); err != nil {
-				t.Errorf("cleanup DeleteByID(%s): %v", id, err)
-			}
-		}
-	})
 
 	// GetRange returns all records; find ours by marker and assert the count.
 	// We can't assert exact totals since the layout may contain other records,
