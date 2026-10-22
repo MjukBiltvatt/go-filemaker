@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -364,7 +365,8 @@ func (f fields) Time(fieldName string) (time.Time, error) {
 // Duration parses the value of a time field, returned as a clock string
 // ([-]HH:MM:SS), as a time.Duration. Unlike Time it represents the value as
 // elapsed time, so it handles 24 hours or more and negative values. A value that
-// is not such a string is ErrUnknownFormat.
+// is not such a string is ErrUnknownFormat, and one beyond the range of
+// time.Duration (about 2562047 hours) is ErrOutOfRange.
 func (f fields) Duration(fieldName string) (time.Duration, error) {
 	return read(f, fieldName, toDuration)
 }
@@ -507,8 +509,13 @@ func toDuration(v any) (time.Duration, error) {
 	return parseFMDuration(s)
 }
 
+// maxDurationSeconds is the most whole seconds a time.Duration can hold, in
+// either sign (about 2562047 hours).
+const maxDurationSeconds = int64(math.MaxInt64 / time.Second)
+
 // parseFMDuration parses a FileMaker time clock string ([-]H[H…]:MM:SS) into a
-// time.Duration. Hours may exceed 24; minutes and seconds must be 0–59.
+// time.Duration. Hours may exceed 24; minutes and seconds must be 0–59. A
+// well-formed value beyond the range of time.Duration is ErrOutOfRange.
 func parseFMDuration(s string) (time.Duration, error) {
 	neg := false
 	if strings.HasPrefix(s, "-") {
@@ -518,13 +525,25 @@ func parseFMDuration(s string) (time.Duration, error) {
 	if len(parts) != 3 {
 		return 0, ErrUnknownFormat
 	}
-	h, errH := strconv.Atoi(parts[0])
+	h, errH := strconv.ParseInt(parts[0], 10, 64)
 	m, errM := strconv.Atoi(parts[1])
 	sec, errS := strconv.Atoi(parts[2])
+	if errors.Is(errH, strconv.ErrRange) && h > 0 && errM == nil && errS == nil {
+		return 0, ErrOutOfRange
+	}
 	if errH != nil || errM != nil || errS != nil || h < 0 || m < 0 || m > 59 || sec < 0 || sec > 59 {
 		return 0, ErrUnknownFormat
 	}
-	d := time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(sec)*time.Second
+	// Sum in seconds and range-check before scaling to nanoseconds, which
+	// would otherwise overflow silently.
+	if h > maxDurationSeconds/3600 {
+		return 0, ErrOutOfRange
+	}
+	total := h*3600 + int64(m)*60 + int64(sec)
+	if total > maxDurationSeconds {
+		return 0, ErrOutOfRange
+	}
+	d := time.Duration(total) * time.Second
 	if neg {
 		d = -d
 	}

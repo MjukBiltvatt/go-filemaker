@@ -694,6 +694,9 @@ func TestDurationGetter(t *testing.T) {
 		"100:00:00": 100 * time.Hour,
 		"-01:30:00": -(time.Hour + 30*time.Minute), // negative
 		"-00:00:01": -time.Second,
+		// The largest whole-second magnitude a time.Duration holds.
+		"2562047:47:16":  2562047*time.Hour + 47*time.Minute + 16*time.Second,
+		"-2562047:47:16": -(2562047*time.Hour + 47*time.Minute + 16*time.Second),
 	}
 	for v, want := range valid {
 		r := Record{fields: fields{data: map[string]any{"f": v}}}
@@ -725,6 +728,24 @@ func TestDurationGetter(t *testing.T) {
 		}
 		if got != 0 {
 			t.Errorf("Duration(%v) = %v, want 0", v, got)
+		}
+	}
+
+	// Well-formed values beyond time.Duration must not wrap around.
+	outOfRange := []string{
+		"2562047:47:17",              // one second past the maximum
+		"-2562047:47:17",             // one second past the minimum
+		"2562048:00:00",              // hours alone overflow
+		"99999999999999999999:00:00", // hours overflow int64
+	}
+	for _, v := range outOfRange {
+		r := Record{fields: fields{data: map[string]any{"f": v}}}
+		got, err := r.Duration("f")
+		if !errors.Is(err, ErrOutOfRange) {
+			t.Errorf("Duration(%q) err = %v, want ErrOutOfRange", v, err)
+		}
+		if got != 0 {
+			t.Errorf("Duration(%q) = %v, want 0", v, got)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package filemaker
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 	"time"
 )
@@ -83,6 +84,10 @@ func TestDurationMarshalJSON(t *testing.T) {
 		37*time.Hour + 30*time.Minute:                `"37:30:00"`, // exceeds 24h
 		-(time.Hour + 2*time.Minute + 3*time.Second): `"-01:02:03"`,
 		0: `"00:00:00"`,
+		// Negating the minimum overflows, so it must not be negated whole.
+		math.MinInt64:           `"-2562047:47:16"`,
+		math.MaxInt64:           `"2562047:47:16"`,
+		-500 * time.Millisecond: `"00:00:00"`, // truncates to zero, unsigned
 	}
 	for in, want := range cases {
 		got, err := json.Marshal(Duration(in))

@@ -61,12 +61,14 @@ func fmTimeOfDay(t time.Time) string {
 // fmDuration formats d as a FileMaker time-of-day duration ([-]HH:MM:SS), with
 // hours allowed to exceed 24 — FileMaker Time fields can hold elapsed durations.
 func fmDuration(d time.Duration) string {
-	sign := ""
-	if d < 0 {
-		sign = "-"
-		d = -d
-	}
+	// Truncate to seconds before taking the magnitude: negating d itself
+	// overflows for the minimum time.Duration, but negating its seconds cannot.
 	total := int64(d / time.Second)
+	sign := ""
+	if total < 0 {
+		sign = "-"
+		total = -total
+	}
 	return fmt.Sprintf("%s%02d:%02d:%02d", sign, total/3600, (total%3600)/60, total%60)
 }
 
