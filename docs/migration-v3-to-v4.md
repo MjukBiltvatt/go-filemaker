@@ -471,13 +471,26 @@ instead. For a write, that means the change may or may not have been applied.
 
 ## New in v4
 
-Beyond the migration, v4 adds capabilities v3 lacked: `Get`/`GetByID` and
-`GetRange`, `Duplicate`, script execution (`RunScript` and `WithScript` on any
-operation), related records through portals (`Record.Portal`,
-`WithPortalData`), database/layout/script metadata, `SetGlobalFields`, container
-downloads by URL, opt-in optimistic concurrency (`IfUnchanged`/`WithModID`), the
-`Bool`/`Date`/`Timestamp`/`Time`/`Duration` write-value wrappers, exact numbers
-beyond `float64` precision (`Number`), ISO date I/O
-(`WithDateFormat`), and opt-in token re-authentication. See the
-[README](../README.md) and the [package reference](https://pkg.go.dev/github.com/MjukBiltvatt/go-filemaker/v4)
+Beyond the migration, v4 adds capabilities v3 lacked:
+
+- **Reading records:** `Get` / `GetByID` for a single record, and `GetRange`
+  for records in insertion order.
+- **Duplicating records:** `Duplicate` / `DuplicateByID`.
+- **Scripts:** `RunScript`, and `WithScript` (plus `WithPrerequestScript` and
+  `WithPresortScript`) on any record operation.
+- **Portals:** read related records with `Record.Portal`, write them with
+  `WithPortalData`, and delete them with `WithDeleteRelated`.
+- **Metadata:** `ProductInfo`, `Databases`, `Layouts`, `LayoutMetadata`, and
+  `Scripts`.
+- **Global fields:** `SetGlobalFields`.
+- **Container downloads by URL:** `DownloadFromContainerByURL`.
+- **Optimistic concurrency** (opt-in): `IfUnchanged` / `WithModID`.
+- **Write-value wrappers:** `Bool`, `Date`, `Timestamp`, `Time`, and `Duration`.
+- **Exact numbers** beyond `float64` precision: `Number`.
+- **ISO date writes:** `WithDateFormat(DateFormatISO)`.
+- **Token re-authentication** (opt-in): `WithReauthOnIdle` and
+  `WithReauthOnInvalidToken`.
+
+See the [README](../README.md) and the
+[package reference](https://pkg.go.dev/github.com/MjukBiltvatt/go-filemaker/v4)
 for these.
