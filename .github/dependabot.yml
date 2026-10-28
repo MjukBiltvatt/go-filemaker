@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # The module has no Go dependencies, so the pinned workflow actions are the
+  # only thing that goes stale.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: [ "*" ]
